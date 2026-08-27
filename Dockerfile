@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # 入口 / 节点。Linux 宿主机请用 network_mode: host。
 # 构建阶段按 BUILDPLATFORM 交叉编译，不需要 QEMU 跑 Go。
 
