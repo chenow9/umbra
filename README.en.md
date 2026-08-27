@@ -74,6 +74,34 @@ npm run dev
 
 Add or edit mappings in the console. Do not edit files on the node. systemd / launchd / Windows service / Docker snippets are on the Deploy page.
 
+### Docker (public gate + private node)
+
+Push a semver tag (`v1.2.3`) to build **linux/amd64** and **linux/arm64** images and push them to Docker Hub:
+
+- `chenow9/umbrad`
+- `chenow9/umbra-agent`
+
+Tags: `1.2.3`, `1.2`, and `latest` on non-prerelease tags.
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+**Gate** (Linux host networking):
+
+```bash
+docker compose -f deploy/compose.gate.yml up -d
+```
+
+**Node** (host networking so mappings can target the host's `127.0.0.1`):
+
+```bash
+cp deploy/agent.env.example agent.env   # set UMBRA_SERVER / UMBRA_TOKEN
+# copy the gate's ca.crt into the current directory
+docker compose -f deploy/compose.agent.yml up -d
+```
+
 Hot-replace the gate binary without dropping tunnels:
 
 ```bash
@@ -102,6 +130,8 @@ internal/           mux, policy, nftables, TLS, upgrade
 src/                console (React)
 docs/               requirements and protocol
 scripts/            cross-compile and smoke tests
+deploy/             gate / node Compose files
+.github/workflows   tag-triggered multi-arch images
 ```
 
 ## Security

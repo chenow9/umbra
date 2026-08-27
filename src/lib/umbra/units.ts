@@ -13,6 +13,9 @@ export const ARCHS: { id: Arch; label: string }[] = [
   { id: "arm64", label: "arm64" },
 ];
 
+export const DOCKERHUB_GATE = "chenow9/umbrad";
+export const DOCKERHUB_AGENT = "chenow9/umbra-agent";
+
 export function platformLabel(os: string, arch: string) {
   const p = PLATFORMS.find((x) => x.id === os)?.label ?? os;
   return `${p} ${arch}`;
@@ -77,16 +80,22 @@ sc.exe start UmbraGate
 export function umbradCompose(arch: Arch) {
   return `# Linux 宿主机才能用 host 网络收入口端口。
 # macOS / Windows 上的 Docker 没有真正的 host 网络，入口请跑本机进程。
+# 镜像由 git tag（v*）触发 CI 推到 Docker Hub，linux/amd64 + linux/arm64。
 services:
   umbrad:
-    image: umbra/umbrad:latest
+    image: ${DOCKERHUB_GATE}:latest
     platform: linux/${arch}
     network_mode: host
     cap_add:
       - NET_ADMIN
       - NET_BIND_SERVICE
     command: ["-listen", ":4400", "-api", "127.0.0.1:4401", "-bind", "0.0.0.0", "-tls-dir", "/var/lib/umbra"]
+    volumes:
+      - umbra-tls:/var/lib/umbra
     restart: unless-stopped
+
+volumes:
+  umbra-tls:
 `;
 }
 
@@ -155,13 +164,15 @@ sc.exe start UmbraAgent
 export function agentCompose(token: string, arch: Arch) {
   return `services:
   umbra-agent:
-    image: umbra/umbra-agent:latest
+    image: ${DOCKERHUB_AGENT}:latest
     platform: linux/${arch}
     network_mode: host
     environment:
-      UMBRA_SERVER: gate:4400
+      UMBRA_SERVER: gate.example.com:4400
       UMBRA_TOKEN: ${token}
       UMBRA_TLS_CA: /etc/umbra/ca.crt
+    volumes:
+      - ./ca.crt:/etc/umbra/ca.crt:ro
     restart: unless-stopped
 `;
 }

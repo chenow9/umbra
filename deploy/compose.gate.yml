@@ -1,0 +1,25 @@
+# 公网入口。必须跑在 Linux 宿主机上（host 网络才能动态绑业务口）。
+# macOS / Windows 的 Docker 没有真正的 host 网络，不能当公网入口。
+services:
+  umbrad:
+    image: chenow9/umbrad:latest
+    container_name: umbrad
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_BIND_SERVICE
+    command:
+      - -listen
+      - :4400
+      - -api
+      - 127.0.0.1:4401
+      - -bind
+      - 0.0.0.0
+      - -tls-dir
+      - /var/lib/umbra
+    volumes:
+      - umbra-tls:/var/lib/umbra
+    restart: unless-stopped
+
+volumes:
+  umbra-tls:

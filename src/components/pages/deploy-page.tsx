@@ -40,6 +40,7 @@ export function DeployPage() {
           {gateOs === "docker" ? (
             <p className="mb-2 text-xs text-stone">
               入口容器需要 Linux 宿主机的 host 网络。macOS / Windows 请跑本机进程。
+              镜像 chenow9/umbrad、chenow9/umbra-agent 由 git tag（v*）构建，linux/amd64 + linux/arm64。
             </p>
           ) : null}
           <pre className="overflow-x-auto rounded-xl bg-card p-4 font-mono text-xs leading-relaxed text-ink shadow-border">

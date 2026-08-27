@@ -78,6 +78,35 @@ npm run dev          # 管理面
 
 在控制台增删映射即可，不必登录节点改任何文件。Linux 安装单元、macOS launchd、Windows 服务、Docker compose 见控制台「部署」页。
 
+### Docker（公网入口 + 内网节点）
+
+推送符合 semver 的 tag（`v1.2.3`）会构建 **linux/amd64** 和 **linux/arm64** 镜像并推到 Docker Hub：
+
+- `chenow9/umbrad`
+- `chenow9/umbra-agent`
+
+标签：`1.2.3`、`1.2`，正式版额外打 `latest`。
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+**入口**（Linux 宿主机，host 网络）：
+
+```bash
+docker compose -f deploy/compose.gate.yml up -d
+# 证书在 named volume umbra-tls → /var/lib/umbra/ca.crt
+```
+
+**节点**（同样 host 网络，才能把映射目标写成宿主机 `127.0.0.1`）：
+
+```bash
+cp deploy/agent.env.example agent.env   # 填 UMBRA_SERVER / UMBRA_TOKEN
+# 把入口的 ca.crt 放到当前目录
+docker compose -f deploy/compose.agent.yml up -d
+```
+
 换入口程序本身不停机：
 
 ```bash
@@ -106,6 +135,8 @@ internal/           控制通道、策略、nftables、TLS、热升级
 src/                管理面（React）
 docs/               需求与接口
 scripts/            交叉编译与冒烟
+deploy/             入口 / 节点 Docker Compose
+.github/workflows   tag 触发多架构镜像
 ```
 
 ### 安全注意

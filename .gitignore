@@ -12,6 +12,8 @@ dist/
 .env
 .env.*
 !.env.example
+/agent.env
+/ca.crt
 /data/
 /tmp/
 *.sqlite
