@@ -59,6 +59,12 @@ export const umbradPlist = `<?xml version="1.0" encoding="UTF-8"?>
     <string>/usr/local/bin/umbrad</string>
     <string>-tls-dir</string>
     <string>/usr/local/var/umbra</string>
+    <string>-listen</string>
+    <string>:4400</string>
+    <string>-http</string>
+    <string>:8080</string>
+    <string>-bind</string>
+    <string>0.0.0.0</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -72,7 +78,7 @@ export function umbradWin(arch: Arch) {
   const bin = binaryName("umbrad", "windows", arch);
   return `mkdir "%ProgramFiles%\\Umbra"
 copy ${bin} "%ProgramFiles%\\Umbra\\umbrad.exe"
-sc.exe create UmbraGate binPath= "%ProgramFiles%\\Umbra\\umbrad.exe" start= auto
+sc.exe create UmbraGate binPath= "%ProgramFiles%\\Umbra\\umbrad.exe -tls-dir C:\\ProgramData\\umbra -listen :4400 -http :8080 -bind 0.0.0.0" start= auto
 sc.exe start UmbraGate
 `;
 }
@@ -81,9 +87,10 @@ export function umbradCompose(arch: Arch) {
   return `# Linux 宿主机才能用 host 网络收入口端口。
 # macOS / Windows 上的 Docker 没有真正的 host 网络，入口请跑本机进程。
 # 镜像由 git tag（v*）触发 CI 推到 Docker Hub，linux/amd64 + linux/arm64。
+# -http 是控制台+API；预发布不打 latest，例如 UMBRA_TAG=0.0.1-beta。
 services:
   umbrad:
-    image: ${DOCKERHUB_GATE}:latest
+    image: ${DOCKERHUB_GATE}:\${UMBRA_TAG:-latest}
     platform: linux/${arch}
     network_mode: host
     cap_add:
@@ -164,7 +171,7 @@ sc.exe start UmbraAgent
 export function agentCompose(token: string, arch: Arch) {
   return `services:
   umbra-agent:
-    image: ${DOCKERHUB_AGENT}:latest
+    image: ${DOCKERHUB_AGENT}:\${UMBRA_TAG:-latest}
     platform: linux/${arch}
     network_mode: host
     environment:

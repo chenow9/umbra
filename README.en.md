@@ -75,12 +75,14 @@ Add or edit mappings in the console. Do not edit files on the node. systemd / la
 
 ### Docker (public gate + private node)
 
+The gate container is the control plane: `-http` serves the UI and API on one port (default `:8080`). Nodes use `:4400` TLS. Do not run a separate `npm run dev` in production.
+
 Push a semver tag (`v1.2.3`) to build **linux/amd64** and **linux/arm64** images and push them to Docker Hub:
 
 - `chenow9/umbrad`
 - `chenow9/umbra-agent`
 
-Tags: `1.2.3`, `1.2`, and `latest` on non-prerelease tags.
+Tags: `1.2.3`, `1.2`. `latest` is only applied on tags without `-`. A prerelease such as `v0.0.1-beta` publishes `0.0.1-beta` only.
 
 ```bash
 git tag v0.1.0
@@ -90,15 +92,18 @@ git push origin v0.1.0
 **Gate** (Linux host networking):
 
 ```bash
-docker compose -f deploy/compose.gate.yml up -d
+UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.gate.yml up -d
+# open http://gate:8080 and set a password on first visit
 ```
+
+Do not publish `-http :8080` to the internet. Bind `127.0.0.1:8080` and use an SSH tunnel if needed.
 
 **Node** (host networking so mappings can target the host's `127.0.0.1`):
 
 ```bash
 cp deploy/agent.env.example agent.env   # set UMBRA_SERVER / UMBRA_TOKEN
 # copy the gate's ca.crt into the current directory
-docker compose -f deploy/compose.agent.yml up -d
+UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.agent.yml up -d
 ```
 
 Hot-replace the gate binary without dropping tunnels:
@@ -125,8 +130,8 @@ Kernel DROP is Linux-only. macOS / Windows gates still close in user space. Dock
 ```
 cmd/umbrad          gate
 cmd/umbra-agent     node
-internal/           mux, policy, nftables, TLS, upgrade
-src/                console (React)
+internal/           mux, policy, nftables, TLS, upgrade, control HTTP
+src/                console (React; production is umbrad -http / -ui)
 docs/               requirements and protocol
 scripts/            cross-compile and smoke tests
 deploy/             gate / node Compose files

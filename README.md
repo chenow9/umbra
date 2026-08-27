@@ -79,12 +79,14 @@ sudo ./dist/umbrad_linux_amd64 \
 
 ### Docker（公网入口 + 内网节点）
 
+入口容器就是控制面：`-http` 同时提供网页和 API（默认 `:8080`），节点走 `:4400` TLS。不要再单独跑 `npm run dev`。
+
 推送符合 semver 的 tag（`v1.2.3`）会构建 **linux/amd64** 和 **linux/arm64** 镜像并推到 Docker Hub：
 
 - `chenow9/umbrad`
 - `chenow9/umbra-agent`
 
-标签：`1.2.3`、`1.2`，正式版额外打 `latest`。
+标签：`1.2.3`、`1.2`；不含 `-` 的正式版才打 `latest`。预发布例如 `v0.0.1-beta` 只会推 `0.0.1-beta`。
 
 ```bash
 git tag v0.1.0
@@ -94,16 +96,19 @@ git push origin v0.1.0
 **入口**（Linux 宿主机，host 网络）：
 
 ```bash
-docker compose -f deploy/compose.gate.yml up -d
+UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.gate.yml up -d
+# 浏览器打开 http://入口:8080 ，第一次设定口令
 # 证书在 named volume umbra-tls → /var/lib/umbra/ca.crt
 ```
+
+`-http :8080` 不要裸奔公网；可改成 `127.0.0.1:8080`，再用 SSH 隧道访问。
 
 **节点**（同样 host 网络，才能把映射目标写成宿主机 `127.0.0.1`）：
 
 ```bash
 cp deploy/agent.env.example agent.env   # 填 UMBRA_SERVER / UMBRA_TOKEN
 # 把入口的 ca.crt 放到当前目录
-docker compose -f deploy/compose.agent.yml up -d
+UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.agent.yml up -d
 ```
 
 换入口程序本身不停机：
@@ -130,8 +135,8 @@ kill -USR2 $(pidof umbrad)   # 或 systemctl reload umbrad
 ```
 cmd/umbrad          入口
 cmd/umbra-agent     节点程序
-internal/           控制通道、策略、nftables、TLS、热升级
-src/                管理面（React）
+internal/           控制通道、策略、nftables、TLS、热升级、控制面 HTTP
+src/                管理面（React；生产由 umbrad -http / -ui 提供）
 docs/               需求与接口
 scripts/            交叉编译与冒烟
 deploy/             入口 / 节点 Docker Compose

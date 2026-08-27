@@ -1,8 +1,9 @@
 # 内网节点。host 网络才能把映射目标写成宿主机的 127.0.0.1。
 # 先把入口的 ca.crt 放到本目录（或改 UMBRA_TLS_CA_FILE），再复制 agent.env.example 为 agent.env。
+# 预发布例如：UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.agent.yml up -d
 services:
   umbra-agent:
-    image: chenow9/umbra-agent:latest
+    image: chenow9/umbra-agent:${UMBRA_TAG:-latest}
     container_name: umbra-agent
     network_mode: host
     env_file:

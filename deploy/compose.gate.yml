@@ -1,8 +1,15 @@
 # 公网入口。必须跑在 Linux 宿主机上（host 网络才能动态绑业务口）。
 # macOS / Windows 的 Docker 没有真正的 host 网络，不能当公网入口。
+#
+# -listen :4400  节点 TLS 控制通道（对公网）
+# -http   :8080  控制台 + API 同一口。第一次打开网页设定口令。
+#                不要裸奔公网；可改成 127.0.0.1:8080，再用 SSH 隧道访问。
+#
+# 预发布 tag 不打 latest。当前 Hub 上的版本例如：
+#   UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.gate.yml up -d
 services:
   umbrad:
-    image: chenow9/umbrad:latest
+    image: chenow9/umbrad:${UMBRA_TAG:-latest}
     container_name: umbrad
     network_mode: host
     cap_add:
@@ -11,8 +18,8 @@ services:
     command:
       - -listen
       - :4400
-      - -api
-      - 127.0.0.1:4401
+      - -http
+      - :8080
       - -bind
       - 0.0.0.0
       - -tls-dir
