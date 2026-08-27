@@ -92,6 +92,10 @@ export function createAgent({
   });
 }
 
+export function getAgentBootstrap({ data }: { data: { id: string } }) {
+  return api<{ token: string }>(`/v1/agents/${encodeURIComponent(data.id)}/bootstrap`);
+}
+
 export function helloAgent({ data }: { data: { id: string } }) {
   return api<{ ok: true; pushed: number }>(`/v1/agents/${encodeURIComponent(data.id)}/hello`, { method: "POST" });
 }

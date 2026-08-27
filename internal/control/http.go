@@ -35,6 +35,7 @@ func (c *Console) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/overview", c.need(c.getOverview))
 	mux.HandleFunc("GET /v1/agents", c.need(c.getAgents))
 	mux.HandleFunc("POST /v1/agents", c.need(c.postAgent))
+	mux.HandleFunc("GET /v1/agents/{id}/bootstrap", c.need(c.getBootstrap))
 	mux.HandleFunc("POST /v1/agents/{id}/hello", c.need(c.postHello))
 	mux.HandleFunc("POST /v1/agents/{id}/disconnect", c.need(c.postDisconnect))
 	mux.HandleFunc("POST /v1/agents/{id}/revoke", c.need(c.postRevoke))
@@ -279,6 +280,18 @@ func (c *Console) postAgent(w http.ResponseWriter, r *http.Request) {
 	c.save()
 	c.mu.Unlock()
 	writeJSON(w, map[string]any{"id": id, "token": tok, "os": rec.OS, "arch": rec.Arch})
+}
+
+func (c *Console) getBootstrap(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	c.mu.Lock()
+	a := c.agents[id]
+	c.mu.Unlock()
+	if a == nil || a.Status == "revoked" || a.Token == "" {
+		writeErr(w, 404, "没有可用凭证")
+		return
+	}
+	writeJSON(w, map[string]any{"token": a.Token})
 }
 
 func (c *Console) postHello(w http.ResponseWriter, r *http.Request) {

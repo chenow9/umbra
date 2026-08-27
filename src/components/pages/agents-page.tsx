@@ -11,6 +11,7 @@ import { TextAreaField, TextField, SelectField } from "@/components/field";
 import {
   createAgent,
   disconnectAgent,
+  getAgentBootstrap,
   helloAgent,
   listAgents,
   listFrames,
@@ -148,6 +149,20 @@ function AgentActions({ agent }: { agent: Agent }) {
 
   return (
     <div className="flex flex-wrap justify-end gap-1">
+      {agent.status !== "revoked" ? (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            void getAgentBootstrap({ data: { id: agent.id } })
+              .then((r) => navigator.clipboard.writeText(r.token))
+              .then(() => toast.success("凭证已复制，填进客户端 UMBRA_TOKEN"))
+              .catch((e: Error) => toast.error(e.message));
+          }}
+        >
+          复制凭证
+        </Button>
+      ) : null}
       {agent.status !== "revoked" && agent.status !== "online" ? (
         <Button size="sm" variant="outline" onClick={() => hello.mutate()} disabled={hello.isPending}>
           {hello.isPending ? "握手中…" : "上线"}
