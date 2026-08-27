@@ -1,13 +1,15 @@
 "use client";
 
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, Navigate, useRouterState } from "@tanstack/react-router";
 import { Activity, GitBranch, LayoutGrid, Menu, Radio, ScrollText, Server } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ThemeMenu } from "@/components/theme-picker";
 import { useTheme } from "@/components/app-providers";
 import { cn } from "@/lib/utils";
+import { getOwnerStatus, logoutOwnerSession } from "@/lib/umbra/api";
 
 const nav = [
   { to: "/", label: "总览", icon: LayoutGrid },
@@ -30,6 +32,11 @@ export function AppShell({
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
+  const owner = useQuery({ queryKey: ["umbra", "owner"], queryFn: () => getOwnerStatus() });
+
+  if (owner.data?.required && !owner.data.signedIn) {
+    return <Navigate to="/login" />;
+  }
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -56,6 +63,7 @@ export function AppShell({
             <h1 className="truncate text-lg font-medium tracking-tight text-ink">{title}</h1>
           </div>
           <ThemeMenu value={theme} onChange={setTheme} />
+          {owner.data?.required ? <SignOut /> : null}
           {action}
         </header>
 
@@ -103,5 +111,20 @@ function Nav({ pathname, onNavigate }: { pathname: string; onNavigate?: () => vo
         );
       })}
     </nav>
+  );
+}
+
+function SignOut() {
+  const qc = useQueryClient();
+  const out = useMutation({
+    mutationFn: () => logoutOwnerSession(),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["umbra"] });
+    },
+  });
+  return (
+    <Button type="button" size="sm" variant="ghost" onClick={() => out.mutate()} disabled={out.isPending}>
+      退出
+    </Button>
   );
 }

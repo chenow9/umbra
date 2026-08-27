@@ -38,8 +38,11 @@ function must(name, ok, extra) {
   if (!ok) throw new Error(name + (extra ? ": " + extra : ""));
 }
 
-function spawnBin(bin, args, logFile) {
-  const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
+function spawnBin(bin, args, extraEnv = {}) {
+  const child = spawn(bin, args, {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, ...extraEnv },
+  });
   const chunks = [];
   child.stdout.on("data", (b) => chunks.push(b));
   child.stderr.on("data", (b) => chunks.push(b));
@@ -185,7 +188,7 @@ async function main() {
     "-api", API,
     "-bind", BIND,
     "-tls-dir", tlsDir,
-  ]);
+  ], { UMBRA_LOGIN: "off" });
   must("入口进程起来", await waitHttp(`http://${API}/health`), umbrad.log());
   const st0 = await api("GET", "/v1/status");
   must("控制通道已加密或可上报状态", Boolean(st0), JSON.stringify(st0));

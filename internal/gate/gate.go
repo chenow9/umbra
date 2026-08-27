@@ -48,6 +48,8 @@ type entry struct {
 	active   int
 	window   policy.Window
 	udpSess  map[string]*udpSess
+	in       atomic.Int64
+	out      atomic.Int64
 }
 
 type Server struct {
@@ -465,6 +467,7 @@ func (s *Server) handleTCP(e *entry, c net.Conn) {
 		_ = c.SetReadDeadline(time.Now().Add(idle))
 		n, err := c.Read(buf)
 		if n > 0 {
+			e.in.Add(int64(n))
 			if !e.window.Take(e.spec.RateKbps, n) {
 				_ = ac.conn.SendClose(sid)
 				return
@@ -596,6 +599,28 @@ func (s *Server) Status() Status {
 		n += e.active
 	}
 	return Status{Agents: out, Stealth: s.stealth.Mode(), Active: n}
+}
+
+func (s *Server) MappingStats() map[string]struct {
+	In     int64
+	Out    int64
+	Active int
+} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]struct {
+		In     int64
+		Out    int64
+		Active int
+	}{}
+	for id, e := range s.ent {
+		out[id] = struct {
+			In     int64
+			Out    int64
+			Active int
+		}{In: e.in.Load(), Out: e.out.Load(), Active: e.active}
+	}
+	return out
 }
 
 type Snapshot struct {

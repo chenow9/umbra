@@ -15,11 +15,11 @@ import {
   listAgents,
   listFrames,
   revokeAgent,
-} from "@/lib/umbra/actions";
+} from "@/lib/umbra/api";
 import { formatBytes, formatRelative } from "@/lib/umbra/format";
 import { frameLabel } from "@/lib/umbra/labels";
 import type { Agent } from "@/lib/umbra/types";
-import { ARCHS, PLATFORMS, platformLabel, type Arch, type Platform } from "@/lib/umbra/units";
+import { ARCHS, PLATFORMS, agentInstall, platformLabel, type Arch, type Platform } from "@/lib/umbra/units";
 
 export function AgentsPage() {
   const qc = useQueryClient();
@@ -244,7 +244,7 @@ function NewAgentPanel({
       setIssued({
         id: res.id,
         token: res.token,
-        installCmd: res.installCmd,
+        installCmd: agentInstall(os, arch, res.token),
       });
       onCreated();
     },

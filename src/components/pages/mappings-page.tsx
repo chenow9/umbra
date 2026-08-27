@@ -17,7 +17,7 @@ import {
   probeMapping,
   setMappingEnabled,
   visitMapping,
-} from "@/lib/umbra/actions";
+} from "@/lib/umbra/api";
 import { formatBytes, formatPort, formatRelative } from "@/lib/umbra/format";
 import { listenLabel, modeLabel, pushLabel } from "@/lib/umbra/labels";
 import { ECHO_PORT } from "@/lib/umbra/protocol";

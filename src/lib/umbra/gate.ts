@@ -1,10 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { request as httpRequest } from "node:http";
+import { join } from "node:path";
 import type { MappingWire } from "./protocol";
 
-const API = process.env.UMBRA_GATE_API ?? "http://127.0.0.1:4401";
+const TLS_DIR = process.env.UMBRA_TLS_DIR ?? "/tmp/umbra-tls";
+const SOCK = process.env.UMBRA_GATE_SOCK ?? join(TLS_DIR, "api.sock");
+const HTTP = process.env.UMBRA_GATE_API;
 const AGENT_BIN = process.env.UMBRA_AGENT_BIN ?? "/usr/local/bin/umbra-agent";
 const SERVER = process.env.UMBRA_SERVER ?? "127.0.0.1:4400";
-const TLS_CA = process.env.UMBRA_TLS_CA ?? "/tmp/umbra-tls/ca.crt";
+const TLS_CA = process.env.UMBRA_TLS_CA ?? join(TLS_DIR, "ca.crt");
 
 const g = globalThis as typeof globalThis & {
   __umbraKids__?: Map<string, ChildProcess>;
@@ -30,11 +34,46 @@ export function recallToken(agentId: string) {
   return boots().get(agentId);
 }
 
+function gateFetch(path: string, init: RequestInit = {}, timeoutMs = 1500): Promise<Response> {
+  if (HTTP) return fetch(`${HTTP.replace(/\/$/, "")}${path}`, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+  const method = init.method ?? "GET";
+  const body = typeof init.body === "string" ? init.body : undefined;
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      {
+        socketPath: SOCK,
+        path,
+        method,
+        headers: { "content-type": "application/json" },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c) => chunks.push(c as Buffer));
+        res.on("end", () => {
+          resolve(
+            new Response(Buffer.concat(chunks), {
+              status: res.statusCode ?? 500,
+              headers: { "content-type": String(res.headers["content-type"] ?? "application/json") },
+            }),
+          );
+        });
+      },
+    );
+    req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      reject(new Error("timeout"));
+    });
+    req.on("error", reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
 export async function gateHealth() {
   const cached = g.__umbraHealth__;
   if (cached && Date.now() - cached.t < 2500) return cached.ok;
   try {
-    const r = await fetch(`${API}/health`, { signal: AbortSignal.timeout(150) });
+    const r = await gateFetch("/health", {}, 150);
     g.__umbraHealth__ = { t: Date.now(), ok: r.ok };
     return r.ok;
   } catch {
@@ -44,50 +83,41 @@ export async function gateHealth() {
 }
 
 export async function gatePutToken(token: string, agentId: string) {
-  await fetch(`${API}/v1/tokens/${encodeURIComponent(token)}`, {
+  await gateFetch(`/v1/tokens/${encodeURIComponent(token)}`, {
     method: "PUT",
-    headers: { "content-type": "application/json" },
     body: JSON.stringify({ agent_id: agentId }),
-    signal: AbortSignal.timeout(1500),
   });
 }
 
 export async function gatePutMappings(agentId: string, mappings: MappingWire[]) {
-  await fetch(`${API}/v1/agents/${encodeURIComponent(agentId)}/mappings`, {
+  await gateFetch(`/v1/agents/${encodeURIComponent(agentId)}/mappings`, {
     method: "PUT",
-    headers: { "content-type": "application/json" },
     body: JSON.stringify(mappings),
-    signal: AbortSignal.timeout(1500),
   });
 }
 
 export async function gateKnock(mappingId: string) {
-  const r = await fetch(`${API}/v1/knock/${encodeURIComponent(mappingId)}`, {
-    method: "POST",
-    signal: AbortSignal.timeout(1000),
-  });
+  const r = await gateFetch(`/v1/knock/${encodeURIComponent(mappingId)}`, { method: "POST" }, 1000);
   if (!r.ok) return null;
   const j = (await r.json()) as { until?: string };
   return j.until ?? null;
 }
 
 export async function gateRevoke(agentId: string) {
-  await fetch(`${API}/v1/agents/${encodeURIComponent(agentId)}/revoke`, {
+  await gateFetch(`/v1/agents/${encodeURIComponent(agentId)}/revoke`, {
     method: "POST",
-    signal: AbortSignal.timeout(1000),
-  });
+  }, 1000);
 }
 
 export async function gateDisconnect(agentId: string) {
-  await fetch(`${API}/v1/agents/${encodeURIComponent(agentId)}/disconnect`, {
+  await gateFetch(`/v1/agents/${encodeURIComponent(agentId)}/disconnect`, {
     method: "POST",
-    signal: AbortSignal.timeout(1000),
-  });
+  }, 1000);
 }
 
 export async function gateAgentOnline(agentId: string) {
   try {
-    const r = await fetch(`${API}/v1/status`, { signal: AbortSignal.timeout(250) });
+    const r = await gateFetch("/v1/status", {}, 250);
     if (!r.ok) return false;
     const j = (await r.json()) as { agents?: { id: string; online: boolean }[] };
     return Boolean(j.agents?.some((a) => a.id === agentId && a.online));

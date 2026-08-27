@@ -5,7 +5,7 @@ import { useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { RateChart } from "@/components/rate-chart";
 import { SelectField } from "@/components/field";
-import { getTraffic, listAgents, listMappings } from "@/lib/umbra/actions";
+import { getTraffic, listAgents, listMappings } from "@/lib/umbra/api";
 import { formatBps, formatBytes } from "@/lib/umbra/format";
 import { cn } from "@/lib/utils";
 

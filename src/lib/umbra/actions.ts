@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { getSql } from "@/lib/db";
+import { assertOwner } from "./owner.server";
 import { hashToken, newBootstrap, newId, newVisitorTicket } from "./ids";
 import type {
   Agent,
@@ -96,7 +97,7 @@ async function liveSync(agentId: string, online: boolean) {
   }
   const { errors } = await syncAgentEntries(agentId, wires, online);
   if (errors.length === 0) return;
-  const sql = await getSql();
+  const sql = await ownerSql();
   for (const e of errors) {
     await sql.query(
       `update mappings set listen_state = 'error', listen_error = $1, updated_at = now() where id = $2`,
@@ -111,7 +112,7 @@ async function persistProbe(
   result: { bytesIn: number; bytesOut: number; preview: string; frames: ControlFrame[] },
   action: string,
 ) {
-  const sql = await getSql();
+  const sql = await ownerSql();
   await persistFrames(agentId, result.frames);
   await sql.query(
     `update mappings
@@ -205,7 +206,7 @@ function mapMapping(r: MappingRow): Mapping {
 
 async function persistFrames(agentId: string, frames: ControlFrame[]) {
   if (frames.length === 0) return;
-  const sql = await getSql();
+  const sql = await ownerSql();
   for (const f of frames) {
     await sql.query(
       `insert into control_frames (ts, agent_id, dir, type, body) values ($1,$2,$3,$4,$5)`,
@@ -247,8 +248,13 @@ function toWire(m: {
   };
 }
 
+async function ownerSql() {
+  await assertOwner();
+  return getSql();
+}
+
 async function loadWires(agentId: string): Promise<MappingWire[]> {
-  const sql = await getSql();
+  const sql = await ownerSql();
   const rows = await sql.query<{
     id: string;
     name: string;
@@ -272,7 +278,7 @@ async function loadWires(agentId: string): Promise<MappingWire[]> {
 }
 
 async function audit(action: string, target: string, detail = "") {
-  const sql = await getSql();
+  const sql = await ownerSql();
   await sql`
     insert into audit_log (actor, action, target, detail)
     values ('admin', ${action}, ${target}, ${detail})
@@ -280,7 +286,7 @@ async function audit(action: string, target: string, detail = "") {
 }
 
 async function ownedAgent(id: string) {
-  const sql = await getSql();
+  const sql = await ownerSql();
   const [a] = await sql.query<{ id: string; status: string; enabled: boolean }>(
     `select id, status, enabled from agents where id = $1`,
     [id],
@@ -290,7 +296,7 @@ async function ownedAgent(id: string) {
 }
 
 async function ownedMapping(id: string) {
-  const sql = await getSql();
+  const sql = await ownerSql();
   const [m] = await sql.query<{
     id: string;
     agent_id: string;
@@ -375,7 +381,7 @@ const mappingSelect = `
 `;
 
 export const listAgents = createServerFn({ method: "GET" }).handler(async () => {
-  const sql = await getSql();
+  const sql = await ownerSql();
   const rows = await sql.query<AgentRow>(
     `${agentSelect} group by a.id order by a.created_at desc`,
   );
@@ -383,7 +389,7 @@ export const listAgents = createServerFn({ method: "GET" }).handler(async () => 
 });
 
 export const listMappings = createServerFn({ method: "GET" }).handler(async () => {
-  const sql = await getSql();
+  const sql = await ownerSql();
   const rows = await sql.query<MappingRow>(
     `${mappingSelect} order by m.created_at desc`,
   );
@@ -391,7 +397,7 @@ export const listMappings = createServerFn({ method: "GET" }).handler(async () =
 });
 
 export const getOverview = createServerFn({ method: "GET" }).handler(async () => {
-  const sql = await getSql();
+  const sql = await ownerSql();
   const [agents] = await sql.query<{ online: number; total: number }>(
     `select
         (select count(*)::int from agents where status = 'online' and enabled = true) as online,
@@ -448,7 +454,7 @@ export const createAgent = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }) => {
-    const sql = await getSql();
+    const sql = await ownerSql();
     const id = newId("agt");
     const token = newBootstrap();
     const os = data.os as Platform;
@@ -475,7 +481,7 @@ export const helloAgent = createServerFn({ method: "POST" })
   
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
-    const sql = await getSql();
+    const sql = await ownerSql();
     const agent = await ownedAgent(data.id);
     if (agent.status === "revoked" || !agent.enabled) throw new Error("凭证已吊销");
     await ensureEcho();
@@ -516,7 +522,7 @@ export const disconnectAgent = createServerFn({ method: "POST" })
   
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
-    const sql = await getSql();
+    const sql = await ownerSql();
     await ownedAgent(data.id);
     stopAgent(data.id);
     if (await gateHealth()) await gateDisconnect(data.id).catch(() => undefined);
@@ -538,7 +544,7 @@ export const revokeAgent = createServerFn({ method: "POST" })
   
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
-    const sql = await getSql();
+    const sql = await ownerSql();
     await ownedAgent(data.id);
     stopAgent(data.id);
     if (await gateHealth()) await gateRevoke(data.id).catch(() => undefined);
@@ -585,7 +591,7 @@ export const createMapping = createServerFn({ method: "POST" })
     if (data.mode !== "visitor" && entryPort == null) {
       throw new Error("公开或暗端口模式必须指定入口端口");
     }
-    const sql = await getSql();
+    const sql = await ownerSql();
     const agent = await ownedAgent(data.agentId);
     if (agent.status === "revoked" || !agent.enabled) throw new Error("节点已吊销");
     if (entryPort != null) {
@@ -671,7 +677,7 @@ export const setMappingPolicy = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data }) => {
-    const sql = await getSql();
+    const sql = await ownerSql();
     const m = await ownedMapping(data.id);
     const allowCidrs = normalizeCidrs(data.allowCidrs);
     await sql.query(
@@ -701,7 +707,7 @@ export const setMappingEnabled = createServerFn({ method: "POST" })
   
   .validator(z.object({ id: z.string(), enabled: z.boolean() }))
   .handler(async ({ data }) => {
-    const sql = await getSql();
+    const sql = await ownerSql();
     const m = await ownedMapping(data.id);
     const [agent] = await sql.query<{ status: string }>(
       `select status from agents where id = $1`,
@@ -737,7 +743,7 @@ export const deleteMapping = createServerFn({ method: "POST" })
   
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
-    const sql = await getSql();
+    const sql = await ownerSql();
     const m = await ownedMapping(data.id);
     const [agent] = await sql.query<{ status: string }>(
       `select status from agents where id = $1`,
@@ -754,13 +760,13 @@ export const deleteMapping = createServerFn({ method: "POST" })
   });
 
 export const pulse = createServerFn({ method: "POST" }).handler(async () => {
-  const sql = await getSql();
+  const sql = await ownerSql();
   await sql`update agents set last_seen = now() where status = 'online' and enabled = true`;
   return { ok: true as const };
 });
 
 export const listFrames = createServerFn({ method: "GET" }).handler(async () => {
-  const sql = await getSql();
+  const sql = await ownerSql();
   const rows = await sql.query<{
     id: number;
     ts: string | Date;
@@ -790,7 +796,7 @@ export const listFrames = createServerFn({ method: "GET" }).handler(async () => 
 });
 
 export const listAudit = createServerFn({ method: "GET" }).handler(async () => {
-  const sql = await getSql();
+  const sql = await ownerSql();
   const rows = await sql.query<AuditItem>(
     `select id, ts, actor, action, target, detail from audit_log order by ts desc limit 80`,
   );
@@ -804,7 +810,7 @@ export const probeMapping = createServerFn({ method: "POST" })
   
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
-    const sql = await getSql();
+    const sql = await ownerSql();
     const m = await ownedMapping(data.id);
     const [agent] = await sql.query<{ status: string; enabled: boolean }>(
       `select status, enabled from agents where id = $1`,
@@ -844,7 +850,7 @@ export const knockMapping = createServerFn({ method: "POST" })
   
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
-    const sql = await getSql();
+    const sql = await ownerSql();
     const m = await ownedMapping(data.id);
     if (m.mode !== "spa" || !m.enabled) throw new Error("只有启用的暗端口需要敲门");
     const { until, frames } = knockChannel(m.id);
@@ -858,7 +864,7 @@ export const issueVisitor = createServerFn({ method: "POST" })
   
   .validator(z.object({ id: z.string(), label: z.string().max(64).optional() }))
   .handler(async ({ data }) => {
-    const sql = await getSql();
+    const sql = await ownerSql();
     const m = await ownedMapping(data.id);
     if (m.mode !== "visitor" || !m.enabled) throw new Error("只有启用的访客映射可以签发");
     const id = newId("vis");
@@ -883,7 +889,7 @@ export const visitMapping = createServerFn({ method: "POST" })
   
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
-    const sql = await getSql();
+    const sql = await ownerSql();
     const m = await ownedMapping(data.id);
     const [agent] = await sql.query<{ status: string; enabled: boolean }>(
       `select status, enabled from agents where id = $1`,
@@ -922,7 +928,7 @@ export const getTraffic = createServerFn({ method: "GET" })
     }),
   )
   .handler(async ({ data }) => {
-    const sql = await getSql();
+    const sql = await ownerSql();
     const range = data.range ?? "24h";
     const interval = range === "1h" ? "1 hour" : range === "7d" ? "7 days" : "24 hours";
     const trunc = range === "1h" ? "minute" : range === "7d" ? "hour" : "minute";
@@ -972,7 +978,7 @@ export const getTraffic = createServerFn({ method: "GET" })
   });
 
 export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
-  const sql = await getSql();
+  const sql = await ownerSql();
   await ensureEcho();
 
   let [agent] = await sql.query<{ id: string; status: string; enabled: boolean }>(

@@ -28,7 +28,7 @@ export function DeployPage() {
       <div className="mx-auto flex max-w-2xl flex-col gap-8">
         <p className="text-sm leading-relaxed text-ink-soft">
           入口与节点都支持 Linux、macOS、Windows 与 Docker，架构 amd64 / arm64。
-          节点只带入口地址和凭证，映射不写进客户端。
+          控制台和 API 共用一个 HTTP 口；节点走 TLS 控制通道。第一次打开网页时设定口令。
         </p>
 
         <section>
@@ -61,7 +61,7 @@ export function DeployPage() {
         </section>
 
         <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-stone">
-          <li>不要在节点上改映射、端口或模式。</li>
+          <li>人只用 umbrad 的 HTTP 口（页面和 API）。节点走 4400 的 TLS 控制通道。</li>
           <li>暗端口默认丢弃未授权连接；公开口是显式选项。</li>
           <li>入口热替换时已有连接不中断；增删映射本来就不会重启入口。</li>
           <li>Docker 镜像是 linux/amd64 与 linux/arm64。Windows 容器不支持。</li>

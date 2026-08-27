@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { DemoButton } from "@/components/demo-button";
-import { getOverview, getTraffic, listAgents, listMappings } from "@/lib/umbra/actions";
+import { getOverview, getTraffic, listAgents, listMappings } from "@/lib/umbra/api";
 import { formatBps, formatBytes, formatRelative } from "@/lib/umbra/format";
 import { actionLabel } from "@/lib/umbra/labels";
 import { StatusDot } from "@/components/status-dot";

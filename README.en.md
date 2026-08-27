@@ -26,7 +26,7 @@ Out of scope: exposing `frpc.toml`, NPS protocol compatibility, an internet logi
 |---|---|
 | `umbrad` | Public gate. TLS 1.3 control channel, business listeners, nftables DROP, hot upgrade |
 | `umbra-agent` | Node behind NAT. Dials local targets from server-pushed mappings |
-| Console | Overview / nodes / mappings / traffic / audit / deploy |
+| Console | Overview / nodes / mappings / traffic / audit / deploy. Same HTTP port as the API; set a password on first open |
 
 ## Modes
 
@@ -49,12 +49,12 @@ go 1.24+
 ```bash
 sudo ./dist/umbrad_linux_amd64 \
   -listen :4400 \
-  -api 127.0.0.1:4401 \
+  -http :8080 \
   -bind 0.0.0.0 \
   -tls-dir /var/lib/umbra
 ```
 
-First start writes `ca.crt`, `gate.crt`, `gate.key` under `-tls-dir`. Copy `ca.crt` to every Agent host.
+First start writes `ca.crt`, `gate.crt`, `gate.key` under `-tls-dir`. Copy `ca.crt` to every node host.
 
 **Node** (token is issued once in the console)
 
@@ -67,10 +67,9 @@ First start writes `ca.crt`, `gate.crt`, `gate.key` under `-tls-dir`. Copy `ca.c
 
 **Console**
 
-```bash
-npm install
-npm run dev
-```
+`umbrad -http` serves the API and the static UI on one port (default `:8080`). First visit sets a local password.
+
+In development Vite reverse-proxies `/v1` to the gate. In production put the built UI in `-ui`, or put nginx in front of the same port.
 
 Add or edit mappings in the console. Do not edit files on the node. systemd / launchd / Windows service / Docker snippets are on the Deploy page.
 

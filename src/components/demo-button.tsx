@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { runDemo } from "@/lib/umbra/actions";
+import { runDemo } from "@/lib/umbra/api";
 
 export function DemoButton({
   variant = "default",

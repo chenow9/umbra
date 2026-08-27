@@ -37,7 +37,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/umbrad -tls-dir /var/lib/umbra -listen :4400 -bind 0.0.0.0
+ExecStart=/usr/local/bin/umbrad -tls-dir /var/lib/umbra -listen :4400 -http :8080 -bind 0.0.0.0
 ExecReload=/bin/kill -USR2 $MAINPID
 Restart=on-failure
 RestartSec=2
@@ -89,7 +89,7 @@ services:
     cap_add:
       - NET_ADMIN
       - NET_BIND_SERVICE
-    command: ["-listen", ":4400", "-api", "127.0.0.1:4401", "-bind", "0.0.0.0", "-tls-dir", "/var/lib/umbra"]
+    command: ["-listen", ":4400", "-http", ":8080", "-bind", "0.0.0.0", "-tls-dir", "/var/lib/umbra"]
     volumes:
       - umbra-tls:/var/lib/umbra
     restart: unless-stopped

@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/app-shell";
-import { listAudit } from "@/lib/umbra/actions";
+import { listAudit } from "@/lib/umbra/api";
 import { formatRelative } from "@/lib/umbra/format";
 import { actionLabel } from "@/lib/umbra/labels";
 

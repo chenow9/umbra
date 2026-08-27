@@ -30,7 +30,7 @@ Pangolin 做 TCP/UDP 要改 Traefik 并重启。Orbien 要先把端口池映射�
 |---|---|
 | `umbrad` | 公网入口。控制通道（TLS 1.3）、业务口 Listen、SPA 内核丢弃、热升级 |
 | `umbra-agent` | NAT 后节点。只连入口，按服务端下发的映射去拨本地目标 |
-| 控制台 | 总览 / 节点 / 映射 / 流量 / 审计 / 部署 |
+| 控制台 | 总览 / 节点 / 映射 / 流量 / 审计 / 部署。与 API 共用一个 HTTP 口，第一次打开时设定口令 |
 
 ### 模式
 
@@ -53,7 +53,7 @@ go 1.24+
 ```bash
 sudo ./dist/umbrad_linux_amd64 \
   -listen :4400 \
-  -api 127.0.0.1:4401 \
+  -http :8080 \
   -bind 0.0.0.0 \
   -tls-dir /var/lib/umbra
 ```
@@ -71,10 +71,9 @@ sudo ./dist/umbrad_linux_amd64 \
 
 **4. 控制台**
 
-```bash
-npm install
-npm run dev          # 管理面
-```
+`umbrad -http` 同时提供 API 和静态页面，默认 `:8080`。第一次打开设定口令。
+
+开发时 Vite 只是把 `/v1` 反代到入口进程，生产把前端构建产物放到 `-ui`，或用 nginx 反代同一个口。
 
 在控制台增删映射即可，不必登录节点改任何文件。Linux 安装单元、macOS launchd、Windows 服务、Docker compose 见控制台「部署」页。
 

@@ -6,12 +6,16 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"umbra/internal/control"
 	"umbra/internal/gate"
 	"umbra/internal/netutil"
 	"umbra/internal/stealth"
@@ -19,8 +23,10 @@ import (
 )
 
 func main() {
-	listen := flag.String("listen", ":4400", "Agent 控制通道")
-	api := flag.String("api", "127.0.0.1:4401", "本机管理接口，供控制台下发")
+	listen := flag.String("listen", ":4400", "节点控制通道")
+	httpAddr := flag.String("http", ":8080", "控制台与 API 同一 HTTP 口")
+	api := flag.String("api", "", "兼容旧参数，覆盖 -http")
+	ui := flag.String("ui", "", "前端静态目录，空则用内置")
 	bind := flag.String("bind", "127.0.0.1", "入口监听地址")
 	tlsDir := flag.String("tls-dir", "/var/lib/umbra", "证书与热升级状态")
 	plain := flag.Bool("plain", false, "控制通道不加密（仅调试）")
@@ -60,17 +66,36 @@ func main() {
 	if !*plain {
 		cln = tls.NewListener(cln, bundle.TLS.Clone())
 	}
-	aln, err := netutil.Listen("tcp", *api)
+	apiAddr := *httpAddr
+	if *api != "" {
+		apiAddr = *api
+	}
+	aln, err := listenAPI(apiAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
 	s.SetListeners(cln, aln)
 
+	agentAddr := *listen
+	if strings.HasPrefix(agentAddr, ":") {
+		agentAddr = "127.0.0.1" + agentAddr
+	}
+	con := control.New(s, filepath.Join(*tlsDir, "control.json"))
+	con.Listen = agentAddr
+	con.CAFile = bundle.CAFile
+	con.AgentBin = envOr("UMBRA_AGENT_BIN", "/usr/local/bin/umbra-agent")
+	con.UIDir = *ui
+	con.UIUpstream = os.Getenv("UMBRA_UI_UPSTREAM")
+	if con.UIUpstream == "" && os.Getenv("GROK_AGENT") != "" {
+		con.UIUpstream = "http://127.0.0.1:8080"
+	}
+	con.SkipAuth = os.Getenv("UMBRA_LOGIN") == "off" || os.Getenv("GROK_AGENT") != "" || os.Getenv("GROK_PROJECT_ID") != ""
+
 	mode := "tls1.3"
 	if *plain {
 		mode = "plain"
 	}
-	log.Printf("umbrad control %s (%s) api %s entry-bind %s stealth %s ca %s", *listen, mode, *api, *bind, st.Mode(), bundle.CAFile)
+	log.Printf("umbrad control %s (%s) http %s entry-bind %s stealth %s ca %s", *listen, mode, apiAddr, *bind, st.Mode(), bundle.CAFile)
 
 	go func() {
 		if err := s.ServeControl(cln); err != nil {
@@ -78,8 +103,8 @@ func main() {
 		}
 	}()
 	go func() {
-		if err := s.ServeAPI(aln); err != nil {
-			log.Printf("api: %v", err)
+		if err := http.Serve(aln, con.Handler()); err != nil {
+			log.Printf("http: %v", err)
 		}
 	}()
 
@@ -137,3 +162,25 @@ func main() {
 		return
 	}
 }
+
+func listenAPI(addr string) (net.Listener, error) {
+	if strings.Contains(addr, "/") || strings.HasSuffix(addr, ".sock") || strings.HasPrefix(addr, "unix:") {
+		path := strings.TrimPrefix(addr, "unix:")
+		_ = os.Remove(path)
+		ln, err := net.Listen("unix", path)
+		if err != nil {
+			return nil, err
+		}
+		_ = os.Chmod(path, 0o600)
+		return ln, nil
+	}
+	return net.Listen("tcp", addr)
+}
+
+func envOr(k, d string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return d
+}
+
