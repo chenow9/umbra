@@ -27,17 +27,9 @@ export function DeployPage() {
     <AppShell title="部署">
       <div className="mx-auto flex max-w-2xl flex-col gap-8">
         <p className="text-sm leading-relaxed text-ink-soft">
-          入口与 Agent 都支持 Linux、macOS、Windows 与 Docker，架构 amd64 / arm64。
-          Agent 只带入口地址和凭证，映射不写进客户端。
+          入口与节点都支持 Linux、macOS、Windows 与 Docker，架构 amd64 / arm64。
+          节点只带入口地址和凭证，映射不写进客户端。
         </p>
-
-        <a
-          href="/umbra.zip"
-          download="umbra.zip"
-          className="inline-flex w-fit items-center rounded-xl bg-pine px-4 py-2.5 text-sm text-paper no-underline shadow-border"
-        >
-          下载源码与程序（27MB）
-        </a>
 
         <section>
           <div className="mb-3 flex items-baseline justify-between gap-3">
@@ -57,10 +49,10 @@ export function DeployPage() {
 
         <section>
           <div className="mb-3 flex items-baseline justify-between gap-3">
-            <h2 className="text-sm font-medium text-ink">内网 Agent</h2>
+            <h2 className="text-sm font-medium text-ink">内网节点</h2>
             <Copy text={agent} />
           </div>
-          <p className="mb-2 text-xs text-stone">凭证在「登记 Agent」时签发，只显示一次。下面是样例。</p>
+          <p className="mb-2 text-xs text-stone">凭证在「登记节点」时签发，只显示一次。下面是样例。</p>
           <Pickers os={agentOs} arch={agentArch} onOs={setAgentOs} onArch={setAgentArch} />
           <pre className="overflow-x-auto rounded-xl bg-card p-4 font-mono text-xs leading-relaxed text-ink shadow-border">
             {agent.trim()}
@@ -68,13 +60,13 @@ export function DeployPage() {
         </section>
 
         <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-stone">
-          <li>不要在 Agent 上改映射、端口或模式。</li>
+          <li>不要在节点上改映射、端口或模式。</li>
           <li>暗端口默认丢弃未授权连接；公开口是显式选项。</li>
           <li>入口热替换时已有连接不中断；增删映射本来就不会重启入口。</li>
           <li>Docker 镜像是 linux/amd64 与 linux/arm64。Windows 容器不支持。</li>
-          <li>控制通道默认 TLS 1.3。把入口的 ca.crt 放到 Agent 上。</li>
+          <li>控制通道默认 TLS 1.3。把入口的 ca.crt 放到节点上。</li>
           <li>暗端口在 Linux 入口走内核丢弃；换入口程序发 USR2，已有连接不中断。</li>
-          <li>预览里点「完成并上线」会拉起本机 Agent 连入口。</li>
+          <li>预览里点「完成并上线」会拉起本机节点连入口。</li>
         </ul>
       </div>
     </AppShell>

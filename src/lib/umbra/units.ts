@@ -92,7 +92,7 @@ services:
 
 export function agentUnit(token: string) {
   return `[Unit]
-Description=Umbra Agent
+Description=Umbra node
 After=network-online.target
 Wants=network-online.target
 

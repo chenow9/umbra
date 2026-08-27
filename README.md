@@ -3,7 +3,7 @@
 [English](README.en.md) · [中文](#幽门) · [需求文档](docs/幽门-L4隐匿穿透-需求分析与技术报告.md) · [接口草案](docs/M1-接口草案.md)
 
 自托管 **L4（TCP / UDP）** 隐匿内网穿透网关。  
-Agent 只带入口地址和凭证；映射、模式、ACL 全部在服务端改，热下发，不改客户端文件、不重启入口、不断已有连接。
+节点只带入口地址和凭证；映射、模式、ACL 全部在服务端改，热下发，不改客户端文件、不重启入口、不断已有连接。
 
 ---
 
@@ -17,10 +17,10 @@ Pangolin 做 TCP/UDP 要改 Traefik 并重启。Orbien 要先把端口池映射�
 幽门只要五件事叠在一起：
 
 1. 只做 L4：TCP、UDP，不做用户流量的 L7 反代。
-2. **配置唯一真相在服务端。** Agent 安装后不再改配置。
+2. **配置唯一真相在服务端。** 节点安装后不再改配置。
 3. 入口运行时绑定 / 释放端口，其它映射的在途连接不受影响。
 4. 默认对扫描不可见（暗端口 / SPA / Visitor）；公开口是显式选项。
-5. 按 Agent、按映射的流量统计 + 简约管理面。
+5. 按节点、按映射的流量统计 + 简约管理面。
 
 不提供：把 `frpc.toml` 当产品配置面、兼容 NPS 协议、互联网登录体系。
 
@@ -30,7 +30,7 @@ Pangolin 做 TCP/UDP 要改 Traefik 并重启。Orbien 要先把端口池映射�
 |---|---|
 | `umbrad` | 公网入口。控制通道（TLS 1.3）、业务口 Listen、SPA 内核丢弃、热升级 |
 | `umbra-agent` | NAT 后节点。只连入口，按服务端下发的映射去拨本地目标 |
-| 控制台 | 总览 / Agent / 映射 / 流量 / 审计 / 部署 |
+| 控制台 | 总览 / 节点 / 映射 / 流量 / 审计 / 部署 |
 
 ### 模式
 
@@ -40,7 +40,7 @@ Pangolin 做 TCP/UDP 要改 Traefik 并重启。Orbien 要先把端口池映射�
 
 ### 快速开始
 
-**1. 编入口和 Agent**
+**1. 编入口和节点程序**
 
 ```bash
 go 1.24+
@@ -58,9 +58,9 @@ sudo ./dist/umbrad_linux_amd64 \
   -tls-dir /var/lib/umbra
 ```
 
-首次启动会在 `-tls-dir` 写出 `ca.crt` / `gate.crt` / `gate.key`。把 `ca.crt` 拷到 Agent 所在机器。
+首次启动会在 `-tls-dir` 写出 `ca.crt` / `gate.crt` / `gate.key`。把 `ca.crt` 拷到节点所在机器。
 
-**3. 登记 Agent（控制台「登记 Agent」签发凭证，只显示一次）**
+**3. 登记节点（控制台「登记节点」签发凭证，只显示一次）**
 
 ```bash
 ./umbra-agent \
@@ -76,7 +76,7 @@ npm install
 npm run dev          # 管理面
 ```
 
-在控制台增删映射即可，不必登录 Agent 改任何文件。Linux 安装单元、macOS launchd、Windows 服务、Docker compose 见控制台「部署」页。
+在控制台增删映射即可，不必登录节点改任何文件。Linux 安装单元、macOS launchd、Windows 服务、Docker compose 见控制台「部署」页。
 
 换入口程序本身不停机：
 
@@ -101,7 +101,7 @@ kill -USR2 $(pidof umbrad)   # 或 systemctl reload umbrad
 
 ```
 cmd/umbrad          入口
-cmd/umbra-agent     Agent
+cmd/umbra-agent     节点程序
 internal/           控制通道、策略、nftables、TLS、热升级
 src/                管理面（React）
 docs/               需求与接口
@@ -110,7 +110,7 @@ scripts/            交叉编译与冒烟
 
 ### 安全注意
 
-- 控制通道默认 TLS 1.3，Agent 必须带 `--tls-ca`。
+- 控制通道默认 TLS 1.3，节点必须带 `--tls-ca`。
 - 管理面只放在你自己够得到的网上，不要裸奔公网。
 - 暗端口要对 nmap 显示 filtered，入口进程需要 `CAP_NET_ADMIN`。
 - 凭证只显示一次，吊销在控制台操作。

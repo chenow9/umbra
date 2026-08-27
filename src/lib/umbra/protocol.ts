@@ -1,4 +1,4 @@
-/** M1 控制通道：长度前缀 JSON 的语义。Agent 不持有映射配置。 */
+/** M1 控制通道：长度前缀 JSON 的语义。节点不持有映射配置。 */
 
 export type FrameDir = "c2s" | "s2c";
 

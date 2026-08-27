@@ -4,7 +4,7 @@ import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { AppProviders } from "@/components/app-providers";
 import appCss from "../styles.css?url";
 
-const APP_NAME = "幽门";
+const APP_NAME = "umbra";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -15,7 +15,7 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#f6f3ee" },
       {
         name: "description",
-        content: "幽门 — L4 隐匿式内网穿透控制台。映射只在服务端改，Agent 零配置热下发。",
+        content: "umbra — L4 隐匿式内网穿透控制台。映射只在服务端改，节点零配置热下发。",
       },
     ],
     links: [

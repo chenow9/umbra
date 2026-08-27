@@ -52,28 +52,26 @@ export function TrafficPage() {
             ))}
           </div>
           <SelectField
-            label="Agent"
-            value={agentId}
-            onChange={(e) => {
-              setAgentId(e.target.value);
+            label="节点"
+            value={agentId || "all"}
+            onValueChange={(v) => {
+              setAgentId(v === "all" ? "" : v);
               setMappingId("");
             }}
-          >
-            <option value="">全部</option>
-            {(agents.data ?? []).map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </SelectField>
-          <SelectField label="映射" value={mappingId} onChange={(e) => setMappingId(e.target.value)}>
-            <option value="">全部</option>
-            {filteredMaps.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </SelectField>
+            options={[
+              { value: "all", label: "全部" },
+              ...(agents.data ?? []).map((a) => ({ value: a.id, label: a.name })),
+            ]}
+          />
+          <SelectField
+            label="映射"
+            value={mappingId || "all"}
+            onValueChange={(v) => setMappingId(v === "all" ? "" : v)}
+            options={[
+              { value: "all", label: "全部" },
+              ...filteredMaps.map((m) => ({ value: m.id, label: m.name })),
+            ]}
+          />
         </div>
 
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -110,7 +108,7 @@ export function TrafficPage() {
               <tr className="border-b border-line text-xs text-stone">
                 <th className="px-4 py-3 font-medium">映射</th>
                 <th className="px-4 py-3 font-medium">协议</th>
-                <th className="px-4 py-3 font-medium">Agent</th>
+                <th className="px-4 py-3 font-medium">节点</th>
                 <th className="px-4 py-3 font-medium">入站</th>
                 <th className="px-4 py-3 font-medium">出站</th>
                 <th className="px-4 py-3 font-medium">连接</th>

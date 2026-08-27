@@ -32,32 +32,42 @@ export function AgentsPage() {
 
   return (
     <AppShell
-      title="Agent"
+      title="节点"
       action={
         empty ? null : (
           <Button type="button" onClick={() => setComposing((v) => !v)}>
-            {composing ? "收起" : "登记 Agent"}
+            {composing ? "收起" : "登记节点"}
           </Button>
         )
       }
     >
-      {showForm ? (
-        <NewAgentPanel
-          onCreated={() => {
-            setComposing(true);
-            void qc.invalidateQueries({ queryKey: ["umbra"] });
-          }}
-          onClose={() => setComposing(false)}
-          allowCancel={!empty}
-        />
-      ) : null}
-
       {empty ? (
-        <div className="mt-2">
-          <DemoButton variant="outline" size="default" label="或直接跑一遍演示" />
+        <div className="mx-auto flex w-full max-w-xl flex-col gap-8">
+          <NewAgentPanel
+            onCreated={() => {
+              setComposing(true);
+              void qc.invalidateQueries({ queryKey: ["umbra"] });
+            }}
+            onClose={() => setComposing(false)}
+            allowCancel={false}
+          />
+          <div className="flex flex-col items-center gap-3">
+            <p className="text-xs text-stone">还没有节点时，也可以先在本机跑通一遍。</p>
+            <DemoButton variant="outline" size="default" label="跑一遍演示" />
+          </div>
         </div>
       ) : (
         <>
+          {showForm ? (
+            <NewAgentPanel
+              onCreated={() => {
+                setComposing(true);
+                void qc.invalidateQueries({ queryKey: ["umbra"] });
+              }}
+              onClose={() => setComposing(false)}
+              allowCancel
+            />
+          ) : null}
           <div className="flex flex-col gap-3 md:hidden">
             {list.map((a) => (
               <AgentCard key={a.id} agent={a} />
@@ -122,7 +132,7 @@ function AgentActions({ agent }: { agent: Agent }) {
   const bye = useMutation({
     mutationFn: () => disconnectAgent({ data: { id: agent.id } }),
     onSuccess: () => {
-      toast.message("Agent 已离线，映射等待重连");
+      toast.message("节点已离线，映射等待重连");
       void qc.invalidateQueries({ queryKey: ["umbra"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -253,7 +263,7 @@ function NewAgentPanel({
   });
 
   return (
-    <section className="mb-8 max-w-lg rounded-xl bg-card p-5 shadow-border">
+    <section className="mb-8 w-full rounded-xl bg-card p-6 shadow-border sm:p-7">
       {issued ? (
         <>
           <h2 className="text-base font-medium text-ink">安装命令只显示这一次</h2>
@@ -284,7 +294,7 @@ function NewAgentPanel({
         </>
       ) : (
         <>
-          <h2 className="text-base font-medium text-ink">登记 Agent</h2>
+          <h2 className="text-base font-medium text-ink">登记节点</h2>
           <p className="mt-1 text-sm leading-relaxed text-stone">只生成凭证。不要在客户端写映射。</p>
           <form
             className="mt-4 flex flex-col gap-3"
@@ -311,25 +321,15 @@ function NewAgentPanel({
               <SelectField
                 label="系统"
                 value={os}
-                onChange={(e) => setOs(e.target.value as Platform)}
-              >
-                {PLATFORMS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </SelectField>
+                onValueChange={(v) => setOs(v as Platform)}
+                options={PLATFORMS.map((p) => ({ value: p.id, label: p.label }))}
+              />
               <SelectField
                 label="架构"
                 value={arch}
-                onChange={(e) => setArch(e.target.value as Arch)}
-              >
-                {ARCHS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </SelectField>
+                onValueChange={(v) => setArch(v as Arch)}
+                options={ARCHS.map((p) => ({ value: p.id, label: p.label }))}
+              />
             </div>
             <TextAreaField
               label="备注"

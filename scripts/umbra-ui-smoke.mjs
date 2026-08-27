@@ -29,7 +29,7 @@ async function main() {
   log("演示后有流量", /今日入站\s+[1-9]/.test(body) || /\d+\s*B/.test(body));
 
   const routes = [
-    ["/agents", "Agent"],
+    ["/agents", "节点"],
     ["/mappings", "映射"],
     ["/traffic", "流量"],
     ["/audit", "审计"],

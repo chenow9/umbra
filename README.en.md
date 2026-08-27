@@ -4,7 +4,7 @@
 
 Self-hosted **L4 (TCP / UDP)** stealth intranet-penetration gateway.
 
-Agents only keep the gate address and a credential. Mappings, modes and ACL live on the server, are pushed to online Agents, and take effect without touching client files, restarting the gate, or dropping existing connections.
+Nodes only keep the gate address and a credential. Mappings, modes and ACL live on the server, are pushed to online nodes, and take effect without touching client files, restarting the gate, or dropping existing connections.
 
 ## Why not NPS / Pangolin / frp
 
@@ -13,10 +13,10 @@ NPS has the right control model (change it on the server, the client executes) a
 Umbra stacks five requirements:
 
 1. L4 only — TCP and UDP. No user-traffic L7 reverse proxy.
-2. **Server is the only config truth.** After install, the Agent is not edited.
+2. **Server is the only config truth.** After install, the node is not edited.
 3. The gate binds and releases ports at runtime; in-flight connections on other mappings stay up.
 4. Default stealth (SPA / visitor). Public ports are an explicit mode.
-5. Per-Agent and per-mapping traffic stats, plus a spare console.
+5. Per-node and per-mapping traffic stats, plus a spare console.
 
 Out of scope: exposing `frpc.toml`, NPS protocol compatibility, an internet login system for the product.
 
@@ -26,7 +26,7 @@ Out of scope: exposing `frpc.toml`, NPS protocol compatibility, an internet logi
 |---|---|
 | `umbrad` | Public gate. TLS 1.3 control channel, business listeners, nftables DROP, hot upgrade |
 | `umbra-agent` | Node behind NAT. Dials local targets from server-pushed mappings |
-| Console | Overview / Agents / mappings / traffic / audit / deploy |
+| Console | Overview / nodes / mappings / traffic / audit / deploy |
 
 ## Modes
 
@@ -56,7 +56,7 @@ sudo ./dist/umbrad_linux_amd64 \
 
 First start writes `ca.crt`, `gate.crt`, `gate.key` under `-tls-dir`. Copy `ca.crt` to every Agent host.
 
-**Agent** (token is issued once in the console)
+**Node** (token is issued once in the console)
 
 ```bash
 ./umbra-agent \
@@ -72,7 +72,7 @@ npm install
 npm run dev
 ```
 
-Add or edit mappings in the console. Do not edit files on the Agent. systemd / launchd / Windows service / Docker snippets are on the Deploy page.
+Add or edit mappings in the console. Do not edit files on the node. systemd / launchd / Windows service / Docker snippets are on the Deploy page.
 
 Hot-replace the gate binary without dropping tunnels:
 
@@ -97,7 +97,7 @@ Kernel DROP is Linux-only. macOS / Windows gates still close in user space. Dock
 
 ```
 cmd/umbrad          gate
-cmd/umbra-agent     agent
+cmd/umbra-agent     node
 internal/           mux, policy, nftables, TLS, upgrade
 src/                console (React)
 docs/               requirements and protocol
@@ -106,7 +106,7 @@ scripts/            cross-compile and smoke tests
 
 ## Security
 
-- Control channel is TLS 1.3; Agents require `--tls-ca`.
+- Control channel is TLS 1.3; nodes require `--tls-ca`.
 - Keep the console on a network you already reach. Do not publish it.
 - For nmap `filtered` on dark ports, run the gate with `CAP_NET_ADMIN`.
 - Bootstrap tokens are shown once; revoke them in the console.

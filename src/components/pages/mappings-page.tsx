@@ -46,7 +46,7 @@ export function MappingsPage() {
     >
       {!hasAgent ? (
         <p className="max-w-md text-sm leading-relaxed text-ink-soft">
-          先登记一台 Agent，才能把映射下发到它。
+          先登记一台节点，才能把映射下发到它。
         </p>
       ) : null}
 
@@ -73,7 +73,7 @@ export function MappingsPage() {
               <thead>
                 <tr className="border-b border-line text-xs text-stone">
                   <th className="px-4 py-3 font-medium">名称</th>
-                  <th className="px-4 py-3 font-medium">Agent</th>
+                  <th className="px-4 py-3 font-medium">节点</th>
                   <th className="px-4 py-3 font-medium">协议</th>
                   <th className="px-4 py-3 font-medium">模式</th>
                   <th className="px-4 py-3 font-medium">入口</th>
@@ -304,7 +304,7 @@ function NewMappingPanel({
       }),
     onSuccess: (m) => {
       toast.success(
-        m.pushState === "acked" ? (m.mode === "visitor" ? "已下发，无公网入口" : "已下发并监听") : "已保存，等待 Agent 上线后下发",
+        m.pushState === "acked" ? (m.mode === "visitor" ? "已下发，无公网入口" : "已下发并监听") : "已保存，等待节点上线后下发",
       );
       setName("");
       onCreated();
@@ -313,7 +313,7 @@ function NewMappingPanel({
   });
 
   return (
-    <section className="mb-8 max-w-lg rounded-xl bg-card p-5 shadow-border">
+    <section className="mb-8 w-full max-w-3xl rounded-xl bg-card p-6 shadow-border sm:p-7">
       <h2 className="text-base font-medium text-ink">新建映射</h2>
       <p className="mt-1 text-sm leading-relaxed text-stone">
         保存后立刻下发。暗端口默认丢包；公开口才会一直听。
@@ -337,40 +337,44 @@ function NewMappingPanel({
           />
         </div>
         <div className="sm:col-span-2">
-          <SelectField label="Agent" value={selected} onChange={(e) => setAgentId(e.target.value)}>
-            {usable.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name} ({a.status === "online" ? "在线" : "离线"})
-              </option>
-            ))}
-          </SelectField>
+          <SelectField
+            label="节点"
+            value={selected}
+            onValueChange={setAgentId}
+            options={usable.map((a) => ({
+              value: a.id,
+              label: `${a.name}（${a.status === "online" ? "在线" : "离线"}）`,
+            }))}
+          />
         </div>
         <SelectField
           label="协议"
           value={proto}
-          onChange={(e) => {
-            const next = e.target.value as Proto;
+          onValueChange={(v) => {
+            const next = v as Proto;
             setProto(next);
             if (next === "udp" && mode === "public") setEntryPort("25565");
           }}
-        >
-          <option value="tcp">TCP</option>
-          <option value="udp">UDP</option>
-        </SelectField>
+          options={[
+            { value: "tcp", label: "TCP" },
+            { value: "udp", label: "UDP" },
+          ]}
+        />
         <SelectField
           label="模式"
           value={mode}
-          onChange={(e) => {
-            const next = e.target.value as MappingMode;
+          onValueChange={(v) => {
+            const next = v as MappingMode;
             setMode(next);
             if (next === "public" && proto === "udp") setEntryPort("25565");
             if (next === "spa" && entryPort === "25565") setEntryPort("40222");
           }}
-        >
-          <option value="spa">暗端口（SPA）</option>
-          <option value="visitor">访客（无公网端口）</option>
-          <option value="public">公开</option>
-        </SelectField>
+          options={[
+            { value: "spa", label: "暗端口（SPA）" },
+            { value: "visitor", label: "访客（无公网端口）" },
+            { value: "public", label: "公开" },
+          ]}
+        />
         {mode !== "visitor" ? (
           <TextField
             label="入口端口"

@@ -1,7 +1,10 @@
-import type { ComponentProps, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+"use client";
+
+import type { ComponentProps, ReactNode, TextareaHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 
 export function Field({
   label,
@@ -31,23 +34,22 @@ export function TextField({
 
 export function SelectField({
   label,
-  className,
-  children,
-  ...props
-}: { label: string } & SelectHTMLAttributes<HTMLSelectElement>) {
+  value,
+  onValueChange,
+  options,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onValueChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+}) {
   return (
-    <Field label={label}>
-      <select
-        className={cn(
-          "flex h-11 w-full rounded-md bg-paper px-3 text-sm text-ink shadow-border",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine/35",
-          className,
-        )}
-        {...props}
-      >
-        {children}
-      </select>
-    </Field>
+    <div className="flex flex-col gap-1.5">
+      <Label>{label}</Label>
+      <Select value={value} onValueChange={onValueChange} options={options} placeholder={placeholder} />
+    </div>
   );
 }
 

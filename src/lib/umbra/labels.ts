@@ -38,14 +38,14 @@ export const frameLabel: Record<string, string> = {
 };
 
 export const actionLabel: Record<string, string> = {
-  "agent.create": "登记 Agent",
+  "agent.create": "登记节点",
   "agent.hello": "Hello 全量下发",
   "mapping.push": "MappingSync",
   "mapping.probe": "探测开流",
   "mapping.knock": "SPA 敲门",
   "mapping.visit": "访客探访",
   "visitor.issue": "签发访客",
-  "agent.disconnect": "Agent 离线",
+  "agent.disconnect": "节点离线",
   "agent.revoke": "吊销凭证",
   "mapping.create": "新建映射",
   "mapping.policy": "更新策略",

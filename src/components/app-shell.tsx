@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 
 const nav = [
   { to: "/", label: "总览", icon: LayoutGrid },
-  { to: "/agents", label: "Agent", icon: Radio },
+  { to: "/agents", label: "节点", icon: Radio },
   { to: "/mappings", label: "映射", icon: GitBranch },
   { to: "/traffic", label: "流量", icon: Activity },
   { to: "/audit", label: "审计", icon: ScrollText },
@@ -37,7 +37,7 @@ export function AppShell({
         <Brand />
         <Nav pathname={pathname} />
         <p className="mt-auto px-2 text-xs leading-relaxed text-stone">
-          配置只在这里改。Agent 不上配置文件。
+          配置只在这里改。节点不上配置文件。
         </p>
       </aside>
 

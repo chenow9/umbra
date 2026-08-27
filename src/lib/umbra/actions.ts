@@ -285,7 +285,7 @@ async function ownedAgent(id: string) {
     `select id, status, enabled from agents where id = $1`,
     [id],
   );
-  if (!a) throw new Error("Agent 不存在");
+  if (!a) throw new Error("节点不存在");
   return a;
 }
 
@@ -587,7 +587,7 @@ export const createMapping = createServerFn({ method: "POST" })
     }
     const sql = await getSql();
     const agent = await ownedAgent(data.agentId);
-    if (agent.status === "revoked" || !agent.enabled) throw new Error("Agent 已吊销");
+    if (agent.status === "revoked" || !agent.enabled) throw new Error("节点已吊销");
     if (entryPort != null) {
       const [hit] = await sql.query<{ id: string }>(
         `select id from mappings where proto = $1 and entry_port = $2`,
@@ -811,7 +811,7 @@ export const probeMapping = createServerFn({ method: "POST" })
       [m.agent_id],
     );
     if (!agent || agent.status !== "online" || !agent.enabled) {
-      throw new Error("Agent 不在线，无法开流");
+      throw new Error("节点不在线，无法开流");
     }
     await ensureEcho();
     const spec = (await loadWires(m.agent_id)).find((w) => w.id === m.id);
@@ -890,7 +890,7 @@ export const visitMapping = createServerFn({ method: "POST" })
       [m.agent_id],
     );
     if (!agent || agent.status !== "online" || !agent.enabled) {
-      throw new Error("Agent 不在线，无法探访");
+      throw new Error("节点不在线，无法探访");
     }
     await ensureEcho();
     const spec = (await loadWires(m.agent_id)).find((w) => w.id === m.id);

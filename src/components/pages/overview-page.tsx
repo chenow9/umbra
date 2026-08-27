@@ -45,7 +45,7 @@ export function OverviewPage() {
           />
 
           <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Stat label="在线 Agent" value={`${o?.agentsOnline ?? 0}`} hint={`共 ${o?.agentsTotal ?? 0}`} />
+            <Stat label="在线节点" value={`${o?.agentsOnline ?? 0}`} hint={`共 ${o?.agentsTotal ?? 0}`} />
             <Stat label="活跃映射" value={`${o?.mappingsActive ?? 0}`} hint={`共 ${o?.mappingsTotal ?? 0}`} />
             <Stat label="今日入站" value={formatBytes(o?.bytesInToday ?? 0)} hint={`现 ${formatBps(o?.bpsIn ?? 0)}`} />
             <Stat label="今日出站" value={formatBytes(o?.bytesOutToday ?? 0)} hint={`现 ${formatBps(o?.bpsOut ?? 0)}`} />
@@ -60,7 +60,7 @@ export function OverviewPage() {
 
           <section className="grid gap-6 lg:grid-cols-2">
             <div>
-              <h2 className="mb-3 text-sm font-medium text-ink-soft">Agent</h2>
+              <h2 className="mb-3 text-sm font-medium text-ink-soft">节点</h2>
               <ul className="divide-y divide-line rounded-xl bg-card shadow-border">
                 {(agents.data ?? []).slice(0, 5).map((a) => (
                   <li key={a.id} className="flex items-center justify-between gap-3 px-4 py-3">
@@ -117,7 +117,7 @@ function NextHint({
   if (online === 0) {
     return (
       <Hint>
-        Agent 还没上线，映射无法开流。
+        节点还没上线，映射无法开流。
         <Button asChild size="sm" variant="outline">
           <Link to="/agents">去上线</Link>
         </Button>
