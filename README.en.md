@@ -75,7 +75,7 @@ Add or edit mappings in the console. Do not edit files on the node. systemd / la
 
 ### Docker (public gate + private node)
 
-The gate container is the control plane: `-http` serves the UI and API on one port (default `:8080`). Nodes use `:4400` TLS. Do not run a separate `npm run dev` in production.
+The gate container is the control plane: `-http` serves the UI and API on one port (default `:8080`). Nodes use `:4400` TLS. The console is compiled into `umbrad` at image build time; first visit sets a password. Do not run a separate `npm run dev` in production.
 
 Push a semver tag (`v1.2.3`) to build **linux/amd64** and **linux/arm64** images and push them to Docker Hub:
 

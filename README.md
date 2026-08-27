@@ -79,7 +79,7 @@ sudo ./dist/umbrad_linux_amd64 \
 
 ### Docker（公网入口 + 内网节点）
 
-入口容器就是控制面：`-http` 同时提供网页和 API（默认 `:8080`），节点走 `:4400` TLS。不要再单独跑 `npm run dev`。
+入口容器就是控制面：`-http` 同时提供网页和 API（默认 `:8080`），节点走 `:4400` TLS。镜像构建时会把控制台打进 `umbrad`，第一次打开网页设定口令。不要再单独跑 `npm run dev`。
 
 推送符合 semver 的 tag（`v1.2.3`）会构建 **linux/amd64** 和 **linux/arm64** 镜像并推到 Docker Hub：
 

@@ -1,5 +1,12 @@
 # 入口 / 节点。Linux 宿主机请用 network_mode: host。
-# 构建阶段按 BUILDPLATFORM 交叉编译，不需要 QEMU 跑 Go。
+# 先编控制台静态文件，再交叉编译进 umbrad（go:embed）。
+
+FROM --platform=$BUILDPLATFORM node:22-bookworm AS ui
+WORKDIR /src
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build:embed-ui
 
 FROM --platform=$BUILDPLATFORM golang:1.24-bookworm AS build
 WORKDIR /src
@@ -9,6 +16,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
+COPY --from=ui /src/internal/control/ui ./internal/control/ui
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w" -o /out/umbrad ./cmd/umbrad \
  && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \

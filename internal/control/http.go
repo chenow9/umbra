@@ -18,7 +18,7 @@ import (
 	"umbra/internal/wire"
 )
 
-//go:embed ui/*
+//go:embed all:ui
 var uiFS embed.FS
 
 func (c *Console) Handler() http.Handler {
@@ -97,10 +97,14 @@ func (c *Console) serveUI(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if p == "/" {
-		p = "/index.html"
+	rel := strings.TrimPrefix(p, "/")
+	if rel == "" || rel == "." || strings.HasSuffix(rel, "/") {
+		rel = "index.html"
 	}
-	http.FileServer(http.FS(sub)).ServeHTTP(w, r)
+	if _, err := fs.Stat(sub, rel); err != nil {
+		rel = "index.html"
+	}
+	http.ServeFileFS(w, r, sub, rel)
 }
 
 func (c *Console) need(h http.HandlerFunc) http.HandlerFunc {
@@ -197,7 +201,7 @@ func (c *Console) live() map[string]gateAgent {
 }
 
 type gateAgent struct {
-	Online bool
+	Online              bool
 	Addr, OS, Arch, Ver string
 }
 
@@ -243,7 +247,7 @@ func (c *Console) getAgents(w http.ResponseWriter, _ *http.Request) {
 			"id": a.ID, "name": a.Name, "comment": a.Comment, "status": st,
 			"addr": addr, "version": ver, "os": os, "arch": arch,
 			"lastSeen": last, "enabled": a.Enabled && a.Status != "revoked",
-			"createdAt": a.Created.UTC().Format(time.RFC3339),
+			"createdAt":    a.Created.UTC().Format(time.RFC3339),
 			"mappingCount": n, "bytesIn": in, "bytesOut": outB,
 		})
 	}
@@ -556,7 +560,7 @@ func (c *Console) postVisitor(w http.ResponseWriter, _ *http.Request) {
 	ticket := "umbra_vis_" + newID("k")[2:]
 	writeJSON(w, map[string]any{
 		"id": id, "ticket": ticket,
-		"visitCmd": "umbra visit --gate gate:4400 --ticket " + ticket + " --local 2222",
+		"visitCmd":  "umbra visit --gate gate:4400 --ticket " + ticket + " --local 2222",
 		"expiresAt": time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
 	})
 }

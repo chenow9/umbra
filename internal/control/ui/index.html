@@ -15,7 +15,7 @@
     <main>
       <h1>幽门</h1>
       <p>入口进程已起来。控制台静态文件还没打进这个二进制。</p>
-      <p>开发时用 Vite 的 8080；生产把构建产物交给 <code>-ui</code>，或设 <code>UMBRA_UI_UPSTREAM</code>。</p>
+      <p>生产镜像会在构建时把控制台编进来。本地请先 <code>npm run build:embed-ui</code> 再编译，或把构建产物交给 <code>-ui</code>。</p>
     </main>
   </body>
 </html>

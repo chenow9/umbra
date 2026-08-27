@@ -40,3 +40,5 @@ umbra.zip
 coverage/
 .node_modules.lock
 .cache/
+internal/control/ui/**
+!internal/control/ui/index.html
