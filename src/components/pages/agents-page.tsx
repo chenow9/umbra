@@ -22,53 +22,60 @@ import { frameLabel } from "@/lib/umbra/labels";
 import type { Agent } from "@/lib/umbra/types";
 import { ARCHS, PLATFORMS, agentInstall, platformLabel, type Arch, type Platform } from "@/lib/umbra/units";
 
+type Issued = { id: string; token: string; os: Platform; arch: Arch };
+
 export function AgentsPage() {
   const qc = useQueryClient();
   const agents = useQuery({ queryKey: ["umbra", "agents"], queryFn: () => listAgents() });
   const frames = useQuery({ queryKey: ["umbra", "frames"], queryFn: () => listFrames() });
   const [composing, setComposing] = useState(false);
+  const [issued, setIssued] = useState<Issued | null>(null);
   const list = agents.data ?? [];
   const empty = !agents.isLoading && list.length === 0;
-  const showForm = composing || empty;
+  const showForm = composing || empty || issued !== null;
+
+  function closeForm() {
+    setComposing(false);
+    setIssued(null);
+    void qc.invalidateQueries({ queryKey: ["umbra"] });
+  }
 
   return (
     <AppShell
       title="节点"
       action={
-        empty ? null : (
-          <Button type="button" onClick={() => setComposing((v) => !v)}>
-            {composing ? "收起" : "登记节点"}
+        empty && !issued ? null : (
+          <Button
+            type="button"
+            onClick={() => {
+              if (showForm) closeForm();
+              else setComposing(true);
+            }}
+          >
+            {showForm ? "收起" : "登记节点"}
           </Button>
         )
       }
     >
-      {empty ? (
-        <div className="mx-auto flex w-full max-w-xl flex-col gap-8">
+      {showForm ? (
+        <div className={empty && !issued ? "mx-auto mb-8 flex w-full max-w-xl flex-col gap-8" : undefined}>
           <NewAgentPanel
-            onCreated={() => {
-              setComposing(true);
-              void qc.invalidateQueries({ queryKey: ["umbra"] });
-            }}
-            onClose={() => setComposing(false)}
-            allowCancel={false}
+            issued={issued}
+            onIssued={setIssued}
+            onClose={closeForm}
+            allowCancel={!empty || issued !== null}
           />
-          <div className="flex flex-col items-center gap-3">
-            <p className="text-xs text-stone">还没有节点时，也可以先在本机跑通一遍。</p>
-            <DemoButton variant="outline" size="default" label="跑一遍演示" />
-          </div>
-        </div>
-      ) : (
-        <>
-          {showForm ? (
-            <NewAgentPanel
-              onCreated={() => {
-                setComposing(true);
-                void qc.invalidateQueries({ queryKey: ["umbra"] });
-              }}
-              onClose={() => setComposing(false)}
-              allowCancel
-            />
+          {empty && !issued ? (
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-xs text-stone">还没有节点时，也可以先在本机跑通一遍。</p>
+              <DemoButton variant="outline" size="default" label="跑一遍演示" />
+            </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {!empty ? (
+        <>
           <div className="flex flex-col gap-3 md:hidden">
             {list.map((a) => (
               <AgentCard key={a.id} agent={a} />
@@ -95,7 +102,7 @@ export function AgentsPage() {
             </table>
           </div>
         </>
-      )}
+      ) : null}
 
       {(frames.data ?? []).length > 0 ? (
         <section className="mt-8">
@@ -233,11 +240,13 @@ function AgentRow({ agent }: { agent: Agent }) {
 }
 
 function NewAgentPanel({
-  onCreated,
+  issued,
+  onIssued,
   onClose,
   allowCancel,
 }: {
-  onCreated: () => void;
+  issued: Issued | null;
+  onIssued: (v: Issued) => void;
   onClose: () => void;
   allowCancel: boolean;
 }) {
@@ -246,22 +255,12 @@ function NewAgentPanel({
   const [comment, setComment] = useState("");
   const [os, setOs] = useState<Platform>("linux");
   const [arch, setArch] = useState<Arch>("amd64");
-  const [issued, setIssued] = useState<{
-    id: string;
-    token: string;
-    installCmd: string;
-  } | null>(null);
 
   const create = useMutation({
     mutationFn: () => createAgent({ data: { name, comment, os, arch } }),
     onSuccess: (res) => {
-      toast.success("凭证已签发", { id: "create-agent" });
-      setIssued({
-        id: res.id,
-        token: res.token,
-        installCmd: agentInstall(os, arch, res.token),
-      });
-      onCreated();
+      toast.success("凭证已签发，请复制保存", { id: "create-agent" });
+      onIssued({ id: res.id, token: res.token, os, arch });
     },
     onError: (e: Error) => toast.error(e.message, { id: "create-agent" }),
   });
@@ -277,33 +276,49 @@ function NewAgentPanel({
     onError: (e: Error) => toast.error(e.message, { id: "hello-new" }),
   });
 
+  const installCmd = issued ? agentInstall(issued.os, issued.arch, issued.token) : "";
+
   return (
     <section className="mb-8 w-full rounded-xl bg-card p-6 shadow-border sm:p-7">
       {issued ? (
         <>
-          <h2 className="text-base font-medium text-ink">安装命令只显示这一次</h2>
+          <h2 className="text-base font-medium text-ink">把凭证放到内网节点上</h2>
           <p className="mt-1 text-sm leading-relaxed text-stone">
-            真机只带入口和凭证。映射永远在服务端改。预览可直接上线。
+            客户端只需要入口地址、CA 和下面这串 token。「本机演示上线」只在入口这台机器上拉 agent，不能给内网节点用。
           </p>
-          <pre className="mt-4 max-h-56 overflow-auto rounded-md bg-paper-2 p-3 font-mono text-xs leading-relaxed text-ink">
-            {issued.installCmd.trim()}
+          <p className="mt-4 text-xs font-medium text-stone">UMBRA_TOKEN</p>
+          <pre className="mt-1 overflow-x-auto rounded-md bg-paper-2 p-3 font-mono text-xs leading-relaxed text-ink">
+            {issued.token}
+          </pre>
+          <pre className="mt-3 max-h-56 overflow-auto rounded-md bg-paper-2 p-3 font-mono text-xs leading-relaxed text-ink">
+            {installCmd.trim()}
           </pre>
           <div className="mt-4 flex flex-wrap justify-end gap-2">
             <Button
               type="button"
               variant="outline"
               onClick={() => {
-                void navigator.clipboard.writeText(issued.installCmd);
-                toast.success("已复制");
+                void navigator.clipboard.writeText(issued.token);
+                toast.success("凭证已复制");
               }}
             >
-              复制
+              复制凭证
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                void navigator.clipboard.writeText(installCmd);
+                toast.success("已复制安装命令");
+              }}
+            >
+              复制安装命令
             </Button>
             <Button type="button" variant="ghost" onClick={onClose}>
               稍后再上线
             </Button>
             <Button type="button" onClick={() => hello.mutate()} disabled={hello.isPending} aria-busy={hello.isPending}>
-              {hello.isPending ? "正在上线…" : "完成并上线"}
+              {hello.isPending ? "正在上线…" : "本机演示上线"}
             </Button>
           </div>
         </>
