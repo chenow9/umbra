@@ -1,0 +1,40 @@
+# deps & build
+node_modules/
+.vercel/
+.tanstack/
+.nitro/
+dist/
+*.exe
+*.zip
+
+# logs & local state
+*.log
+.env
+.env.*
+!.env.example
+/data/
+/tmp/
+*.sqlite
+*.db
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# sandbox / preview (not product)
+AGENTS.md
+AGENTS.project.md
+.grok/
+artifacts/
+screenshots/
+public/umbra.zip
+public/__grok/
+umbra.zip
+
+# generated
+coverage/
+.node_modules.lock
+.cache/

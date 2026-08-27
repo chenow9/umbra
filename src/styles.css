@@ -1,0 +1,256 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "IBM Plex Sans", "Source Han Sans SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-serif: "Instrument Serif", "Songti SC", "Noto Serif SC", Georgia, serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-stone: var(--stone);
+  --color-line: var(--line);
+  --color-pine: var(--pine);
+  --color-pine-fg: var(--pine-fg);
+  --color-moss: var(--moss);
+  --color-amber: var(--amber);
+  --color-rose: var(--rose);
+
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
+  --color-card: var(--card);
+  --color-card-foreground: var(--ink);
+  --color-muted: var(--stone);
+  --color-muted-foreground: var(--stone);
+  --color-border: var(--line);
+  --color-input: var(--line);
+  --color-primary: var(--pine);
+  --color-primary-foreground: var(--pine-fg);
+  --color-secondary: var(--paper-2);
+  --color-secondary-foreground: var(--ink);
+  --color-accent: var(--pine);
+  --color-accent-foreground: var(--pine-fg);
+  --color-destructive: var(--rose);
+  --color-destructive-foreground: var(--pine-fg);
+  --color-ring: var(--pine);
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius: 10px;
+}
+
+:root,
+html[data-theme="guci"] {
+  color-scheme: light;
+  --paper: #f6f3ee;
+  --paper-2: #eee9e1;
+  --card: #faf8f4;
+  --ink: #1e1c19;
+  --ink-soft: #45413c;
+  --stone: #8a857c;
+  --line: #ddd6cc;
+  --pine: #2a2724;
+  --pine-fg: #f6f3ee;
+  --moss: #4a4641;
+  --amber: #9a7a48;
+  --rose: #8c3d3d;
+  --shadow-border:
+    0px 0px 0px 1px rgba(30, 28, 25, 0.07),
+    0px 1px 2px -1px rgba(30, 28, 25, 0.06),
+    0px 2px 4px 0px rgba(30, 28, 25, 0.04);
+}
+
+html[data-theme="songmo"] {
+  color-scheme: light;
+  --paper: #f3efe6;
+  --paper-2: #ebe6da;
+  --card: #f7f4ec;
+  --ink: #1a1814;
+  --ink-soft: #3f3a33;
+  --stone: #8a8478;
+  --line: #d9d2c4;
+  --pine: #2c4a3e;
+  --pine-fg: #f3efe6;
+  --moss: #4d6b5c;
+  --amber: #9a6b2f;
+  --rose: #8c3d3d;
+  --shadow-border:
+    0px 0px 0px 1px rgba(26, 24, 20, 0.06),
+    0px 1px 2px -1px rgba(26, 24, 20, 0.06),
+    0px 2px 4px 0px rgba(26, 24, 20, 0.04);
+}
+
+html[data-theme="qingci"] {
+  color-scheme: light;
+  --paper: #eef3ee;
+  --paper-2: #e3ebe4;
+  --card: #f5f8f5;
+  --ink: #1c2420;
+  --ink-soft: #3c4a43;
+  --stone: #7d8a82;
+  --line: #cdd6cf;
+  --pine: #3f6b5c;
+  --pine-fg: #eef3ee;
+  --moss: #5a8874;
+  --amber: #9a7a48;
+  --rose: #8c4a4a;
+  --shadow-border:
+    0px 0px 0px 1px rgba(28, 36, 32, 0.06),
+    0px 1px 2px -1px rgba(28, 36, 32, 0.06),
+    0px 2px 4px 0px rgba(28, 36, 32, 0.04);
+}
+
+html[data-theme="haijiao"] {
+  color-scheme: light;
+  --paper: #eef1f3;
+  --paper-2: #e4e8eb;
+  --card: #f5f7f8;
+  --ink: #1b2328;
+  --ink-soft: #3d4a52;
+  --stone: #7a858c;
+  --line: #cfd6db;
+  --pine: #3d5a66;
+  --pine-fg: #eef1f3;
+  --moss: #5a7884;
+  --amber: #9a7a48;
+  --rose: #8c4a4a;
+  --shadow-border:
+    0px 0px 0px 1px rgba(27, 35, 40, 0.06),
+    0px 1px 2px -1px rgba(27, 35, 40, 0.06),
+    0px 2px 4px 0px rgba(27, 35, 40, 0.04);
+}
+
+html[data-theme="zhusha"] {
+  color-scheme: light;
+  --paper: #f4eee8;
+  --paper-2: #ece4dc;
+  --card: #f8f3ee;
+  --ink: #1c1614;
+  --ink-soft: #4a3c38;
+  --stone: #8a7c76;
+  --line: #ddd2ca;
+  --pine: #7a3a32;
+  --pine-fg: #f4eee8;
+  --moss: #8f5048;
+  --amber: #9a6b2f;
+  --rose: #8c3d3d;
+  --shadow-border:
+    0px 0px 0px 1px rgba(28, 22, 20, 0.06),
+    0px 1px 2px -1px rgba(28, 22, 20, 0.06),
+    0px 2px 4px 0px rgba(28, 22, 20, 0.04);
+}
+
+html[data-theme="dianlan"] {
+  color-scheme: light;
+  --paper: #eef0f4;
+  --paper-2: #e4e6ec;
+  --card: #f5f6f9;
+  --ink: #161820;
+  --ink-soft: #3a3e4a;
+  --stone: #7a7e8a;
+  --line: #cfd2da;
+  --pine: #3d4a63;
+  --pine-fg: #eef0f4;
+  --moss: #536078;
+  --amber: #9a7a48;
+  --rose: #8c4a4a;
+  --shadow-border:
+    0px 0px 0px 1px rgba(22, 24, 32, 0.06),
+    0px 1px 2px -1px rgba(22, 24, 32, 0.06),
+    0px 2px 4px 0px rgba(22, 24, 32, 0.04);
+}
+
+html[data-theme="chahe"] {
+  color-scheme: light;
+  --paper: #f3eadc;
+  --paper-2: #e8decc;
+  --card: #f7f1e6;
+  --ink: #1c1610;
+  --ink-soft: #4a3e32;
+  --stone: #8a7c68;
+  --line: #d9cdb8;
+  --pine: #5a4030;
+  --pine-fg: #f3eadc;
+  --moss: #6e5240;
+  --amber: #9a6b2f;
+  --rose: #8c3d3d;
+  --shadow-border:
+    0px 0px 0px 1px rgba(28, 22, 16, 0.07),
+    0px 1px 2px -1px rgba(28, 22, 16, 0.06),
+    0px 2px 4px 0px rgba(28, 22, 16, 0.04);
+}
+
+html[data-theme="moye"] {
+  color-scheme: dark;
+  --paper: #121314;
+  --paper-2: #181a1b;
+  --card: #1c1e20;
+  --ink: #eceae4;
+  --ink-soft: #c4c0b6;
+  --stone: #8b8a84;
+  --line: #2c2e30;
+  --pine: #c8ccd4;
+  --pine-fg: #121314;
+  --moss: #a8adb6;
+  --amber: #c4a574;
+  --rose: #d08080;
+  --shadow-border: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+html[data-theme="yesong"] {
+  color-scheme: dark;
+  --paper: #141210;
+  --paper-2: #1c1916;
+  --card: #221e1a;
+  --ink: #ece6dc;
+  --ink-soft: #c4baac;
+  --stone: #8a8278;
+  --line: #2e2a26;
+  --pine: #9bb5a4;
+  --pine-fg: #141210;
+  --moss: #b3c8ba;
+  --amber: #c4a574;
+  --rose: #d08080;
+  --shadow-border: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  html,
+  body,
+  #app {
+    min-height: 100%;
+    background: var(--paper);
+    color: var(--ink);
+    pointer-events: auto;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
