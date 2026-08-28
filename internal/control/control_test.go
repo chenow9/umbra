@@ -720,6 +720,29 @@ func TestRotateExpiredTokenHasNoGrace(t *testing.T) {
 	}
 }
 
+func TestPutTokenReplaceDropsOldHash(t *testing.T) {
+	c, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "PUT", "/v1/tokens/token_old", map[string]string{"node_id": "nde_put"}, nil)
+	if res.StatusCode != 204 {
+		t.Fatalf("put old %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+	if c.Gate.LookupToken("token_old") != "nde_put" {
+		t.Fatal("old token should enroll after first put")
+	}
+	res = doJSON(t, srv, "PUT", "/v1/tokens/token_new", map[string]string{"node_id": "nde_put"}, nil)
+	if res.StatusCode != 204 {
+		t.Fatalf("put new %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+	if c.Gate.LookupToken("token_old") != "" {
+		t.Fatal("old token must not enroll after replace")
+	}
+	if c.Gate.LookupToken("token_new") != "nde_put" {
+		t.Fatal("new token must enroll after replace")
+	}
+}
+
 func TestPutTokenPersistFailDoesNotPublish(t *testing.T) {
 	c, srv, dir := newTestConsole(t)
 	plain := "umbra_boot_putfail"

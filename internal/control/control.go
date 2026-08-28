@@ -284,6 +284,14 @@ func (c *Console) revokeHash(h string) {
 	c.revoked[h] = struct{}{}
 }
 
+func (c *Console) snapshotRevoked() map[string]struct{} {
+	out := make(map[string]struct{}, len(c.revoked))
+	for h := range c.revoked {
+		out[h] = struct{}{}
+	}
+	return out
+}
+
 func (c *Console) loadTomb() error {
 	raw, err := os.ReadFile(c.tombPath())
 	if err != nil {

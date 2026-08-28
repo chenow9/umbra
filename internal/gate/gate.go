@@ -636,6 +636,35 @@ func (s *Server) SetTokenHashUntil(hash, nodeID string, until time.Time) {
 	s.mu.Unlock()
 }
 
+// ReplaceToken installs newHash as the only credential for nodeID and
+// drops every other hash for that node. Sessions still bound to an old
+// hash are closed after the table update.
+func (s *Server) ReplaceToken(nodeID, newHash string, until time.Time) {
+	if nodeID == "" || newHash == "" {
+		return
+	}
+	if until.IsZero() {
+		until = time.Now().Add(TokenTTL)
+	}
+	s.mu.Lock()
+	for h, e := range s.tok {
+		if e.NodeID == nodeID && h != newHash {
+			delete(s.tok, h)
+		}
+	}
+	s.tok[newHash] = tokenEnt{NodeID: nodeID, Until: until}
+	ac := s.nodes[nodeID]
+	kick := ac != nil && ac.credHash != newHash
+	s.mu.Unlock()
+	if kick {
+		if ac.sess != nil {
+			_ = ac.sess.Close()
+		} else if ac.raw != nil {
+			_ = ac.raw.Close()
+		}
+	}
+}
+
 func (s *Server) RotateToken(nodeID, oldHash, newHash string, grace time.Duration) {
 	s.RotateTokenUntil(nodeID, oldHash, newHash, time.Now().Add(TokenTTL), grace)
 }
