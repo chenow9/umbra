@@ -1,0 +1,151 @@
+package visit
+
+import (
+	"context"
+	"encoding/hex"
+	"fmt"
+	"net"
+	"sync"
+	"time"
+
+	"umbra/internal/uplane"
+)
+
+func serveUDPPlane(ctx context.Context, cfg Config, tlsConn net.Conn, visitID, cookieHex, mappingID string) error {
+	cookie, err := hex.DecodeString(cookieHex)
+	if err != nil || len(cookie) != 16 {
+		if err == nil {
+			err = fmt.Errorf("bad udp cookie")
+		}
+		return err
+	}
+	ekm := uplane.ExportEKM(tlsConn)
+	if len(ekm) != 32 {
+		return fmt.Errorf("udp requires tls exported key")
+	}
+	c2s, s2c := uplane.DerivePair(ekm, cookie)
+	out, in := &uplane.Sealer{Key: c2s}, &uplane.Opener{Key: s2c}
+	uaddr, err := net.ResolveUDPAddr("udp", cfg.Server)
+	if err != nil {
+		return err
+	}
+	uc, err := net.DialUDP("udp", nil, uaddr)
+	if err != nil {
+		return err
+	}
+	defer uc.Close()
+	if err := waitBindAck(ctx, uc, out, in, visitID, cookie); err != nil {
+		return err
+	}
+	if raw, err := out.Encode(visitID, uplane.Packet{Type: uplane.TypeBindConfirm, Payload: cookie}); err == nil {
+		_, _ = uc.Write(raw)
+	}
+
+	laddr, err := net.ResolveUDPAddr("udp", cfg.Local)
+	if err != nil {
+		return err
+	}
+	pc, err := net.ListenUDP("udp", laddr)
+	if err != nil {
+		return err
+	}
+	defer pc.Close()
+	if cfg.OnListen != nil {
+		cfg.OnListen("udp", pc.LocalAddr().String())
+	}
+	go func() {
+		<-ctx.Done()
+		_ = pc.Close()
+		_ = uc.Close()
+	}()
+
+	var mu sync.Mutex
+	flows := map[string]string{}
+	rev := map[string]*net.UDPAddr{}
+
+	go func() {
+		buf := uplane.GetBuf()
+		defer uplane.PutBuf(buf)
+		for {
+			n, err := uc.Read(buf)
+			if err != nil {
+				_ = pc.Close()
+				return
+			}
+			_, pkt, err := in.Decode(buf[:n])
+			if err != nil || pkt.Type != uplane.TypeData {
+				continue
+			}
+			mu.Lock()
+			dest := rev[pkt.FlowID]
+			mu.Unlock()
+			if dest == nil && pkt.PeerIP != nil {
+				dest = &net.UDPAddr{IP: pkt.PeerIP, Port: pkt.PeerPort}
+			}
+			if dest == nil {
+				continue
+			}
+			_, _ = pc.WriteToUDP(pkt.Payload, dest)
+		}
+	}()
+	buf := uplane.GetBuf()
+	defer uplane.PutBuf(buf)
+	for {
+		n, raddr, err := pc.ReadFromUDP(buf)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+		pkey := raddr.String()
+		mu.Lock()
+		fid := flows[pkey]
+		if fid == "" {
+			fid = uplane.NewFlowID()
+			flows[pkey] = fid
+			rev[fid] = cloneUDPAddr(raddr)
+		}
+		mu.Unlock()
+		raw, err := out.Encode(visitID, uplane.Packet{
+			Type: uplane.TypeData, MappingID: mappingID, FlowID: fid,
+			PeerIP: raddr.IP, PeerPort: raddr.Port, Payload: append([]byte(nil), buf[:n]...),
+		})
+		if err != nil {
+			continue
+		}
+		_, _ = uc.Write(raw)
+	}
+}
+
+func waitBindAck(ctx context.Context, uc *net.UDPConn, out *uplane.Sealer, in *uplane.Opener, id string, cookie []byte) error {
+	buf := uplane.GetBuf()
+	defer uplane.PutBuf(buf)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		raw, err := out.Encode(id, uplane.Packet{Type: uplane.TypeBind, Payload: cookie})
+		if err != nil {
+			return err
+		}
+		if _, err := uc.Write(raw); err != nil {
+			return err
+		}
+		_ = uc.SetReadDeadline(time.Now().Add(400 * time.Millisecond))
+		n, err := uc.Read(buf)
+		if err != nil {
+			continue
+		}
+		_, pkt, err := in.Decode(buf[:n])
+		if err != nil {
+			continue
+		}
+		if pkt.Type == uplane.TypeBindAck {
+			_ = uc.SetReadDeadline(time.Time{})
+			return nil
+		}
+	}
+	return fmt.Errorf("udp bind timeout")
+}

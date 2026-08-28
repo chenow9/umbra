@@ -5,7 +5,7 @@ import { useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { RateChart } from "@/components/rate-chart";
 import { SelectField } from "@/components/field";
-import { getTraffic, listAgents, listMappings } from "@/lib/umbra/api";
+import { getTraffic, listNodes, listMappings } from "@/lib/umbra/api";
 import { formatBps, formatBytes } from "@/lib/umbra/format";
 import { cn } from "@/lib/utils";
 
@@ -13,24 +13,24 @@ type Range = "1h" | "24h" | "7d";
 
 export function TrafficPage() {
   const [range, setRange] = useState<Range>("24h");
-  const [agentId, setAgentId] = useState("");
+  const [nodeId, setNodeId] = useState("");
   const [mappingId, setMappingId] = useState("");
-  const agents = useQuery({ queryKey: ["umbra", "agents"], queryFn: () => listAgents() });
+  const nodes = useQuery({ queryKey: ["umbra", "nodes"], queryFn: () => listNodes() });
   const mappings = useQuery({ queryKey: ["umbra", "mappings"], queryFn: () => listMappings() });
   const traffic = useQuery({
-    queryKey: ["umbra", "traffic", range, agentId, mappingId],
+    queryKey: ["umbra", "traffic", range, nodeId, mappingId],
     queryFn: () =>
       getTraffic({
         data: {
           range,
-          agentId: agentId || undefined,
+          nodeId: nodeId || undefined,
           mappingId: mappingId || undefined,
         },
       }),
   });
 
   const t = traffic.data;
-  const filteredMaps = (mappings.data ?? []).filter((m) => !agentId || m.agentId === agentId);
+  const filteredMaps = (mappings.data ?? []).filter((m) => !nodeId || m.nodeId === nodeId);
 
   return (
     <AppShell title="流量">
@@ -53,14 +53,14 @@ export function TrafficPage() {
           </div>
           <SelectField
             label="节点"
-            value={agentId || "all"}
+            value={nodeId || "all"}
             onValueChange={(v) => {
-              setAgentId(v === "all" ? "" : v);
+              setNodeId(v === "all" ? "" : v);
               setMappingId("");
             }}
             options={[
               { value: "all", label: "全部" },
-              ...(agents.data ?? []).map((a) => ({ value: a.id, label: a.name })),
+              ...(nodes.data ?? []).map((a) => ({ value: a.id, label: a.name })),
             ]}
           />
           <SelectField
@@ -93,7 +93,7 @@ export function TrafficPage() {
               <article key={m.id} className="rounded-xl bg-card p-4 shadow-border">
                 <p className="font-medium">{m.name}</p>
                 <p className="mt-1 text-xs text-stone">
-                  {m.agentName} · {m.proto.toUpperCase()}
+                  {m.nodeName} · {m.proto.toUpperCase()}
                 </p>
                 <p className="mt-2 font-mono text-xs tabular-nums text-ink-soft">
                   入 {formatBytes(m.bytesIn)} · 出 {formatBytes(m.bytesOut)}
@@ -126,7 +126,7 @@ export function TrafficPage() {
                   <tr key={m.id} className="border-b border-line/70 last:border-0">
                     <td className="px-4 py-3 font-medium">{m.name}</td>
                     <td className="px-4 py-3 font-mono text-xs uppercase">{m.proto}</td>
-                    <td className="px-4 py-3 text-ink-soft">{m.agentName}</td>
+                    <td className="px-4 py-3 text-ink-soft">{m.nodeName}</td>
                     <td className="px-4 py-3 font-mono text-xs tabular-nums">{formatBytes(m.bytesIn)}</td>
                     <td className="px-4 py-3 font-mono text-xs tabular-nums">{formatBytes(m.bytesOut)}</td>
                     <td className="px-4 py-3 font-mono tabular-nums">{m.activeConns}</td>

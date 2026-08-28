@@ -29,7 +29,7 @@ async function main() {
   log("演示后有流量", /今日入站\s+[1-9]/.test(body) || /\d+\s*B/.test(body));
 
   const routes = [
-    ["/agents", "节点"],
+    ["/nodes", "节点"],
     ["/mappings", "映射"],
     ["/traffic", "流量"],
     ["/audit", "审计"],
@@ -46,7 +46,7 @@ async function main() {
     }
     if (path === "/deploy") {
       log("部署含入口程序", t.includes("umbrad") || t.includes("入口"));
-      log("部署含 Agent 安装", t.includes("umbra-agent") || t.includes("安装"));
+      log("部署含节点安装", t.includes("umbra-node") || t.includes("安装"));
     }
   }
 

@@ -14,7 +14,7 @@ export const ARCHS: { id: Arch; label: string }[] = [
 ];
 
 export const DOCKERHUB_GATE = "chenow9/umbrad";
-export const DOCKERHUB_AGENT = "chenow9/umbra-agent";
+export const DOCKERHUB_NODE = "chenow9/umbra-node";
 
 export function platformLabel(os: string, arch: string) {
   const p = PLATFORMS.find((x) => x.id === os)?.label ?? os;
@@ -25,7 +25,7 @@ function goos(platform: Platform) {
   return platform === "docker" ? "linux" : platform;
 }
 
-export function binaryName(kind: "umbrad" | "umbra-agent", platform: Platform, arch: Arch) {
+export function binaryName(kind: "umbrad" | "umbra-node", platform: Platform, arch: Arch) {
   const ext = goos(platform) === "windows" ? ".exe" : "";
   return `${kind}_${goos(platform)}_${arch}${ext}`;
 }
@@ -37,7 +37,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/umbrad -tls-dir /var/lib/umbra -listen :4400 -http :8080 -bind 0.0.0.0
+ExecStart=/usr/local/bin/umbrad -tls-dir /var/lib/umbra -listen :4400 -http 127.0.0.1:8080 -bind 0.0.0.0
 ExecReload=/bin/kill -USR2 $MAINPID
 Restart=on-failure
 RestartSec=2
@@ -62,7 +62,7 @@ export const umbradPlist = `<?xml version="1.0" encoding="UTF-8"?>
     <string>-listen</string>
     <string>:4400</string>
     <string>-http</string>
-    <string>:8080</string>
+    <string>127.0.0.1:8080</string>
     <string>-bind</string>
     <string>0.0.0.0</string>
   </array>
@@ -78,7 +78,7 @@ export function umbradWin(arch: Arch) {
   const bin = binaryName("umbrad", "windows", arch);
   return `mkdir "%ProgramFiles%\\Umbra"
 copy ${bin} "%ProgramFiles%\\Umbra\\umbrad.exe"
-sc.exe create UmbraGate binPath= "%ProgramFiles%\\Umbra\\umbrad.exe -tls-dir C:\\ProgramData\\umbra -listen :4400 -http :8080 -bind 0.0.0.0" start= auto
+sc.exe create UmbraGate binPath= "%ProgramFiles%\\Umbra\\umbrad.exe -tls-dir C:\\ProgramData\\umbra -listen :4400 -http 127.0.0.1:8080 -bind 0.0.0.0" start= auto
 sc.exe start UmbraGate
 `;
 }
@@ -96,7 +96,7 @@ services:
     cap_add:
       - NET_ADMIN
       - NET_BIND_SERVICE
-    command: ["-listen", ":4400", "-http", ":8080", "-bind", "0.0.0.0", "-tls-dir", "/var/lib/umbra"]
+    command: ["-listen", ":4400", "-http", "127.0.0.1:8080", "-bind", "0.0.0.0", "-tls-dir", "/var/lib/umbra"]
     volumes:
       - umbra-tls:/var/lib/umbra
     restart: unless-stopped
@@ -106,7 +106,7 @@ volumes:
 `;
 }
 
-export function agentUnit(token: string) {
+export function nodeUnit(token: string) {
   return `[Unit]
 Description=Umbra node
 After=network-online.target
@@ -114,7 +114,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/umbra-agent --server gate:4400 --tls-ca /etc/umbra/ca.crt
+ExecStart=/usr/local/bin/umbra-node --server gate:4400 --tls-ca /etc/umbra/ca.crt
 Environment=UMBRA_TOKEN=${token}
 Restart=on-failure
 RestartSec=2
@@ -124,16 +124,16 @@ WantedBy=multi-user.target
 `;
 }
 
-export function agentPlist(token: string) {
+export function nodePlist(token: string) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>io.umbra.agent</string>
+  <string>io.umbra.node</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/local/bin/umbra-agent</string>
+    <string>/usr/local/bin/umbra-node</string>
     <string>--server</string>
     <string>gate:4400</string>
     <string>--tls-ca</string>
@@ -154,24 +154,24 @@ export function agentPlist(token: string) {
 }
 
 export function enrollCmd(token: string) {
-  return `umbra-agent --server gate:4400 --tls-ca /etc/umbra/ca.crt --token ${token}`;
+  return `umbra-node --server gate:4400 --tls-ca /etc/umbra/ca.crt --token ${token}`;
 }
 
-export function agentWinService(token: string, arch: Arch = "amd64") {
-  const bin = binaryName("umbra-agent", "windows", arch);
+export function nodeWinService(token: string, arch: Arch = "amd64") {
+  const bin = binaryName("umbra-node", "windows", arch);
   return `${enrollCmd(token)}
 
 mkdir "%ProgramFiles%\\Umbra"
-copy ${bin} "%ProgramFiles%\\Umbra\\umbra-agent.exe"
-sc.exe create UmbraAgent binPath= "%ProgramFiles%\\Umbra\\umbra-agent.exe --server gate:4400 --tls-ca C:\\ProgramData\\umbra\\ca.crt --token ${token}" start= auto
-sc.exe start UmbraAgent
+copy ${bin} "%ProgramFiles%\\Umbra\\umbra-node.exe"
+sc.exe create UmbraNode binPath= "%ProgramFiles%\\Umbra\\umbra-node.exe --server gate:4400 --tls-ca C:\\ProgramData\\umbra\\ca.crt --token ${token}" start= auto
+sc.exe start UmbraNode
 `;
 }
 
-export function agentCompose(token: string, arch: Arch) {
+export function nodeCompose(token: string, arch: Arch) {
   return `services:
-  umbra-agent:
-    image: ${DOCKERHUB_AGENT}:\${UMBRA_TAG:-latest}
+  umbra-node:
+    image: ${DOCKERHUB_NODE}:\${UMBRA_TAG:-latest}
     platform: linux/${arch}
     network_mode: host
     environment:
@@ -205,27 +205,27 @@ ${umbradPlist.trim()}
   return umbradWin(arch);
 }
 
-export function agentInstall(platform: Platform, arch: Arch, token: string) {
-  const bin = binaryName("umbra-agent", platform, arch);
-  if (platform === "docker") return agentCompose(token, arch);
+export function nodeInstall(platform: Platform, arch: Arch, token: string) {
+  const bin = binaryName("umbra-node", platform, arch);
+  if (platform === "docker") return nodeCompose(token, arch);
   if (platform === "linux") {
     return `${enrollCmd(token)}
 
-install -m 755 ${bin} /usr/local/bin/umbra-agent
-sudo systemctl enable --now umbra-agent
+install -m 755 ${bin} /usr/local/bin/umbra-node
+sudo systemctl enable --now umbra-node
 
-${agentUnit(token).trim()}
+${nodeUnit(token).trim()}
 `;
   }
   if (platform === "darwin") {
     return `${enrollCmd(token)}
 
-install -m 755 ${bin} /usr/local/bin/umbra-agent
-sudo cp io.umbra.agent.plist /Library/LaunchDaemons/
-sudo launchctl load /Library/LaunchDaemons/io.umbra.agent.plist
+install -m 755 ${bin} /usr/local/bin/umbra-node
+sudo cp io.umbra.node.plist /Library/LaunchDaemons/
+sudo launchctl load /Library/LaunchDaemons/io.umbra.node.plist
 
-${agentPlist(token).trim()}
+${nodePlist(token).trim()}
 `;
   }
-  return agentWinService(token, arch);
+  return nodeWinService(token, arch);
 }

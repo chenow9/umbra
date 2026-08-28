@@ -35,7 +35,11 @@ func CidrAllowed(ip string, cidrs string) bool {
 	}
 	for _, raw := range list {
 		if !strings.Contains(raw, "/") {
-			raw += "/32"
+			if parsed.To4() != nil {
+				raw += "/32"
+			} else {
+				raw += "/128"
+			}
 		}
 		_, netw, err := net.ParseCIDR(raw)
 		if err != nil {

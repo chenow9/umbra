@@ -8,10 +8,14 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/scrypt"
@@ -19,11 +23,13 @@ import (
 	"umbra/internal/wire"
 )
 
+var errPersist = errors.New("状态未能落盘")
+
 type Console struct {
-	Gate     *gate.Server
-	Listen   string
-	CAFile   string
-	AgentBin string
+	Gate       *gate.Server
+	Listen     string
+	CAFile     string
+	NodeBin    string
 	UIDir      string
 	UIUpstream string
 	SkipAuth   bool
@@ -32,8 +38,9 @@ type Console struct {
 	mu          sync.Mutex
 	ownerHash   string
 	ownerSecret string
-	agents      map[string]*agentRec
+	nodes       map[string]*nodeRec
 	maps        map[string]*mapRec
+	tickets     map[string]*ticketRec
 	audit       []auditRec
 	frames      []frameRec
 	samples     []sampleRec
@@ -41,7 +48,7 @@ type Console struct {
 	seq         int64
 }
 
-type agentRec struct {
+type nodeRec struct {
 	ID, Name, Comment, OS, Arch, Version, Addr, Token, Status string
 	Enabled                                                   bool
 	Created                                                   time.Time
@@ -49,17 +56,27 @@ type agentRec struct {
 }
 
 type mapRec struct {
-	Spec         wire.Mapping
-	AgentID      string
-	ListenState  string
-	PushState    string
-	ListenError  string
-	BytesIn      int64
-	BytesOut     int64
-	Created      time.Time
-	Updated      time.Time
-	LastProbe    *time.Time
-	LastPreview  string
+	Spec        wire.Mapping `json:"Spec"`
+	NodeID      string       `json:"NodeID"`
+	LegacyNode  string       `json:"AgentID,omitempty"`
+	ListenState string       `json:"ListenState"`
+	PushState   string       `json:"PushState"`
+	ListenError string       `json:"ListenError"`
+	BytesIn     int64        `json:"BytesIn"`
+	BytesOut    int64        `json:"BytesOut"`
+	Created     time.Time    `json:"Created"`
+	Updated     time.Time    `json:"Updated"`
+	LastProbe   *time.Time   `json:"LastProbe"`
+	LastPreview string       `json:"LastPreview"`
+}
+
+type ticketRec struct {
+	ID        string    `json:"id"`
+	MappingID string    `json:"mapping_id"`
+	Hash      string    `json:"hash"`
+	Label     string    `json:"label"`
+	Expires   time.Time `json:"expires"`
+	Created   time.Time `json:"created"`
 }
 
 type auditRec struct {
@@ -72,19 +89,20 @@ type auditRec struct {
 }
 
 type frameRec struct {
-	ID        int64     `json:"id"`
-	Ts        time.Time `json:"ts"`
-	AgentID   string    `json:"agentId"`
-	AgentName string    `json:"agentName"`
-	Dir       string    `json:"dir"`
-	Type      string    `json:"type"`
-	Body      string    `json:"body"`
+	ID       int64     `json:"id"`
+	Ts       time.Time `json:"ts"`
+	NodeID   string    `json:"nodeId"`
+	NodeName string    `json:"nodeName"`
+	Dir      string    `json:"dir"`
+	Type     string    `json:"type"`
+	Body     string    `json:"body"`
 }
 
 type sampleRec struct {
-	Ts   time.Time
-	In   int64
-	Out  int64
+	Ts  time.Time
+	In  int64
+	Out int64
+	By  map[string][2]int64
 }
 
 type hit struct {
@@ -93,81 +111,129 @@ type hit struct {
 }
 
 type persistFile struct {
-	OwnerHash   string              `json:"owner_hash"`
-	OwnerSecret string              `json:"owner_secret"`
-	Agents      []*agentRec         `json:"agents"`
-	Maps        []*mapRec           `json:"maps"`
-	Audit       []auditRec          `json:"audit"`
+	OwnerHash   string       `json:"owner_hash"`
+	OwnerSecret string       `json:"owner_secret"`
+	Nodes       []*nodeRec   `json:"nodes"`
+	LegacyNodes []*nodeRec   `json:"agents,omitempty"`
+	Maps        []*mapRec    `json:"maps"`
+	Tickets     []*ticketRec `json:"tickets"`
+	Audit       []auditRec   `json:"audit"`
 }
 
-func New(g *gate.Server, persist string) *Console {
+func New(g *gate.Server, persist string) (*Console, error) {
 	c := &Console{
 		Gate:    g,
 		Persist: persist,
-		agents:  map[string]*agentRec{},
+		nodes:   map[string]*nodeRec{},
 		maps:    map[string]*mapRec{},
+		tickets: map[string]*ticketRec{},
 		hits:    map[string]hit{},
 	}
-	c.load()
+	if err := c.load(); err != nil {
+		return nil, err
+	}
 	go c.sampleLoop()
-	return c
+	return c, nil
 }
 
 func (c *Console) sampleLoop() {
 	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
 	for range t.C {
-		var in, out int64
 		st := c.Gate.MappingStats()
-		for _, m := range st {
+		var in, out int64
+		by := map[string][2]int64{}
+		for id, m := range st {
 			in += m.In
 			out += m.Out
+			by[id] = [2]int64{m.In, m.Out}
 		}
 		c.mu.Lock()
-		c.samples = append(c.samples, sampleRec{Ts: time.Now(), In: in, Out: out})
-		if len(c.samples) > 2000 {
-			c.samples = c.samples[len(c.samples)-2000:]
+		for id, rec := range c.maps {
+			if s, ok := st[id]; ok {
+				rec.BytesIn, rec.BytesOut = s.In, s.Out
+			}
+		}
+		c.samples = append(c.samples, sampleRec{Ts: time.Now(), In: in, Out: out, By: by})
+		if len(c.samples) > 10000 {
+			c.samples = c.samples[len(c.samples)-10000:]
 		}
 		c.mu.Unlock()
 	}
 }
 
-func (c *Console) load() {
+func (c *Console) load() error {
 	raw, err := os.ReadFile(c.Persist)
 	if err != nil {
-		return
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	var p persistFile
-	if json.Unmarshal(raw, &p) != nil {
-		return
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("control.json 损坏，拒绝以空配置启动: %w", err)
 	}
 	c.ownerHash, c.ownerSecret = p.OwnerHash, p.OwnerSecret
-	for _, a := range p.Agents {
-		c.agents[a.ID] = a
+	legacy := p.Nodes
+	if len(legacy) == 0 {
+		legacy = p.LegacyNodes
+	}
+	for _, a := range legacy {
+		c.nodes[a.ID] = a
 		if a.Token != "" && a.Status != "revoked" {
 			c.Gate.SetToken(a.Token, a.ID)
 		}
 	}
-	byAgent := map[string][]wire.Mapping{}
+	byNode := map[string][]wire.Mapping{}
 	for _, m := range p.Maps {
+		if m.NodeID == "" {
+			m.NodeID = m.LegacyNode
+		}
+		m.LegacyNode = ""
+		if err := validateMapping(m.Spec.Proto, m.Spec.Mode, m.Spec.EntryPort, m.Spec.LocalHost, m.Spec.LocalPort); err != nil {
+			return fmt.Errorf("control.json mapping %s: %w", m.Spec.ID, err)
+		}
+		if m.Spec.Enabled {
+			if err := c.portTaken(m.Spec.ID, m.Spec); err != nil {
+				log.Printf("restore: disable %s: %v", m.Spec.ID, err)
+				m.Spec.Enabled = false
+			}
+		}
 		c.maps[m.Spec.ID] = m
-		byAgent[m.AgentID] = append(byAgent[m.AgentID], m.Spec)
+		byNode[m.NodeID] = append(byNode[m.NodeID], m.Spec)
 	}
-	for id, maps := range byAgent {
+	for id, maps := range byNode {
 		c.Gate.PutMappings(id, maps)
 	}
 	c.audit = p.Audit
+	now := time.Now()
+	for _, t := range p.Tickets {
+		if t == nil || t.Hash == "" {
+			continue
+		}
+		if !t.Expires.IsZero() && now.After(t.Expires) {
+			continue
+		}
+		c.tickets[t.ID] = t
+		c.Gate.SetTicket(t.Hash, t.MappingID, t.Expires)
+	}
+	return nil
 }
 
-func (c *Console) save() {
+func (c *Console) save() error {
 	p := persistFile{OwnerHash: c.ownerHash, OwnerSecret: c.ownerSecret}
-	for _, a := range c.agents {
+	for _, a := range c.nodes {
 		cp := *a
-		p.Agents = append(p.Agents, &cp)
+		p.Nodes = append(p.Nodes, &cp)
 	}
 	for _, m := range c.maps {
 		cp := *m
 		p.Maps = append(p.Maps, &cp)
+	}
+	for _, t := range c.tickets {
+		cp := *t
+		p.Tickets = append(p.Tickets, &cp)
 	}
 	p.Audit = c.audit
 	if len(p.Audit) > 200 {
@@ -175,15 +241,68 @@ func (c *Console) save() {
 	}
 	raw, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
-		return
+		log.Printf("persist marshal: %v", err)
+		return fmt.Errorf("%w: %v", errPersist, err)
 	}
-	_ = os.WriteFile(c.Persist, raw, 0o600)
+	if err := writeAtomic(c.Persist, raw, 0o600); err != nil {
+		log.Printf("persist write: %v", err)
+		return fmt.Errorf("%w: %v", errPersist, err)
+	}
+	return nil
+}
+
+func writeAtomic(path string, raw []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, "control-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	if _, err := f.Write(raw); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Chmod(tmp, mode); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return fsyncDir(dir)
+}
+
+func fsyncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil {
+		var errno syscall.Errno
+		if errors.As(err, &errno) && errno == syscall.EINVAL {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func newID(prefix string) string {
-	var b [6]byte
+	var b [16]byte
 	_, _ = rand.Read(b[:])
-	return fmt.Sprintf("%s_%s%s", prefix, hex.EncodeToString(b[:2]), hex.EncodeToString(b[2:]))
+	return fmt.Sprintf("%s_%s", prefix, hex.EncodeToString(b[:]))
 }
 
 func (c *Console) next() int64 {
@@ -200,13 +319,13 @@ func (c *Console) logAudit(action, target, detail string) {
 	}
 }
 
-func (c *Console) logFrame(agentID, dir, typ, body string) {
+func (c *Console) logFrame(nodeID, dir, typ, body string) {
 	name := ""
-	if a := c.agents[agentID]; a != nil {
+	if a := c.nodes[nodeID]; a != nil {
 		name = a.Name
 	}
 	c.frames = append([]frameRec{{
-		ID: c.next(), Ts: time.Now(), AgentID: agentID, AgentName: name, Dir: dir, Type: typ, Body: body,
+		ID: c.next(), Ts: time.Now(), NodeID: nodeID, NodeName: name, Dir: dir, Type: typ, Body: body,
 	}}, c.frames...)
 	if len(c.frames) > 40 {
 		c.frames = c.frames[:40]
@@ -265,30 +384,43 @@ func split3(s string) []string {
 }
 
 func (c *Console) setup(pw string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.ownerHash != "" {
-		return fmt.Errorf("口令已经设过")
-	}
 	if len(pw) < 8 || len(pw) > 128 {
 		return fmt.Errorf("口令至少 8 位")
+	}
+	c.mu.Lock()
+	taken := c.ownerHash != ""
+	c.mu.Unlock()
+	if taken {
+		return fmt.Errorf("口令已经设过")
 	}
 	h, err := hashPassword(pw)
 	if err != nil {
 		return err
 	}
 	sec := make([]byte, 32)
-	_, _ = rand.Read(sec)
+	if _, err := rand.Read(sec); err != nil {
+		return err
+	}
+	secret := hex.EncodeToString(sec)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ownerHash != "" {
+		return fmt.Errorf("口令已经设过")
+	}
 	c.ownerHash = h
-	c.ownerSecret = hex.EncodeToString(sec)
-	c.save()
+	c.ownerSecret = secret
+	if err := c.save(); err != nil {
+		c.ownerHash = ""
+		c.ownerSecret = ""
+		return err
+	}
 	return nil
 }
 
 func (c *Console) login(pw, ip string) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.ownerHash == "" {
+		c.mu.Unlock()
 		return fmt.Errorf("先设置口令")
 	}
 	now := time.Now()
@@ -300,9 +432,12 @@ func (c *Console) login(pw, ip string) error {
 	h.t = now
 	c.hits[ip] = h
 	if h.n > 8 {
+		c.mu.Unlock()
 		return fmt.Errorf("试得太勤，过一会儿再来")
 	}
-	if !checkPassword(pw, c.ownerHash) {
+	stored := c.ownerHash
+	c.mu.Unlock()
+	if !checkPassword(pw, stored) {
 		return fmt.Errorf("口令不对")
 	}
 	return nil
@@ -356,18 +491,18 @@ func (c *Console) authStatus(cookie string) map[string]bool {
 	return map[string]bool{"required": true, "configured": cfg, "signedIn": cfg && c.validCookie(cookie)}
 }
 
-func (c *Console) spawnAgent(token string) {
-	if c.AgentBin == "" {
+func (c *Console) spawnNode(token string) {
+	if c.NodeBin == "" {
 		return
 	}
-	if _, err := os.Stat(c.AgentBin); err != nil {
+	if _, err := os.Stat(c.NodeBin); err != nil {
 		return
 	}
 	args := []string{"--server", c.Listen, "--token", token}
 	if c.CAFile != "" {
 		args = append(args, "--tls-ca", c.CAFile)
 	}
-	cmd := exec.Command(c.AgentBin, args...)
+	cmd := exec.Command(c.NodeBin, args...)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	_ = cmd.Start()

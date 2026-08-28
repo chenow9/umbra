@@ -12,7 +12,7 @@ import {
   deleteMapping,
   issueVisitor,
   knockMapping,
-  listAgents,
+  listNodes,
   listMappings,
   probeMapping,
   setMappingEnabled,
@@ -26,25 +26,25 @@ import type { Mapping, MappingMode, Proto } from "@/lib/umbra/types";
 export function MappingsPage() {
   const qc = useQueryClient();
   const mappings = useQuery({ queryKey: ["umbra", "mappings"], queryFn: () => listMappings() });
-  const agents = useQuery({ queryKey: ["umbra", "agents"], queryFn: () => listAgents() });
+  const nodes = useQuery({ queryKey: ["umbra", "nodes"], queryFn: () => listNodes() });
   const [composing, setComposing] = useState(false);
-  const hasAgent = (agents.data ?? []).some((a) => a.status !== "revoked");
+  const hasNode = (nodes.data ?? []).some((a) => a.status !== "revoked");
   const list = mappings.data ?? [];
   const empty = !mappings.isLoading && list.length === 0;
-  const showForm = hasAgent && (composing || empty);
+  const showForm = hasNode && (composing || empty);
 
   return (
     <AppShell
       title="映射"
       action={
-        hasAgent && !empty ? (
+        hasNode && !empty ? (
           <Button type="button" onClick={() => setComposing((v) => !v)}>
             {composing ? "收起" : "新建映射"}
           </Button>
         ) : null
       }
     >
-      {!hasAgent ? (
+      {!hasNode ? (
         <p className="max-w-md text-sm leading-relaxed text-ink-soft">
           先登记一台节点，才能把映射下发到它。
         </p>
@@ -61,7 +61,7 @@ export function MappingsPage() {
         />
       ) : null}
 
-      {hasAgent && !empty ? (
+      {hasNode && !empty ? (
         <>
           <div className="flex flex-col gap-3 md:hidden">
             {list.map((m) => (
@@ -129,7 +129,7 @@ function MappingActions({ mapping: m }: { mapping: Mapping }) {
     mutationFn: () => issueVisitor({ data: { id: m.id } }),
     onSuccess: (r) => {
       void navigator.clipboard.writeText(r.visitCmd).catch(() => undefined);
-      toast.success("访客命令已复制，只显示这一次");
+      toast.success("访客命令已复制，只显示这一次。本机 L4 监听，不走 HTTP。");
       void qc.invalidateQueries({ queryKey: ["umbra"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -148,7 +148,7 @@ function MappingActions({ mapping: m }: { mapping: Mapping }) {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const live = m.enabled && m.agentStatus === "online";
+  const live = m.enabled && m.nodeStatus === "online";
 
   return (
     <div className="flex flex-wrap justify-end gap-1">
@@ -212,7 +212,7 @@ function MappingCard({ mapping: m }: { mapping: Mapping }) {
         <div className="min-w-0">
           <p className="truncate font-medium">{m.name}</p>
           <p className="mt-0.5 text-xs text-stone">
-            {m.agentName} · {m.proto.toUpperCase()} · {modeLabel[m.mode]}
+            {m.nodeName} · {m.proto.toUpperCase()} · {modeLabel[m.mode]}
           </p>
         </div>
         <StatusDot status={m.listenState} label={listenLabel[m.listenState] ?? m.listenState} />
@@ -221,7 +221,7 @@ function MappingCard({ mapping: m }: { mapping: Mapping }) {
         {formatPort(m.entryPort, m.mode)} → {m.localHost}:{m.localPort}
       </p>
       <p className="mt-1 text-xs text-stone">
-        {pushLabel[m.pushState] ?? m.pushState} · {formatBytes(m.bytesIn + m.bytesOut)}
+        {pushLabel[m.pushState] ?? m.pushState} · 入 {formatBytes(m.bytesIn)} / 出 {formatBytes(m.bytesOut)}
       </p>
       {m.listenError ? <p className="mt-1 text-xs text-rose">{m.listenError}</p> : null}
       <ProbeNote mapping={m} />
@@ -239,7 +239,7 @@ function MappingRow({ mapping: m }: { mapping: Mapping }) {
         <div className="font-medium">{m.name}</div>
         <ProbeNote mapping={m} />
       </td>
-      <td className="px-4 py-3 text-ink-soft">{m.agentName}</td>
+      <td className="px-4 py-3 text-ink-soft">{m.nodeName}</td>
       <td className="px-4 py-3 font-mono text-xs uppercase">{m.proto}</td>
       <td className="px-4 py-3">{modeLabel[m.mode]}</td>
       <td className="px-4 py-3 font-mono tabular-nums">{formatPort(m.entryPort, m.mode)}</td>
@@ -254,7 +254,9 @@ function MappingRow({ mapping: m }: { mapping: Mapping }) {
         </div>
       </td>
       <td className="px-4 py-3 font-mono text-xs tabular-nums text-ink-soft">
-        {formatBytes(m.bytesIn + m.bytesOut)}
+        入 {formatBytes(m.bytesIn)}
+        <br />
+        出 {formatBytes(m.bytesOut)}
       </td>
       <td className="px-4 py-3">
         <MappingActions mapping={m} />
@@ -272,9 +274,9 @@ function NewMappingPanel({
   onClose: () => void;
   allowCancel: boolean;
 }) {
-  const agents = useQuery({ queryKey: ["umbra", "agents"], queryFn: () => listAgents() });
-  const usable = (agents.data ?? []).filter((a) => a.status !== "revoked");
-  const [agentId, setAgentId] = useState("");
+  const nodes = useQuery({ queryKey: ["umbra", "nodes"], queryFn: () => listNodes() });
+  const usable = (nodes.data ?? []).filter((a) => a.status !== "revoked");
+  const [nodeId, setNodeId] = useState("");
   const [name, setName] = useState("");
   const [proto, setProto] = useState<Proto>("tcp");
   const [mode, setMode] = useState<MappingMode>("spa");
@@ -284,13 +286,13 @@ function NewMappingPanel({
   const [maxConns, setMaxConns] = useState("64");
   const [rateKbps, setRateKbps] = useState("0");
   const [allowCidrs, setAllowCidrs] = useState("");
-  const selected = agentId || usable[0]?.id || "";
+  const selected = nodeId || usable[0]?.id || "";
 
   const create = useMutation({
     mutationFn: () =>
       createMapping({
         data: {
-          agentId: selected,
+          nodeId: selected,
           name,
           proto,
           mode,
@@ -340,7 +342,7 @@ function NewMappingPanel({
           <SelectField
             label="节点"
             value={selected}
-            onValueChange={setAgentId}
+            onValueChange={setNodeId}
             options={usable.map((a) => ({
               value: a.id,
               label: `${a.name}（${a.status === "online" ? "在线" : "离线"}）`,

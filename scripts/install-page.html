@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="/__grok/install/styles.css" />
     <script>
       (function () {
-        var ua = navigator.userAgent || "";
+        var ua = navigator.userNode || "";
         var touch = navigator.maxTouchPoints || 0;
         var isiPad = /iPad/.test(ua) || (/Macintosh/.test(ua) && touch > 1);
         var isiPhone = /iPhone|iPod/.test(ua);

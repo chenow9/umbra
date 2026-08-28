@@ -1,4 +1,4 @@
-/** M1 控制通道：长度前缀 JSON 的语义。节点不持有映射配置。 */
+/** 控制通道：TLS 上 yamux。第一条流是长度前缀 JSON；数据流首帧 StreamOpen，之后只转 L4。节点不持有映射配置。 */
 
 export type FrameDir = "c2s" | "s2c";
 

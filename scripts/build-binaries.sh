@@ -10,7 +10,8 @@ build() {
   if [ "$goos" = "windows" ]; then ext=".exe"; fi
   echo "build $goos/$goarch"
   GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "dist/umbrad_${goos}_${goarch}${ext}" ./cmd/umbrad
-  GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "dist/umbra-agent_${goos}_${goarch}${ext}" ./cmd/umbra-agent
+  GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "dist/umbra-node_${goos}_${goarch}${ext}" ./cmd/umbra-node
+  GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "dist/umbra-visit_${goos}_${goarch}${ext}" ./cmd/umbra-visit
 }
 build linux amd64
 build linux arm64
@@ -19,5 +20,6 @@ build darwin arm64
 build windows amd64
 build windows arm64
 install -m 755 dist/umbrad_linux_amd64 /usr/local/bin/umbrad
-install -m 755 dist/umbra-agent_linux_amd64 /usr/local/bin/umbra-agent
+install -m 755 dist/umbra-node_linux_amd64 /usr/local/bin/umbra-node
+install -m 755 dist/umbra-visit_linux_amd64 /usr/local/bin/umbra-visit
 ls -l dist

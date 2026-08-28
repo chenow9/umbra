@@ -12,13 +12,19 @@ concurrency:
 permissions:
   contents: read
   actions: write
+  id-token: write
+  attestations: write
 
 env:
   GATE_IMAGE: chenow9/umbrad
-  AGENT_IMAGE: chenow9/umbra-agent
+  NODE_IMAGE: chenow9/umbra-node
 
 jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
   build-push:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -43,11 +49,11 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-') }}
 
-      - name: Agent metadata
-        id: meta-agent
+      - name: Node metadata
+        id: meta-node
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.AGENT_IMAGE }}
+          images: ${{ env.NODE_IMAGE }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -63,20 +69,22 @@ jobs:
           push: true
           tags: ${{ steps.meta-gate.outputs.tags }}
           labels: ${{ steps.meta-gate.outputs.labels }}
-          provenance: false
+          provenance: true
+          sbom: true
           cache-from: type=gha,scope=umbra
           cache-to: type=gha,mode=max,scope=umbra
 
-      - name: Build and push umbra-agent
+      - name: Build and push umbra-node
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
-          target: umbra-agent
+          target: umbra-node
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta-agent.outputs.tags }}
-          labels: ${{ steps.meta-agent.outputs.labels }}
-          provenance: false
+          tags: ${{ steps.meta-node.outputs.tags }}
+          labels: ${{ steps.meta-node.outputs.labels }}
+          provenance: true
+          sbom: true
           cache-from: type=gha,scope=umbra
           cache-to: type=gha,mode=max,scope=umbra

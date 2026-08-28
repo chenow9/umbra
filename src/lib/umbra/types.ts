@@ -1,14 +1,14 @@
-export type AgentStatus = "online" | "offline" | "revoked";
+export type NodeStatus = "online" | "offline" | "revoked";
 export type Proto = "tcp" | "udp";
 export type MappingMode = "visitor" | "spa" | "public";
 export type ListenState = "pending" | "listening" | "ready" | "disabled" | "error";
 export type PushState = "acked" | "pending_offline" | "error";
 
-export type Agent = {
+export type Node = {
   id: string;
   name: string;
   comment: string;
-  status: AgentStatus;
+  status: NodeStatus;
   addr: string | null;
   version: string | null;
   os: string;
@@ -23,9 +23,9 @@ export type Agent = {
 
 export type Mapping = {
   id: string;
-  agentId: string;
-  agentName: string;
-  agentStatus: AgentStatus;
+  nodeId: string;
+  nodeName: string;
+  nodeStatus: NodeStatus;
   name: string;
   proto: Proto;
   mode: MappingMode;
@@ -59,8 +59,8 @@ export type AuditItem = {
 };
 
 export type Overview = {
-  agentsOnline: number;
-  agentsTotal: number;
+  nodesOnline: number;
+  nodesTotal: number;
   mappingsActive: number;
   mappingsTotal: number;
   bytesInToday: number;
@@ -87,8 +87,8 @@ export type TrafficView = {
 export type ControlFrameRow = {
   id: number;
   ts: string;
-  agentId: string;
-  agentName: string;
+  nodeId: string;
+  nodeName: string;
   dir: "c2s" | "s2c";
   type: string;
   body: string;
@@ -101,7 +101,7 @@ export type ProbeResult = {
 };
 
 export type DemoResult = {
-  agentId: string;
+  nodeId: string;
   mappingId: string;
   bytesIn: number;
   bytesOut: number;
@@ -118,7 +118,7 @@ export type VisitorIssued = {
   expiresAt: string;
 };
 
-export type AgentIssued = {
+export type NodeIssued = {
   id: string;
   token: string;
   installCmd: string;

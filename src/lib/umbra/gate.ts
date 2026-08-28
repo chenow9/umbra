@@ -6,7 +6,7 @@ import type { MappingWire } from "./protocol";
 const TLS_DIR = process.env.UMBRA_TLS_DIR ?? "/tmp/umbra-tls";
 const SOCK = process.env.UMBRA_GATE_SOCK ?? join(TLS_DIR, "api.sock");
 const HTTP = process.env.UMBRA_GATE_API;
-const AGENT_BIN = process.env.UMBRA_AGENT_BIN ?? "/usr/local/bin/umbra-agent";
+const NODE_BIN = process.env.UMBRA_NODE_BIN ?? "/usr/local/bin/umbra-node";
 const SERVER = process.env.UMBRA_SERVER ?? "127.0.0.1:4400";
 const TLS_CA = process.env.UMBRA_TLS_CA ?? join(TLS_DIR, "ca.crt");
 
@@ -26,12 +26,12 @@ function boots() {
   return g.__umbraBoots__;
 }
 
-export function rememberToken(agentId: string, token: string) {
-  boots().set(agentId, token);
+export function rememberToken(nodeId: string, token: string) {
+  boots().set(nodeId, token);
 }
 
-export function recallToken(agentId: string) {
-  return boots().get(agentId);
+export function recallToken(nodeId: string) {
+  return boots().get(nodeId);
 }
 
 function gateFetch(path: string, init: RequestInit = {}, timeoutMs = 1500): Promise<Response> {
@@ -82,15 +82,15 @@ export async function gateHealth() {
   }
 }
 
-export async function gatePutToken(token: string, agentId: string) {
+export async function gatePutToken(token: string, nodeId: string) {
   await gateFetch(`/v1/tokens/${encodeURIComponent(token)}`, {
     method: "PUT",
-    body: JSON.stringify({ agent_id: agentId }),
+    body: JSON.stringify({ node_id: nodeId }),
   });
 }
 
-export async function gatePutMappings(agentId: string, mappings: MappingWire[]) {
-  await gateFetch(`/v1/agents/${encodeURIComponent(agentId)}/mappings`, {
+export async function gatePutMappings(nodeId: string, mappings: MappingWire[]) {
+  await gateFetch(`/v1/nodes/${encodeURIComponent(nodeId)}/mappings`, {
     method: "PUT",
     body: JSON.stringify(mappings),
   });
@@ -103,49 +103,49 @@ export async function gateKnock(mappingId: string) {
   return j.until ?? null;
 }
 
-export async function gateRevoke(agentId: string) {
-  await gateFetch(`/v1/agents/${encodeURIComponent(agentId)}/revoke`, {
+export async function gateRevoke(nodeId: string) {
+  await gateFetch(`/v1/nodes/${encodeURIComponent(nodeId)}/revoke`, {
     method: "POST",
   }, 1000);
 }
 
-export async function gateDisconnect(agentId: string) {
-  await gateFetch(`/v1/agents/${encodeURIComponent(agentId)}/disconnect`, {
+export async function gateDisconnect(nodeId: string) {
+  await gateFetch(`/v1/nodes/${encodeURIComponent(nodeId)}/disconnect`, {
     method: "POST",
   }, 1000);
 }
 
-export async function gateAgentOnline(agentId: string) {
+export async function gateNodeOnline(nodeId: string) {
   try {
     const r = await gateFetch("/v1/status", {}, 250);
     if (!r.ok) return false;
     const j = (await r.json()) as { agents?: { id: string; online: boolean }[] };
-    return Boolean(j.agents?.some((a) => a.id === agentId && a.online));
+    return Boolean(j.agents?.some((a) => a.id === nodeId && a.online));
   } catch {
     return false;
   }
 }
 
-export function spawnAgent(agentId: string, token: string) {
-  const existing = kids().get(agentId);
+export function spawnNode(nodeId: string, token: string) {
+  const existing = kids().get(nodeId);
   if (existing && existing.exitCode == null) return;
   const args = ["--server", SERVER, "--token", token];
   if (TLS_CA) args.push("--tls-ca", TLS_CA);
-  const child = spawn(AGENT_BIN, args, {
+  const child = spawn(NODE_BIN, args, {
     stdio: "ignore",
     detached: false,
   });
   child.on("exit", () => {
-    const cur = kids().get(agentId);
-    if (cur === child) kids().delete(agentId);
+    const cur = kids().get(nodeId);
+    if (cur === child) kids().delete(nodeId);
   });
-  kids().set(agentId, child);
+  kids().set(nodeId, child);
 }
 
-export function stopAgent(agentId: string) {
-  const child = kids().get(agentId);
+export function stopNode(nodeId: string) {
+  const child = kids().get(nodeId);
   if (!child) return;
-  kids().delete(agentId);
+  kids().delete(nodeId);
   try {
     child.kill("SIGTERM");
   } catch {
@@ -153,21 +153,21 @@ export function stopAgent(agentId: string) {
   }
 }
 
-export async function waitOnline(agentId: string, ms = 2500) {
+export async function waitOnline(nodeId: string, ms = 2500) {
   const t0 = Date.now();
-  if (await gateAgentOnline(agentId)) return true;
+  if (await gateNodeOnline(nodeId)) return true;
   while (Date.now() - t0 < ms) {
     await new Promise((r) => setTimeout(r, 50));
-    if (await gateAgentOnline(agentId)) return true;
+    if (await gateNodeOnline(nodeId)) return true;
   }
   return false;
 }
 
-export async function ensureAgentOnline(agentId: string, token?: string) {
+export async function ensureNodeOnline(nodeId: string, token?: string) {
   if (!(await gateHealth())) return false;
-  if (token) await gatePutToken(token, agentId).catch(() => undefined);
-  if (await gateAgentOnline(agentId)) return true;
+  if (token) await gatePutToken(token, nodeId).catch(() => undefined);
+  if (await gateNodeOnline(nodeId)) return true;
   if (!token) return false;
-  spawnAgent(agentId, token);
-  return waitOnline(agentId, 2500);
+  spawnNode(nodeId, token);
+  return waitOnline(nodeId, 2500);
 }

@@ -1,7 +1,11 @@
 package gate
 
 import (
+	"crypto/sha256"
+	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -11,60 +15,154 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hashicorp/yamux"
+
+	"umbra/internal/muxcfg"
 	"umbra/internal/netutil"
 	"umbra/internal/policy"
+	"umbra/internal/preface"
 	"umbra/internal/stealth"
+	"umbra/internal/uplane"
 	"umbra/internal/wire"
+	"umbra/internal/xfer"
 )
+
+const (
+	maxHandshake      = 64
+	maxHandshakePerIP = 16
+	maxSessions       = 1024
+	maxSessionsPerIP  = 128
+)
+
+var (
+	handshakeDeadlineNs atomic.Int64
+	listenRetryWait     = 100 * time.Millisecond
+	listenRetryMax      = 8 * time.Second
+	listenTCPFn         atomic.Value
+	listenPacketFn      atomic.Value
+)
+
+type listenTCPFunc func(network, addr string) (net.Listener, error)
+type listenPacketFunc func(network, addr string) (net.PacketConn, error)
+
+func init() {
+	handshakeDeadlineNs.Store(int64(12 * time.Second))
+	listenTCPFn.Store(listenTCPFunc(netutil.Listen))
+	listenPacketFn.Store(listenPacketFunc(netutil.ListenPacket))
+}
+
+func doListenTCP(network, addr string) (net.Listener, error) {
+	return listenTCPFn.Load().(listenTCPFunc)(network, addr)
+}
+
+func doListenPacket(network, addr string) (net.PacketConn, error) {
+	return listenPacketFn.Load().(listenPacketFunc)(network, addr)
+}
 
 type Mapping = wire.Mapping
 
-type agentConn struct {
-	id     string
-	addr   string
-	os     string
-	arch   string
-	ver    string
-	raw    net.Conn
-	conn   *wire.Conn
-	online bool
-	have   map[string]Mapping
-	mu     sync.Mutex
+type nodeConn struct {
+	id        string
+	addr      string
+	os        string
+	arch      string
+	ver       string
+	raw       net.Conn
+	sess      *yamux.Session
+	conn      *wire.Conn
+	online    bool
+	udpCookie []byte
+	udpAddr   net.Addr
+	udpBindOK bool
+	udpBound  bool
+	udpSeen   atomic.Int64
+	udpIn     *uplane.Opener
+	udpOut    *uplane.Sealer
 }
 
 type udpSess struct {
-	pc     net.PacketConn
-	raddr  net.Addr
-	sid    uint32
-	timer  *time.Timer
-	idle   time.Duration
+	pc       net.PacketConn
+	raddr    net.Addr
+	st       net.Conn
+	timer    *time.Timer
+	idle     time.Duration
+	deadline atomic.Int64
+	visitID  string
+	flowID   string
+	peerKey  string
+	path     int32
+}
+
+const (
+	udpPathNone   int32 = 0
+	udpPathUPlane int32 = 1
+	udpPathYamux  int32 = 2
+)
+
+type UDPMode string
+
+const (
+	UDPAuto     UDPMode = "auto"
+	UDPRequired UDPMode = "required"
+	UDPYamux    UDPMode = "yamux"
+)
+
+func ParseUDPMode(s string) UDPMode {
+	switch s {
+	case "required", "uplane-required", "uplane":
+		return UDPRequired
+	case "yamux":
+		return UDPYamux
+	default:
+		return UDPAuto
+	}
 }
 
 type entry struct {
-	spec     Mapping
-	agentID  string
-	ln       net.Listener
-	pc       net.PacketConn
-	active   int
-	window   policy.Window
-	udpSess  map[string]*udpSess
-	in       atomic.Int64
-	out      atomic.Int64
+	spec      Mapping
+	nodeID    string
+	ln        net.Listener
+	pc        net.PacketConn
+	listenErr string
+	mu        sync.Mutex
+	window    policy.Window
+	udpSess   map[string]*udpSess
+	active    atomic.Int32
+	in        atomic.Int64
+	out       atomic.Int64
+	pin       atomic.Int64
+	pout      atomic.Int64
+	stopCh       chan struct{}
+	stopOnce     sync.Once
+	udpViaUplane atomic.Bool
+	udpViaYamux  atomic.Bool
+}
+
+type ticketEnt struct {
+	MappingID string
+	Until     time.Time
 }
 
 type Server struct {
-	bind    string
-	stealth *stealth.Engine
-	mu      sync.Mutex
-	tok     map[string]string
-	ag      map[string]*agentConn
-	ent     map[string]*entry
-	want    map[string][]Mapping
-	grant   map[string]time.Time
-	sid     atomic.Uint32
-	ctrl    net.Listener
-	api     net.Listener
-	draining atomic.Bool
+	bind     string
+	stealth  *stealth.Engine
+	tls      *tls.Config
+	mu       sync.Mutex
+	tok      map[string]string
+	nodes    map[string]*nodeConn
+	ent      map[string]*entry
+	want     map[string][]Mapping
+	grant    map[string]time.Time
+	tix       map[string]ticketEnt
+	visits    map[string]*visitUDP
+	ctrl      net.Listener
+	api       net.Listener
+	udpPC     net.PacketConn
+	udpMode   UDPMode
+	hsQuota   *ipQuota
+	sessQuota *ipQuota
+	splices   atomic.Int32
+	draining  atomic.Bool
 }
 
 func New(bind string, st *stealth.Engine) *Server {
@@ -75,11 +173,76 @@ func New(bind string, st *stealth.Engine) *Server {
 		bind:    bind,
 		stealth: st,
 		tok:     map[string]string{},
-		ag:      map[string]*agentConn{},
+		nodes:   map[string]*nodeConn{},
 		ent:     map[string]*entry{},
 		want:    map[string][]Mapping{},
 		grant:   map[string]time.Time{},
+		tix:       map[string]ticketEnt{},
+		visits:    map[string]*visitUDP{},
+		udpMode:   UDPAuto,
+		hsQuota:   newIPQuota(maxHandshake, maxHandshakePerIP),
+		sessQuota: newIPQuota(maxSessions, maxSessionsPerIP),
 	}
+}
+
+func (s *Server) SetUDPMode(m UDPMode) {
+	if m == "" {
+		m = UDPAuto
+	}
+	s.udpMode = m
+}
+
+type ipQuota struct {
+	mu     sync.Mutex
+	n      map[string]int
+	total  int
+	global int
+	limit  int
+}
+
+func newIPQuota(global, perIP int) *ipQuota {
+	return &ipQuota{
+		n:      map[string]int{},
+		global: global,
+		limit:  perIP,
+	}
+}
+
+func (q *ipQuota) acquire(ip string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.total >= q.global || q.n[ip] >= q.limit {
+		return false
+	}
+	q.n[ip]++
+	q.total++
+	return true
+}
+
+func (q *ipQuota) release(ip string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.n[ip] <= 0 {
+		return
+	}
+	q.n[ip]--
+	q.total--
+	if q.n[ip] == 0 {
+		delete(q.n, ip)
+	}
+}
+
+func (q *ipQuota) held(ip string) int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.n[ip]
+}
+
+func (s *Server) SetTLS(cfg *tls.Config) { s.tls = cfg }
+
+func TicketHash(ticket string) string {
+	sum := sha256.Sum256([]byte(ticket))
+	return hex.EncodeToString(sum[:])
 }
 
 func (s *Server) SetListeners(ctrl, api net.Listener) {
@@ -93,41 +256,123 @@ func (s *Server) ServeControl(ln net.Listener) error {
 	for {
 		c, err := ln.Accept()
 		if err != nil {
-			return err
+			if s.draining.Load() {
+				return err
+			}
+			time.Sleep(80 * time.Millisecond)
+			continue
 		}
-		go s.handleAgent(c)
+		go s.handleConn(c)
 	}
 }
 
-func (s *Server) handleAgent(raw net.Conn) {
+func (s *Server) admitHS(ip string) bool    { return s.hsQuota.acquire(ip) }
+func (s *Server) releaseHS(ip string)       { s.hsQuota.release(ip) }
+func (s *Server) admitSess(ip string) bool  { return s.sessQuota.acquire(ip) }
+func (s *Server) releaseSess(ip string)     { s.sessQuota.release(ip) }
+func (s *Server) handshakeHeld(ip string) int { return s.hsQuota.held(ip) }
+func (s *Server) sessionHeld(ip string) int   { return s.sessQuota.held(ip) }
+
+func (s *Server) handleConn(raw net.Conn) {
 	defer raw.Close()
+	ip := policy.NormalizeIP(raw.RemoteAddr().String())
+	if !s.admitHS(ip) {
+		return
+	}
+	hsHeld := true
+	defer func() {
+		if hsHeld {
+			s.releaseHS(ip)
+		}
+	}()
+	deadline := time.Now().Add(time.Duration(handshakeDeadlineNs.Load()))
+	_ = raw.SetDeadline(deadline)
+	if s.tls != nil {
+		tc := tls.Server(raw, s.tls.Clone())
+		if err := tc.Handshake(); err != nil {
+			return
+		}
+		raw = tc
+		_ = raw.SetDeadline(deadline)
+	}
+	kind, cred, err := preface.Read(raw)
+	if err != nil {
+		return
+	}
+	switch kind {
+	case preface.KindNode:
+		if s.lookupToken(cred) == "" {
+			return
+		}
+	case preface.KindVisit:
+		if _, ok := s.lookupTicket(TicketHash(cred)); !ok {
+			return
+		}
+	default:
+		return
+	}
+	s.releaseHS(ip)
+	hsHeld = false
+
+	if !s.admitSess(ip) {
+		return
+	}
+	defer s.releaseSess(ip)
+
+	sess, err := yamux.Server(raw, muxcfg.Config())
+	if err != nil {
+		return
+	}
+	defer sess.Close()
+	_ = raw.SetDeadline(deadline)
+	ctrl, err := sess.AcceptStream()
+	if err != nil {
+		return
+	}
+	wc := wire.NewConn(ctrl)
+	_ = ctrl.SetDeadline(deadline)
+	env, err := wc.Read()
+	if err != nil {
+		return
+	}
+	_ = ctrl.SetDeadline(time.Time{})
 	_ = raw.SetDeadline(time.Time{})
-	wc := wire.NewConn(raw)
-	var ac *agentConn
+	switch env.Type {
+	case "Enroll":
+		s.runNode(raw, sess, wc, env)
+	case "Visit":
+		s.runVisitor(raw, sess, wc, env)
+	default:
+		_ = wc.SendJSON("Dropped", map[string]string{"reason": "bad_hello"})
+	}
+}
+
+func (s *Server) runNode(raw net.Conn, sess *yamux.Session, wc *wire.Conn, first wire.Envelope) {
+	var ac *nodeConn
+	if err := s.onJSON(raw, sess, wc, &ac, first); err != nil {
+		log.Printf("node json: %v", err)
+		return
+	}
 	for {
-		f, err := wc.Read()
+		env, err := wc.Read()
 		if err != nil {
 			if ac != nil {
 				s.offline(ac)
 			}
 			return
 		}
-		switch f.Kind {
-		case wire.KindJSON:
-			if err := s.onJSON(raw, wc, &ac, f); err != nil {
-				log.Printf("agent json: %v", err)
-				return
-			}
-		case wire.KindData, wire.KindClose:
+		if err := s.onJSON(raw, sess, wc, &ac, env); err != nil {
+			log.Printf("node json: %v", err)
 			if ac != nil {
-				s.onStream(ac, f)
+				s.offline(ac)
 			}
+			return
 		}
 	}
 }
 
-func (s *Server) onJSON(raw net.Conn, wc *wire.Conn, ac **agentConn, f wire.Frame) error {
-	switch f.Type {
+func (s *Server) onJSON(raw net.Conn, sess *yamux.Session, wc *wire.Conn, ac **nodeConn, env wire.Envelope) error {
+	switch env.Type {
 	case "Enroll":
 		var b struct {
 			Bootstrap string `json:"bootstrap"`
@@ -136,137 +381,199 @@ func (s *Server) onJSON(raw net.Conn, wc *wire.Conn, ac **agentConn, f wire.Fram
 			Arch      string `json:"arch"`
 			Version   string `json:"version"`
 		}
-		if err := json.Unmarshal(f.Body, &b); err != nil {
+		if err := json.Unmarshal(env.Body, &b); err != nil {
 			return err
 		}
-		s.mu.Lock()
-		id, ok := s.tok[b.Bootstrap]
-		s.mu.Unlock()
-		if !ok || id == "" {
+		id := s.lookupToken(b.Bootstrap)
+		if id == "" {
 			_ = wc.SendJSON("Dropped", map[string]string{"reason": "bad_token"})
 			return fmt.Errorf("bad token")
 		}
-		sess := &agentConn{id: id, addr: policy.NormalizeIP(raw.RemoteAddr().String()), os: b.OS, arch: b.Arch, ver: b.Version, raw: raw, conn: wc, online: false, have: map[string]Mapping{}}
-		s.mu.Lock()
-		if old := s.ag[id]; old != nil && old != sess {
-			old.online = false
+		sessn := &nodeConn{
+			id: id, addr: policy.NormalizeIP(raw.RemoteAddr().String()),
+			os: b.OS, arch: b.Arch, ver: b.Version, raw: raw, sess: sess, conn: wc, online: false,
 		}
-		s.ag[id] = sess
+		s.mu.Lock()
+		if old := s.nodes[id]; old != nil && old != sessn {
+			old.online = false
+			s.clearNodeUDP(old)
+			if old.sess != nil && old.sess != sess {
+				_ = old.sess.Close()
+			}
+		}
+		s.nodes[id] = sessn
 		s.mu.Unlock()
-		*ac = sess
-		return wc.SendJSON("EnrollOk", map[string]string{"agent_id": id})
+		*ac = sessn
+		return wc.SendJSON("EnrollOk", map[string]string{"node_id": id})
 	case "Hello":
 		var b struct {
-			AgentID string `json:"agent_id"`
+			NodeID  string `json:"node_id"`
 			Version string `json:"version"`
 		}
-		_ = json.Unmarshal(f.Body, &b)
+		_ = json.Unmarshal(env.Body, &b)
 		if *ac == nil {
 			s.mu.Lock()
-			sess := s.ag[b.AgentID]
+			found := s.nodes[b.NodeID]
 			s.mu.Unlock()
-			if sess == nil {
+			if found == nil {
 				return fmt.Errorf("unknown agent")
 			}
-			sess.conn = wc
-			sess.online = true
-			sess.addr = policy.NormalizeIP(raw.RemoteAddr().String())
-			*ac = sess
+			found.conn = wc
+			found.sess = sess
+			found.raw = raw
+			found.online = true
+			found.addr = policy.NormalizeIP(raw.RemoteAddr().String())
+			*ac = found
 		}
 		if b.Version != "" {
 			(*ac).ver = b.Version
 		}
 		(*ac).online = true
 		maps := s.mappingsFor((*ac).id)
-		return wc.SendJSON("HelloOk", map[string]any{"mappings": maps})
-	case "MappingAck", "Heartbeat", "CloseStream":
+		hello := map[string]any{"mappings": maps, "udp_mode": string(s.udpMode)}
+		if keys := s.issueUDP(raw); keys != nil {
+			s.mu.Lock()
+			(*ac).udpCookie = keys.cookie
+			(*ac).udpIn = keys.in
+			(*ac).udpOut = keys.out
+			s.mu.Unlock()
+			hello["udp_cookie"] = hexCookie(keys.cookie)
+		}
+		return wc.SendJSON("HelloOk", hello)
+	case "MappingAck", "Heartbeat":
 		return nil
 	default:
 		return nil
 	}
 }
 
-func (s *Server) mappingsFor(agentID string) []Mapping {
+func (s *Server) mappingsFor(nodeID string) []Mapping {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []Mapping{}
-	for _, e := range s.ent {
-		if e.agentID == agentID {
-			out = append(out, e.spec)
-		}
+	for _, m := range s.want[nodeID] {
+		out = append(out, m)
 	}
 	return out
 }
 
-func (s *Server) offline(ac *agentConn) {
+func (s *Server) offline(ac *nodeConn) {
 	s.mu.Lock()
-	if s.ag[ac.id] == ac {
+	if s.nodes[ac.id] == ac {
 		ac.online = false
+		s.clearNodeUDP(ac)
 	}
 	s.mu.Unlock()
 }
 
-type streamPipe struct {
-	c net.Conn
+func (s *Server) lookupToken(token string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tok[TicketHash(token)]
 }
 
-var pipes sync.Map // streamID -> net.Conn or udpSess
+func (s *Server) SetToken(token, nodeID string) {
+	s.SetTokenHash(TicketHash(token), nodeID)
+}
 
-func (s *Server) onStream(ac *agentConn, f wire.Frame) {
-	v, ok := pipes.Load(f.StreamID)
+func (s *Server) SetTokenHash(hash, nodeID string) {
+	s.mu.Lock()
+	s.tok[hash] = nodeID
+	s.mu.Unlock()
+}
+
+func (s *Server) SetTicket(hash, mappingID string, until time.Time) {
+	s.mu.Lock()
+	s.tix[hash] = ticketEnt{MappingID: mappingID, Until: until}
+	s.mu.Unlock()
+}
+
+func (s *Server) DeleteTicket(hash string) {
+	s.mu.Lock()
+	delete(s.tix, hash)
+	s.mu.Unlock()
+}
+
+func (s *Server) DeleteTicketsFor(mappingID string) {
+	s.mu.Lock()
+	for h, t := range s.tix {
+		if t.MappingID == mappingID {
+			delete(s.tix, h)
+		}
+	}
+	s.mu.Unlock()
+}
+
+func (s *Server) lookupTicket(hash string) (ticketEnt, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.tix[hash]
 	if !ok {
-		return
+		return ticketEnt{}, false
 	}
-	switch p := v.(type) {
-	case net.Conn:
-		if f.Kind == wire.KindClose {
-			_ = p.Close()
-			pipes.Delete(f.StreamID)
-			return
-		}
-		_, _ = p.Write(f.Payload)
-	case *udpSess:
-		if f.Kind == wire.KindClose {
-			pipes.Delete(f.StreamID)
-			return
-		}
-		_, _ = p.pc.WriteTo(f.Payload, p.raddr)
+	if !t.Until.IsZero() && time.Now().After(t.Until) {
+		delete(s.tix, hash)
+		return ticketEnt{}, false
 	}
+	return t, true
 }
 
-func (s *Server) SetToken(token, agentID string) {
+func (s *Server) mappingByID(id string) (Mapping, string, bool) {
 	s.mu.Lock()
-	s.tok[token] = agentID
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	e := s.ent[id]
+	if e != nil {
+		return e.spec, e.nodeID, true
+	}
+	for aid, maps := range s.want {
+		for _, m := range maps {
+			if m.ID == id {
+				return m, aid, true
+			}
+		}
+	}
+	return Mapping{}, "", false
 }
 
-func (s *Server) Revoke(agentID string) {
+func (s *Server) Revoke(nodeID string) {
 	s.mu.Lock()
-	ac := s.ag[agentID]
+	ac := s.nodes[nodeID]
 	ids := []string{}
 	for id, e := range s.ent {
-		if e.agentID == agentID {
+		if e.nodeID == nodeID {
 			ids = append(ids, id)
 		}
 	}
 	s.mu.Unlock()
-	if ac != nil {
+	if ac != nil && ac.conn != nil {
 		_ = ac.conn.SendJSON("Revoked", map[string]any{})
+		if ac.sess != nil {
+			_ = ac.sess.Close()
+		}
 	}
 	for _, id := range ids {
 		s.stopEntry(id)
 	}
 	s.mu.Lock()
-	delete(s.ag, agentID)
+	delete(s.nodes, nodeID)
+	for h, id := range s.tok {
+		if id == nodeID {
+			delete(s.tok, h)
+		}
+	}
 	s.mu.Unlock()
 }
 
-func (s *Server) Disconnect(agentID string) {
+func (s *Server) Disconnect(nodeID string) {
 	s.mu.Lock()
-	ac := s.ag[agentID]
+	ac := s.nodes[nodeID]
 	s.mu.Unlock()
-	if ac != nil && ac.raw != nil {
-		_ = ac.raw.Close()
+	if ac != nil {
+		if ac.sess != nil {
+			_ = ac.sess.Close()
+		} else if ac.raw != nil {
+			_ = ac.raw.Close()
+		}
 	}
 }
 
@@ -293,20 +600,20 @@ func (s *Server) granted(id string) bool {
 	return true
 }
 
-func (s *Server) PutMappings(agentID string, maps []Mapping) {
+func (s *Server) PutMappings(nodeID string, maps []Mapping) {
 	s.mu.Lock()
-	s.want[agentID] = maps
+	s.want[nodeID] = maps
 	s.mu.Unlock()
 	want := map[string]Mapping{}
 	for _, m := range maps {
-		if m.Enabled && m.Mode != "visitor" && m.EntryPort != nil {
+		if m.Enabled {
 			want[m.ID] = m
 		}
 	}
 	s.mu.Lock()
 	have := []string{}
 	for id, e := range s.ent {
-		if e.agentID == agentID {
+		if e.nodeID == nodeID {
 			have = append(have, id)
 		}
 	}
@@ -317,66 +624,174 @@ func (s *Server) PutMappings(agentID string, maps []Mapping) {
 			s.stopEntry(id)
 			continue
 		}
-		s.ensureEntry(agentID, m)
+		s.ensureEntry(nodeID, m)
 		delete(want, id)
 	}
 	for _, m := range want {
-		s.ensureEntry(agentID, m)
+		s.ensureEntry(nodeID, m)
 	}
 	s.mu.Lock()
-	ac := s.ag[agentID]
+	ac := s.nodes[nodeID]
 	s.mu.Unlock()
-	if ac != nil && ac.online {
+	if ac != nil && ac.online && ac.conn != nil {
 		_ = ac.conn.SendJSON("MappingSync", map[string]any{"upsert": maps, "delete": []string{}})
 	}
 }
 
-func (s *Server) ensureEntry(agentID string, m Mapping) {
+func (s *Server) ensureEntry(nodeID string, m Mapping) {
+	listen := m.Mode != "visitor" && m.EntryPort != nil
 	s.mu.Lock()
 	cur := s.ent[m.ID]
-	if cur != nil && sameListen(cur.spec, m) {
+	listening := cur != nil && cur.listenErr == "" && (cur.ln != nil || cur.pc != nil || !listen)
+	if cur != nil && sameListen(cur.spec, m) && listening {
 		cur.spec = m
-		cur.agentID = agentID
+		cur.nodeID = nodeID
 		s.mu.Unlock()
 		return
+	}
+	var in, out, pin, pout int64
+	if cur != nil {
+		in, out = cur.in.Load(), cur.out.Load()
+		pin, pout = cur.pin.Load(), cur.pout.Load()
 	}
 	s.mu.Unlock()
 	s.stopEntry(m.ID)
-	if m.EntryPort == nil {
-		return
-	}
-	port := *m.EntryPort
-	addr := net.JoinHostPort(s.bind, fmt.Sprintf("%d", port))
-	e := &entry{spec: m, agentID: agentID, udpSess: map[string]*udpSess{}}
-	if m.Proto == "udp" {
-		pc, err := netutil.ListenPacket("udp4", addr)
-		if err != nil {
-			log.Printf("udp listen %s: %v", addr, err)
-			return
-		}
-		e.pc = pc
-		s.mu.Lock()
-		s.ent[m.ID] = e
-		s.mu.Unlock()
-		if m.Mode == "spa" {
-			s.stealth.SetSPA(stealth.Port{Proto: "udp", Port: uint16(port)}, true)
-		}
-		go s.serveUDP(e)
-		return
-	}
-	ln, err := netutil.Listen("tcp", addr)
-	if err != nil {
-		log.Printf("tcp listen %s: %v", addr, err)
-		return
-	}
-	e.ln = ln
+	e := &entry{spec: m, nodeID: nodeID, udpSess: map[string]*udpSess{}, stopCh: make(chan struct{})}
+	e.in.Store(in)
+	e.out.Store(out)
+	e.pin.Store(pin)
+	e.pout.Store(pout)
 	s.mu.Lock()
+	if s.draining.Load() {
+		s.mu.Unlock()
+		return
+	}
 	s.ent[m.ID] = e
 	s.mu.Unlock()
-	if m.Mode == "spa" {
-		s.stealth.SetSPA(stealth.Port{Proto: "tcp", Port: uint16(port)}, true)
+	if !listen {
+		return
 	}
-	go s.serveTCP(e)
+	ln, pc, err := s.bindListen(e)
+	if err != nil {
+		log.Printf("listen %s: %v", net.JoinHostPort(s.bind, fmt.Sprintf("%d", *m.EntryPort)), err)
+		s.mu.Lock()
+		if s.ent[m.ID] == e {
+			e.listenErr = err.Error()
+		}
+		s.mu.Unlock()
+		go s.retryListen(e)
+		return
+	}
+	if !s.installListener(e, ln, pc) {
+		if ln != nil {
+			_ = ln.Close()
+		}
+		if pc != nil {
+			_ = pc.Close()
+		}
+		return
+	}
+	s.startServe(e)
+}
+
+func (s *Server) bindListen(e *entry) (net.Listener, net.PacketConn, error) {
+	port := *e.spec.EntryPort
+	addr := net.JoinHostPort(s.bind, fmt.Sprintf("%d", port))
+	if e.spec.Proto == "udp" {
+		pc, err := doListenPacket("udp4", addr)
+		return nil, pc, err
+	}
+	ln, err := doListenTCP("tcp", addr)
+	return ln, nil, err
+}
+
+func (s *Server) stoppedLocked(e *entry) bool {
+	if s.draining.Load() || s.ent[e.spec.ID] != e || !e.spec.Enabled {
+		return true
+	}
+	select {
+	case <-e.stopCh:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) installListener(e *entry, ln net.Listener, pc net.PacketConn) bool {
+	s.mu.Lock()
+	if s.stoppedLocked(e) {
+		s.mu.Unlock()
+		return false
+	}
+	e.ln = ln
+	e.pc = pc
+	e.listenErr = ""
+	spa := e.spec.Mode == "spa" && e.spec.EntryPort != nil
+	proto := e.spec.Proto
+	var port uint16
+	if spa {
+		port = uint16(*e.spec.EntryPort)
+	}
+	s.mu.Unlock()
+	if spa {
+		s.stealth.SetSPA(stealth.Port{Proto: proto, Port: port}, true)
+	}
+	return true
+}
+
+func (s *Server) startServe(e *entry) {
+	s.mu.Lock()
+	ln, pc := e.ln, e.pc
+	udp := e.spec.Proto == "udp"
+	s.mu.Unlock()
+	if udp {
+		go s.serveUDP(e, pc)
+		return
+	}
+	go s.serveTCP(e, ln)
+}
+
+func (s *Server) retryListen(e *entry) {
+	wait := listenRetryWait
+	for {
+		select {
+		case <-e.stopCh:
+			return
+		case <-time.After(wait):
+		}
+		s.mu.Lock()
+		live := !s.stoppedLocked(e)
+		s.mu.Unlock()
+		if !live {
+			return
+		}
+		ln, pc, err := s.bindListen(e)
+		if err != nil {
+			s.mu.Lock()
+			if s.ent[e.spec.ID] == e {
+				e.listenErr = err.Error()
+			}
+			s.mu.Unlock()
+			if wait < listenRetryMax {
+				wait *= 2
+				if wait > listenRetryMax {
+					wait = listenRetryMax
+				}
+			}
+			continue
+		}
+		if !s.installListener(e, ln, pc) {
+			if ln != nil {
+				_ = ln.Close()
+			}
+			if pc != nil {
+				_ = pc.Close()
+			}
+			return
+		}
+		s.startServe(e)
+		return
+	}
 }
 
 func sameListen(a, b Mapping) bool {
@@ -394,6 +809,12 @@ func (s *Server) stopEntry(id string) {
 	s.mu.Lock()
 	e := s.ent[id]
 	delete(s.ent, id)
+	var ln net.Listener
+	var pc net.PacketConn
+	if e != nil {
+		e.stop()
+		ln, pc = e.ln, e.pc
+	}
 	s.mu.Unlock()
 	if e == nil {
 		return
@@ -401,25 +822,49 @@ func (s *Server) stopEntry(id string) {
 	if e.spec.Mode == "spa" && e.spec.EntryPort != nil {
 		s.stealth.SetSPA(stealth.Port{Proto: e.spec.Proto, Port: uint16(*e.spec.EntryPort)}, false)
 	}
-	if e.ln != nil {
-		_ = e.ln.Close()
+	if ln != nil {
+		_ = ln.Close()
 	}
-	if e.pc != nil {
-		_ = e.pc.Close()
+	if pc != nil {
+		_ = pc.Close()
 	}
 }
 
-func (s *Server) serveTCP(e *entry) {
+func (e *entry) stop() {
+	e.stopOnce.Do(func() {
+		if e.stopCh != nil {
+			close(e.stopCh)
+		}
+	})
+}
+
+func (s *Server) serveTCP(e *entry, ln net.Listener) {
+	if ln == nil {
+		return
+	}
 	for {
-		c, err := e.ln.Accept()
+		c, err := ln.Accept()
 		if err != nil {
+			if s.draining.Load() {
+				return
+			}
+			select {
+			case <-e.stopCh:
+				return
+			default:
+			}
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Temporary() {
+				time.Sleep(80 * time.Millisecond)
+				continue
+			}
 			return
 		}
-		go s.handleTCP(e, c)
+		go s.handleTCP(e, c, e.spec.Mode)
 	}
 }
 
-func (s *Server) handleTCP(e *entry, c net.Conn) {
+func (s *Server) handleTCP(e *entry, c net.Conn, via string) {
 	ip := policy.NormalizeIP(c.RemoteAddr().String())
 	if e.spec.Mode == "spa" && !s.granted(e.spec.ID) {
 		_ = c.Close()
@@ -429,64 +874,117 @@ func (s *Server) handleTCP(e *entry, c net.Conn) {
 		_ = c.Close()
 		return
 	}
+	if !e.reserve() {
+		_ = c.Close()
+		return
+	}
+	defer e.release()
+	if !s.reserveSplice() {
+		_ = c.Close()
+		return
+	}
+	defer s.releaseSplice()
 	s.mu.Lock()
-	ac := s.ag[e.agentID]
-	online := ac != nil && ac.online
-	if e.active >= policy.IntOr(e.spec.MaxConns, 64) {
-		s.mu.Unlock()
-		_ = c.Close()
-		return
+	ac := s.nodes[e.nodeID]
+	var sess *yamux.Session
+	if ac != nil && ac.online {
+		sess = ac.sess
 	}
-	if !online {
-		s.mu.Unlock()
-		_ = c.Close()
-		return
-	}
-	e.active++
 	s.mu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		e.active--
-		s.mu.Unlock()
+	if sess == nil {
 		_ = c.Close()
-	}()
-	sid := s.sid.Add(1)
-	pipes.Store(sid, c)
-	defer pipes.Delete(sid)
+		return
+	}
+	st, err := sess.OpenStream()
+	if err != nil {
+		_ = c.Close()
+		return
+	}
+	if err := wire.WriteOpen(st, wire.StreamOpen{
+		MappingID: e.spec.ID, Proto: "tcp", PeerIP: ip, PeerPort: portOf(c.RemoteAddr()), Via: via,
+	}); err != nil {
+		_ = st.Close()
+		_ = c.Close()
+		return
+	}
 	idle := time.Duration(policy.IntOr(e.spec.IdleTimeoutSec, 60)) * time.Second
-	_ = ac.conn.SendJSON("OpenStream", map[string]any{
-		"stream_id":  sid,
-		"mapping_id": e.spec.ID,
-		"proto":      "tcp",
-		"peer_ip":    ip,
-		"peer_port":  portOf(c.RemoteAddr()),
-		"via":        e.spec.Mode,
-	})
-	buf := make([]byte, 32*1024)
+	pub := &idleConn{Conn: c, idle: idle}
+	dst := xfer.WithLimit(st, e.take)
+	xfer.CopyBidirectional(dst, pub, &e.in, &e.out)
+}
+
+func (e *entry) reserve() bool {
+	max := int32(policy.IntOr(e.spec.MaxConns, 64))
 	for {
-		_ = c.SetReadDeadline(time.Now().Add(idle))
-		n, err := c.Read(buf)
-		if n > 0 {
-			e.in.Add(int64(n))
-			if !e.window.Take(e.spec.RateKbps, n) {
-				_ = ac.conn.SendClose(sid)
-				return
-			}
-			if err := ac.conn.SendData(sid, buf[:n]); err != nil {
-				return
-			}
+		cur := e.active.Load()
+		if cur >= max {
+			return false
 		}
-		if err != nil {
-			_ = ac.conn.SendClose(sid)
-			return
+		if e.active.CompareAndSwap(cur, cur+1) {
+			return true
 		}
 	}
 }
 
-func (s *Server) serveUDP(e *entry) {
+func (e *entry) release() {
+	if e != nil {
+		e.active.Add(-1)
+	}
+}
+
+func (s *Server) reserveSplice() bool {
+	for {
+		cur := s.splices.Load()
+		if cur >= 8192 {
+			return false
+		}
+		if s.splices.CompareAndSwap(cur, cur+1) {
+			return true
+		}
+	}
+}
+
+func (s *Server) releaseSplice() { s.splices.Add(-1) }
+
+func (e *entry) take(n int) bool {
+	if e.spec.RateKbps <= 0 {
+		return true
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.window.Take(e.spec.RateKbps, n)
+}
+
+type idleConn struct {
+	net.Conn
+	idle time.Duration
+}
+
+func (c *idleConn) Read(p []byte) (int, error) {
+	if c.idle > 0 {
+		_ = c.Conn.SetReadDeadline(time.Now().Add(c.idle))
+	}
+	return c.Conn.Read(p)
+}
+
+func (c *idleConn) CloseWrite() error {
+	if t, ok := c.Conn.(*net.TCPConn); ok {
+		return t.CloseWrite()
+	}
+	type cw interface{ CloseWrite() error }
+	if x, ok := c.Conn.(cw); ok {
+		return x.CloseWrite()
+	}
+	return c.Close()
+}
+
+func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
+	if pc == nil {
+		return
+	}
 	buf := make([]byte, 64*1024)
 	for {
-		n, raddr, err := e.pc.ReadFrom(buf)
+		n, raddr, err := pc.ReadFrom(buf)
 		if err != nil {
 			return
 		}
@@ -497,58 +995,251 @@ func (s *Server) serveUDP(e *entry) {
 		if !policy.CidrAllowed(ip, e.spec.AllowCidrs) {
 			continue
 		}
-		s.mu.Lock()
-		ac := s.ag[e.agentID]
-		online := ac != nil && ac.online
-		s.mu.Unlock()
-		if !online {
+		if !e.take(n) {
 			continue
 		}
-		if !e.window.Take(e.spec.RateKbps, n) {
-			continue
-		}
-		key := raddr.String()
-		s.mu.Lock()
-		sess := e.udpSess[key]
+		peerKey := raddr.String()
+		peerIP := net.ParseIP(ip)
+		peerPort := portOf(raddr)
+		ready := s.nodeUDPReady(e.nodeID)
+		e.mu.Lock()
+		sess := e.udpSess[udpPeerIndex(peerKey)]
 		idle := time.Duration(policy.IntOr(e.spec.IdleTimeoutSec, 60)) * time.Second
 		if sess == nil {
-			if e.active >= policy.IntOr(e.spec.MaxConns, 64) {
-				s.mu.Unlock()
+			if !e.reserve() {
+				e.mu.Unlock()
 				continue
 			}
-			sid := s.sid.Add(1)
-			sess = &udpSess{pc: e.pc, raddr: raddr, sid: sid, idle: idle}
-			e.udpSess[key] = sess
-			e.active++
-			pipes.Store(sid, sess)
-			s.mu.Unlock()
-			_ = ac.conn.SendJSON("OpenStream", map[string]any{
-				"stream_id":  sid,
-				"mapping_id": e.spec.ID,
-				"proto":      "udp",
-				"peer_ip":    ip,
-				"peer_port":  portOf(raddr),
-				"via":        e.spec.Mode,
-			})
-		} else {
-			s.mu.Unlock()
+			sess = &udpSess{pc: pc, raddr: raddr, idle: idle, flowID: uplane.NewFlowID(), peerKey: peerKey}
+			e.putUDPSess(sess)
 		}
-		if sess.timer != nil {
-			sess.timer.Stop()
-		}
-		sid := sess.sid
-		sess.timer = time.AfterFunc(idle, func() {
-			s.mu.Lock()
-			if e.udpSess[key] == sess {
-				delete(e.udpSess, key)
-				e.active--
+		if sess.path == udpPathNone {
+			path := udpPathYamux
+			if s.udpMode == UDPYamux {
+				path = udpPathYamux
+			} else if ready {
+				path = udpPathUPlane
+			} else if s.udpMode == UDPRequired {
+				path = udpPathNone
 			}
-			s.mu.Unlock()
-			pipes.Delete(sid)
-			_ = ac.conn.SendClose(sid)
-		})
-		_ = ac.conn.SendData(sid, buf[:n])
+			if path == udpPathNone {
+				if e.udpSess[udpFlowIndex(sess.flowID)] == sess {
+					e.delUDPSess(sess)
+					e.release()
+				}
+				e.mu.Unlock()
+				continue
+			}
+			sess.path = path
+			if path == udpPathUPlane {
+				e.udpViaUplane.Store(true)
+			} else {
+				e.udpViaYamux.Store(true)
+			}
+		}
+		path := sess.path
+		flowID := sess.flowID
+		sess.touchLocked(e, udpFlowIndex(flowID))
+		e.mu.Unlock()
+
+		pkt := uplane.Packet{
+			Type: uplane.TypeData, MappingID: e.spec.ID, FlowID: flowID,
+			PeerIP: peerIP, PeerPort: peerPort, Payload: append([]byte(nil), buf[:n]...),
+		}
+		switch path {
+		case udpPathUPlane:
+			if s.sendNodeUDP(e.nodeID, pkt) {
+				e.in.Add(int64(n))
+				e.pin.Add(1)
+			}
+		case udpPathYamux:
+			if !s.openUDPFallback(e, sess, udpFlowIndex(flowID), ip, peerPort) {
+				continue
+			}
+			if err := wire.WriteDatagram(sess.st, buf[:n]); err == nil {
+				e.in.Add(int64(n))
+				e.pin.Add(1)
+			}
+		}
 	}
+}
+
+func (s *Server) pickUDPPath(nodeID string) int32 {
+	if s.udpMode == UDPYamux {
+		return udpPathYamux
+	}
+	if s.nodeUDPReady(nodeID) {
+		return udpPathUPlane
+	}
+	if s.udpMode == UDPRequired {
+		return udpPathNone
+	}
+	return udpPathYamux
+}
+
+func (s *Server) openUDPFallback(e *entry, sess *udpSess, key, ip string, peerPort int) bool {
+	if sess.st != nil {
+		return true
+	}
+	s.mu.Lock()
+	ac := s.nodes[e.nodeID]
+	var ysess *yamux.Session
+	if ac != nil && ac.online {
+		ysess = ac.sess
+	}
+	s.mu.Unlock()
+	if ysess == nil {
+		return false
+	}
+	st, err := ysess.OpenStream()
+	if err != nil {
+		return false
+	}
+	if err := wire.WriteOpen(st, wire.StreamOpen{
+		MappingID: e.spec.ID, Proto: "udp", PeerIP: ip, PeerPort: peerPort, Via: e.spec.Mode,
+	}); err != nil {
+		_ = st.Close()
+		return false
+	}
+	e.mu.Lock()
+	if e.udpSess[udpFlowIndex(sess.flowID)] != sess {
+		e.mu.Unlock()
+		_ = st.Close()
+		return false
+	}
+	sess.st = st
+	e.mu.Unlock()
+	go s.readUDPStream(e, sess, udpFlowIndex(sess.flowID))
+	return true
+}
+
+func (s *Server) readUDPStream(e *entry, sess *udpSess, key string) {
+	for {
+		p, err := wire.ReadDatagram(sess.st)
+		if err != nil {
+			e.mu.Lock()
+			if e.udpSess[key] == sess {
+				e.delUDPSess(sess)
+				e.release()
+				if sess.timer != nil {
+					sess.timer.Stop()
+				}
+			}
+			e.mu.Unlock()
+			_ = sess.st.Close()
+			return
+		}
+		if _, err := sess.pc.WriteTo(p, sess.raddr); err != nil {
+			continue
+		}
+		e.out.Add(int64(len(p)))
+		e.pout.Add(1)
+	}
+}
+
+func (s *Server) openToNode(nodeID string, o wire.StreamOpen) (net.Conn, *entry, error) {
+	s.mu.Lock()
+	ac := s.nodes[nodeID]
+	e := s.ent[o.MappingID]
+	var sess *yamux.Session
+	if ac != nil && ac.online {
+		sess = ac.sess
+	}
+	s.mu.Unlock()
+	if sess == nil {
+		return nil, e, fmt.Errorf("node offline")
+	}
+	if e == nil {
+		return nil, nil, fmt.Errorf("no mapping")
+	}
+	if !e.reserve() {
+		return nil, e, fmt.Errorf("busy")
+	}
+	st, err := sess.OpenStream()
+	if err != nil {
+		e.release()
+		return nil, e, err
+	}
+	if err := wire.WriteOpen(st, o); err != nil {
+		e.release()
+		_ = st.Close()
+		return nil, e, err
+	}
+	return st, e, nil
+}
+
+func (s *Server) spliceToNode(e *entry, peer net.Conn, o wire.StreamOpen) {
+	st, e2, err := s.openToNode(e.nodeID, o)
+	if err != nil {
+		_ = peer.Close()
+		return
+	}
+	if e2 != nil {
+		e = e2
+	}
+	defer e.release()
+	if !s.reserveSplice() {
+		_ = st.Close()
+		_ = peer.Close()
+		return
+	}
+	defer s.releaseSplice()
+	dst := xfer.WithLimit(st, e.take)
+	xfer.CopyBidirectional(dst, peer, &e.in, &e.out)
+}
+
+func (s *Server) Probe(mappingID string, payload []byte, timeout time.Duration) ([]byte, error) {
+	m, nodeID, ok := s.mappingByID(mappingID)
+	if !ok {
+		return nil, fmt.Errorf("映射不存在")
+	}
+	if !m.Enabled {
+		return nil, fmt.Errorf("映射已停用")
+	}
+	st, e, err := s.openToNode(nodeID, wire.StreamOpen{
+		MappingID: mappingID, Proto: m.Proto, PeerIP: "127.0.0.1", PeerPort: 0, Via: "probe",
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+	if e != nil {
+		defer e.release()
+	}
+	_ = st.SetDeadline(time.Now().Add(timeout))
+	if m.Proto == "udp" {
+		if err := wire.WriteDatagram(st, payload); err != nil {
+			return nil, err
+		}
+		if e != nil {
+			e.in.Add(int64(len(payload)))
+			e.pin.Add(1)
+		}
+		reply, err := wire.ReadDatagram(st)
+		if err != nil {
+			return nil, err
+		}
+		if e != nil {
+			e.out.Add(int64(len(reply)))
+			e.pout.Add(1)
+		}
+		return reply, nil
+	}
+	if _, err := st.Write(payload); err != nil {
+		return nil, err
+	}
+	if e != nil {
+		e.in.Add(int64(len(payload)))
+	}
+	buf := make([]byte, 256)
+	n, err := st.Read(buf)
+	if n > 0 && e != nil {
+		e.out.Add(int64(n))
+	}
+	if n == 0 && err != nil {
+		return nil, err
+	}
+	return buf[:n], nil
 }
 
 func portOf(a net.Addr) int {
@@ -562,19 +1253,21 @@ func portOf(a net.Addr) int {
 	return policy.Atoi(p)
 }
 
-type statusAgent struct {
+type statusNode struct {
 	ID     string `json:"id"`
 	Online bool   `json:"online"`
 	Addr   string `json:"addr"`
 	OS     string `json:"os"`
 	Arch   string `json:"arch"`
 	Ver    string `json:"version"`
+	UPlane bool   `json:"uplane"`
 }
 
 type Status struct {
-	Agents  []statusAgent `json:"agents"`
-	Stealth string        `json:"stealth"`
-	Active  int           `json:"active"`
+	Nodes   []statusNode `json:"nodes"`
+	Stealth string       `json:"stealth"`
+	Active  int          `json:"active"`
+	UDP     string       `json:"udp"`
 }
 
 func (s *Server) Active() int {
@@ -582,7 +1275,7 @@ func (s *Server) Active() int {
 	defer s.mu.Unlock()
 	n := 0
 	for _, e := range s.ent {
-		n += e.active
+		n += int(e.active.Load())
 	}
 	return n
 }
@@ -590,43 +1283,60 @@ func (s *Server) Active() int {
 func (s *Server) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := []statusAgent{}
-	for _, a := range s.ag {
-		out = append(out, statusAgent{ID: a.id, Online: a.online, Addr: a.addr, OS: a.os, Arch: a.arch, Ver: a.ver})
+	out := []statusNode{}
+	for _, a := range s.nodes {
+		out = append(out, statusNode{ID: a.id, Online: a.online, Addr: a.addr, OS: a.os, Arch: a.arch, Ver: a.ver, UPlane: a.online && a.udpBound && a.udpAddr != nil && a.udpOut != nil && udpSeenFresh(a.udpSeen.Load())})
 	}
 	n := 0
 	for _, e := range s.ent {
-		n += e.active
+		n += int(e.active.Load())
 	}
-	return Status{Agents: out, Stealth: s.stealth.Mode(), Active: n}
+	return Status{Nodes: out, Stealth: s.stealth.Mode(), Active: n, UDP: string(s.udpMode)}
 }
 
-func (s *Server) MappingStats() map[string]struct {
-	In     int64
-	Out    int64
-	Active int
-} {
+type MapStat struct {
+	In, Out               int64
+	PacketsIn, PacketsOut int64
+	Active                int
+	NodeID                string
+	Error                 string
+	Listening             bool
+	UDPVia                string
+}
+
+func (s *Server) MappingStats() map[string]MapStat {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := map[string]struct {
-		In     int64
-		Out    int64
-		Active int
-	}{}
+	out := map[string]MapStat{}
 	for id, e := range s.ent {
-		out[id] = struct {
-			In     int64
-			Out    int64
-			Active int
-		}{In: e.in.Load(), Out: e.out.Load(), Active: e.active}
+		listen := e.spec.Mode == "visitor" || e.ln != nil || e.pc != nil
+		via := "none"
+		yu, up := e.udpViaYamux.Load(), e.udpViaUplane.Load()
+		switch {
+		case yu && up:
+			via = "mixed"
+		case up:
+			via = "uplane"
+		case yu:
+			via = "yamux"
+		}
+		out[id] = MapStat{
+			In: e.in.Load(), Out: e.out.Load(),
+			PacketsIn: e.pin.Load(), PacketsOut: e.pout.Load(),
+			Active: int(e.active.Load()), NodeID: e.nodeID,
+			Error: e.listenErr, Listening: listen && e.listenErr == "",
+			UDPVia: via,
+		}
 	}
 	return out
 }
 
 type Snapshot struct {
-	Tokens map[string]string         `json:"tokens"`
-	Maps   map[string][]Mapping      `json:"maps"`
-	Grants map[string]int64          `json:"grants"`
+	Tokens  map[string]string    `json:"tokens"`
+	Maps    map[string][]Mapping `json:"maps"`
+	Grants  map[string]int64     `json:"grants"`
+	Tickets map[string]int64     `json:"tickets"`
+	TicketM map[string]string    `json:"ticket_maps"`
 }
 
 func (s *Server) Snapshot() Snapshot {
@@ -646,17 +1356,47 @@ func (s *Server) Snapshot() Snapshot {
 	for k, v := range s.want {
 		maps[k] = v
 	}
-	return Snapshot{Tokens: tok, Maps: maps, Grants: g}
+	tixExp := map[string]int64{}
+	tixMap := map[string]string{}
+	for h, t := range s.tix {
+		if t.Until.IsZero() || t.Until.After(time.Now()) {
+			tixMap[h] = t.MappingID
+			if !t.Until.IsZero() {
+				tixExp[h] = t.Until.UnixMilli()
+			}
+		}
+	}
+	return Snapshot{Tokens: tok, Maps: maps, Grants: g, Tickets: tixExp, TicketM: tixMap}
 }
 
-func (s *Server) RestoreTokens(tokens map[string]string) {
-	for tok, id := range tokens {
-		s.SetToken(tok, id)
+func tokenHashOK(s string) bool {
+	if len(s) != 64 {
+		return false
 	}
+	_, err := hex.DecodeString(s)
+	return err == nil
+}
+
+func (s *Server) RestoreTokens(tokens map[string]string) error {
+	skipped := 0
+	for tok, id := range tokens {
+		if !tokenHashOK(tok) {
+			skipped++
+			log.Printf("restore: refusing raw-token snapshot for %s", id)
+			continue
+		}
+		s.SetTokenHash(tok, id)
+	}
+	if skipped > 0 {
+		return fmt.Errorf("refusing raw-token snapshot (%d entries)", skipped)
+	}
+	return nil
 }
 
 func (s *Server) Restore(snap Snapshot) {
-	s.RestoreTokens(snap.Tokens)
+	if err := s.RestoreTokens(snap.Tokens); err != nil {
+		log.Printf("restore tokens: %v", err)
+	}
 	for id, maps := range snap.Maps {
 		s.PutMappings(id, maps)
 	}
@@ -666,28 +1406,45 @@ func (s *Server) Restore(snap Snapshot) {
 			s.Knock(id, time.Until(until))
 		}
 	}
+	for h, mid := range snap.TicketM {
+		until := time.Time{}
+		if ms, ok := snap.Tickets[h]; ok {
+			until = time.UnixMilli(ms)
+		}
+		if until.IsZero() || until.After(time.Now()) {
+			s.SetTicket(h, mid, until)
+		}
+	}
 }
 
 func (s *Server) StopAccept() {
-	s.draining.Store(true)
 	if s.ctrl != nil {
 		_ = s.ctrl.Close()
 	}
 	if s.api != nil {
 		_ = s.api.Close()
 	}
+	if s.udpPC != nil {
+		_ = s.udpPC.Close()
+	}
 	s.mu.Lock()
-	ents := []*entry{}
+	s.draining.Store(true)
+	type pair struct {
+		ln net.Listener
+		pc net.PacketConn
+	}
+	conns := []pair{}
 	for _, e := range s.ent {
-		ents = append(ents, e)
+		e.stop()
+		conns = append(conns, pair{ln: e.ln, pc: e.pc})
 	}
 	s.mu.Unlock()
-	for _, e := range ents {
-		if e.ln != nil {
-			_ = e.ln.Close()
+	for _, c := range conns {
+		if c.ln != nil {
+			_ = c.ln.Close()
 		}
-		if e.pc != nil {
-			_ = e.pc.Close()
+		if c.pc != nil {
+			_ = c.pc.Close()
 		}
 	}
 }
@@ -710,26 +1467,29 @@ func (s *Server) ServeAPI(ln net.Listener) error {
 	})
 	mux.HandleFunc("PUT /v1/tokens/{token}", func(w http.ResponseWriter, r *http.Request) {
 		var b struct {
-			AgentID string `json:"agent_id"`
+			NodeID string `json:"node_id"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&b)
-		s.SetToken(r.PathValue("token"), b.AgentID)
+		if err := decodeJSONBody(r, &b); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		s.SetToken(r.PathValue("token"), b.NodeID)
 		w.WriteHeader(204)
 	})
-	mux.HandleFunc("PUT /v1/agents/{id}/mappings", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("PUT /v1/nodes/{id}/mappings", func(w http.ResponseWriter, r *http.Request) {
 		var maps []Mapping
-		if err := json.NewDecoder(r.Body).Decode(&maps); err != nil && err != io.EOF {
+		if err := decodeJSONBody(r, &maps); err != nil {
 			http.Error(w, err.Error(), 400)
 			return
 		}
 		s.PutMappings(r.PathValue("id"), maps)
 		w.WriteHeader(204)
 	})
-	mux.HandleFunc("POST /v1/agents/{id}/revoke", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /v1/nodes/{id}/revoke", func(w http.ResponseWriter, r *http.Request) {
 		s.Revoke(r.PathValue("id"))
 		w.WriteHeader(204)
 	})
-	mux.HandleFunc("POST /v1/agents/{id}/disconnect", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /v1/nodes/{id}/disconnect", func(w http.ResponseWriter, r *http.Request) {
 		s.Disconnect(r.PathValue("id"))
 		w.WriteHeader(204)
 	})
@@ -741,4 +1501,20 @@ func (s *Server) ServeAPI(ln net.Listener) error {
 		_ = json.NewEncoder(w).Encode(s.Status())
 	})
 	return http.Serve(ln, mux)
+}
+
+func decodeJSONBody(r *http.Request, v any) error {
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(nil, r.Body, 256<<10)
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return fmt.Errorf("trailing json")
+		}
+		return err
+	}
+	return nil
 }

@@ -9,15 +9,15 @@ import {
 import {
   dialTarget,
   dialUdp,
-  dropAgentEntries,
+  dropNodeEntries,
   ensureEcho,
   grantUntilIso,
   isGranted,
   cidrAllowed,
   knockGrant,
-  markAgentOnline,
+  markNodeOnline,
   probeEntry,
-  syncAgentEntries,
+  syncNodeEntries,
   syncEntry,
 } from "./dataplane";
 
@@ -27,14 +27,14 @@ export {
   ensureEcho,
   grantUntilIso,
   isGranted,
-  markAgentOnline,
-  syncAgentEntries,
+  markNodeOnline,
+  syncNodeEntries,
   syncEntry,
-  dropAgentEntries,
+  dropNodeEntries,
 };
 
 type Session = {
-  agentId: string;
+  nodeId: string;
   have: Map<string, MappingWire>;
   version: string;
 };
@@ -59,25 +59,25 @@ function frame(dir: ControlFrame["dir"], type: FrameType, body: unknown): Contro
   return { ts: new Date().toISOString(), dir, type, body };
 }
 
-export function getSession(agentId: string): Session {
+export function getSession(nodeId: string): Session {
   const all = sessions();
-  let s = all.get(agentId);
+  let s = all.get(nodeId);
   if (!s) {
-    s = { agentId, have: new Map(), version: "0.3.0-m3" };
-    all.set(agentId, s);
+    s = { nodeId, have: new Map(), version: "0.3.0-m3" };
+    all.set(nodeId, s);
   }
   return s;
 }
 
-export function dropSession(agentId: string) {
-  sessions().delete(agentId);
-  markAgentOnline(agentId, false);
+export function dropSession(nodeId: string) {
+  sessions().delete(nodeId);
+  markNodeOnline(nodeId, false);
 }
 
-export function helloAgentChannel(agentId: string, mappings: MappingWire[]) {
-  const s = getSession(agentId);
+export function helloNodeChannel(nodeId: string, mappings: MappingWire[]) {
+  const s = getSession(nodeId);
   const frames: ControlFrame[] = [
-    frame("c2s", "Hello", { agent_id: agentId, version: s.version }),
+    frame("c2s", "Hello", { node_id: nodeId, version: s.version }),
     frame("s2c", "HelloOk", { mappings }),
   ];
   const { started, stopped, restarted } = alignMappings(s.have, mappings);
@@ -90,8 +90,8 @@ export function helloAgentChannel(agentId: string, mappings: MappingWire[]) {
   return { frames, started, stopped, restarted };
 }
 
-export function syncMappings(agentId: string, upsert: MappingWire[], del: string[]) {
-  const s = getSession(agentId);
+export function syncMappings(nodeId: string, upsert: MappingWire[], del: string[]) {
+  const s = getSession(nodeId);
   const frames: ControlFrame[] = [frame("s2c", "MappingSync", { upsert, delete: del })];
   const next = new Map(s.have);
   for (const id of del) next.delete(id);
@@ -104,14 +104,14 @@ export function syncMappings(agentId: string, upsert: MappingWire[], del: string
   return { frames, started, stopped, restarted };
 }
 
-export function heartbeat(agentId: string, deltas: { id: string; bytes_in_d: number; bytes_out_d: number; active_conns: number }[]) {
+export function heartbeat(nodeId: string, deltas: { id: string; bytes_in_d: number; bytes_out_d: number; active_conns: number }[]) {
   return [frame("c2s", "Heartbeat", { ts: Date.now(), mappings: deltas })];
 }
 
-export function revokeChannel(agentId: string) {
+export function revokeChannel(nodeId: string) {
   const frames = [frame("s2c", "Revoked", {})];
-  dropSession(agentId);
-  void dropAgentEntries(agentId);
+  dropSession(nodeId);
+  void dropNodeEntries(nodeId);
   return frames;
 }
 
@@ -140,8 +140,8 @@ function streamFrames(mapping: MappingWire, ok: boolean, extra: ControlFrame[] =
   ];
 }
 
-export async function openStreamProbe(agentId: string, mapping: MappingWire, payload: string): Promise<ProbeOk> {
-  const s = getSession(agentId);
+export async function openStreamProbe(nodeId: string, mapping: MappingWire, payload: string): Promise<ProbeOk> {
+  const s = getSession(nodeId);
   if (!s.have.has(mapping.id) && mapping.enabled) s.have.set(mapping.id, mapping);
   if (!mapping.enabled) throw new Error("映射已停用");
 
@@ -185,8 +185,8 @@ export async function openStreamProbe(agentId: string, mapping: MappingWire, pay
   }
 }
 
-export async function visitStream(agentId: string, mapping: MappingWire, payload: string): Promise<ProbeOk> {
-  const s = getSession(agentId);
+export async function visitStream(nodeId: string, mapping: MappingWire, payload: string): Promise<ProbeOk> {
+  const s = getSession(nodeId);
   if (!s.have.has(mapping.id) && mapping.enabled) s.have.set(mapping.id, mapping);
   if (!mapping.enabled) throw new Error("映射已停用");
   if (mapping.mode !== "visitor") throw new Error("只有访客模式需要探访");

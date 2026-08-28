@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import {
-  agentInstall,
+  nodeInstall,
   ARCHS,
   gateInstall,
   PLATFORMS,
@@ -18,10 +18,10 @@ const exampleToken = "umbra_boot_…";
 export function DeployPage() {
   const [gateOs, setGateOs] = useState<Platform>("linux");
   const [gateArch, setGateArch] = useState<Arch>("amd64");
-  const [agentOs, setAgentOs] = useState<Platform>("linux");
-  const [agentArch, setAgentArch] = useState<Arch>("amd64");
+  const [nodeOs, setNodeOs] = useState<Platform>("linux");
+  const [nodeArch, setNodeArch] = useState<Arch>("amd64");
   const gate = gateInstall(gateOs, gateArch);
-  const agent = agentInstall(agentOs, agentArch, exampleToken);
+  const agent = nodeInstall(nodeOs, nodeArch, exampleToken);
 
   return (
     <AppShell title="部署">
@@ -40,7 +40,7 @@ export function DeployPage() {
           {gateOs === "docker" ? (
             <p className="mb-2 text-xs text-stone">
               入口容器需要 Linux 宿主机的 host 网络。macOS / Windows 请跑本机进程。
-              -http 是控制台和 API。镜像 chenow9/umbrad、chenow9/umbra-agent 由 git tag（v*）构建，linux/amd64 + linux/arm64。预发布不打 latest。
+              -http 是控制台和 API。镜像 chenow9/umbrad、chenow9/umbra-node 由 git tag（v*）构建，linux/amd64 + linux/arm64。预发布不打 latest。
             </p>
           ) : null}
           <pre className="overflow-x-auto rounded-xl bg-card p-4 font-mono text-xs leading-relaxed text-ink shadow-border">
@@ -51,10 +51,10 @@ export function DeployPage() {
         <section>
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <h2 className="text-sm font-medium text-ink">内网节点</h2>
-            <Copy text={agent} />
+            <Copy text={node} />
           </div>
           <p className="mb-2 text-xs text-stone">凭证在「登记节点」时签发，只显示一次。下面是样例。</p>
-          <Pickers os={agentOs} arch={agentArch} onOs={setAgentOs} onArch={setAgentArch} />
+          <Pickers os={nodeOs} arch={nodeArch} onOs={setNodeOs} onArch={setNodeArch} />
           <pre className="overflow-x-auto rounded-xl bg-card p-4 font-mono text-xs leading-relaxed text-ink shadow-border">
             {agent.trim()}
           </pre>
@@ -62,6 +62,7 @@ export function DeployPage() {
 
         <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-stone">
           <li>人只用 umbrad 的 HTTP 口（页面和 API）。节点走 4400 的 TLS 控制通道。</li>
+          <li>访客模式签发票据后，在访问侧跑 umbra-visit，只在本机开 TCP/UDP，入口不暴露业务口。</li>
           <li>暗端口默认丢弃未授权连接；公开口是显式选项。</li>
           <li>入口热替换时已有连接不中断；增删映射本来就不会重启入口。</li>
           <li>Docker 镜像是 linux/amd64 与 linux/arm64。Windows 容器不支持。</li>

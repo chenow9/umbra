@@ -1,5 +1,5 @@
 import type {
-  Agent,
+  Node,
   AuditItem,
   ControlFrameRow,
   DemoResult,
@@ -52,8 +52,8 @@ export function logoutOwnerSession() {
   return api<{ ok: true }>("/v1/logout", { method: "POST" });
 }
 
-export function listAgents() {
-  return api<Agent[]>("/v1/agents");
+export function listNodes() {
+  return api<Node[]>("/v1/nodes");
 }
 
 export function listMappings() {
@@ -72,40 +72,40 @@ export function listFrames() {
   return api<ControlFrameRow[]>("/v1/frames");
 }
 
-export function getTraffic({ data }: { data?: { range?: string; mappingId?: string; agentId?: string } } = {}) {
+export function getTraffic({ data }: { data?: { range?: string; mappingId?: string; nodeId?: string } } = {}) {
   const q = new URLSearchParams();
   if (data?.range) q.set("range", data.range);
   if (data?.mappingId) q.set("mappingId", data.mappingId);
-  if (data?.agentId) q.set("agentId", data.agentId);
+  if (data?.nodeId) q.set("nodeId", data.nodeId);
   const s = q.toString();
   return api<TrafficView>(`/v1/traffic${s ? `?${s}` : ""}`);
 }
 
-export function createAgent({
+export function createNode({
   data,
 }: {
   data: { name: string; comment?: string; os: string; arch: string };
 }) {
-  return api<{ id: string; token: string; os: string; arch: string }>("/v1/agents", {
+  return api<{ id: string; token: string; os: string; arch: string }>("/v1/nodes", {
     method: "POST",
     body: JSON.stringify(data),
   });
 }
 
-export function getAgentBootstrap({ data }: { data: { id: string } }) {
-  return api<{ token: string }>(`/v1/agents/${encodeURIComponent(data.id)}/bootstrap`);
+export function getNodeBootstrap({ data }: { data: { id: string } }) {
+  return api<{ token: string }>(`/v1/nodes/${encodeURIComponent(data.id)}/bootstrap`);
 }
 
-export function helloAgent({ data }: { data: { id: string } }) {
-  return api<{ ok: true; pushed: number }>(`/v1/agents/${encodeURIComponent(data.id)}/hello`, { method: "POST" });
+export function helloNode({ data }: { data: { id: string } }) {
+  return api<{ ok: true; pushed: number }>(`/v1/nodes/${encodeURIComponent(data.id)}/hello`, { method: "POST" });
 }
 
-export function disconnectAgent({ data }: { data: { id: string } }) {
-  return api<void>(`/v1/agents/${encodeURIComponent(data.id)}/disconnect`, { method: "POST" });
+export function disconnectNode({ data }: { data: { id: string } }) {
+  return api<void>(`/v1/nodes/${encodeURIComponent(data.id)}/disconnect`, { method: "POST" });
 }
 
-export function revokeAgent({ data }: { data: { id: string } }) {
-  return api<void>(`/v1/agents/${encodeURIComponent(data.id)}/revoke`, { method: "POST" });
+export function revokeNode({ data }: { data: { id: string } }) {
+  return api<void>(`/v1/nodes/${encodeURIComponent(data.id)}/revoke`, { method: "POST" });
 }
 
 export function createMapping({ data }: { data: Record<string, unknown> }) {

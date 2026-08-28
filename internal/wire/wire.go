@@ -9,9 +9,8 @@ import (
 )
 
 const (
-	KindJSON  byte = 0
-	KindData  byte = 1
-	KindClose byte = 2
+	maxJSON  = 1 << 20
+	maxDgram = 64 << 10
 )
 
 type Envelope struct {
@@ -34,6 +33,14 @@ type Mapping struct {
 	IdleTimeoutSec int    `json:"idle_timeout_sec"`
 }
 
+type StreamOpen struct {
+	MappingID string `json:"mapping_id"`
+	Proto     string `json:"proto"`
+	PeerIP    string `json:"peer_ip"`
+	PeerPort  int    `json:"peer_port"`
+	Via       string `json:"via"`
+}
+
 type Conn struct {
 	rw io.ReadWriter
 	mu sync.Mutex
@@ -50,89 +57,82 @@ func (c *Conn) SendJSON(typ string, body any) error {
 	if err != nil {
 		return err
 	}
-	return c.send(KindJSON, 0, env)
-}
-
-func (c *Conn) SendData(streamID uint32, payload []byte) error {
-	return c.send(KindData, streamID, payload)
-}
-
-func (c *Conn) SendClose(streamID uint32) error {
-	return c.send(KindClose, streamID, nil)
-}
-
-func (c *Conn) send(kind byte, streamID uint32, payload []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	n := 1
-	if kind != KindJSON {
-		n += 4
-	}
-	n += len(payload)
-	var hdr [5]byte
-	binary.BigEndian.PutUint32(hdr[:4], uint32(n))
-	hdr[4] = kind
-	if _, err := c.rw.Write(hdr[:]); err != nil {
-		return err
-	}
-	if kind != KindJSON {
-		var sid [4]byte
-		binary.BigEndian.PutUint32(sid[:], streamID)
-		if _, err := c.rw.Write(sid[:]); err != nil {
-			return err
-		}
-	}
-	if len(payload) > 0 {
-		_, err := c.rw.Write(payload)
-		return err
-	}
-	return nil
+	return writeFrame(c.rw, env, maxJSON)
 }
 
-type Frame struct {
-	Kind     byte
-	StreamID uint32
-	Type     string
-	Body     json.RawMessage
-	Payload  []byte
-}
-
-func (c *Conn) Read() (Frame, error) {
-	var hdr [5]byte
-	if _, err := io.ReadFull(c.rw, hdr[:]); err != nil {
-		return Frame{}, err
+func (c *Conn) Read() (Envelope, error) {
+	buf, err := readFrame(c.rw, maxJSON)
+	if err != nil {
+		return Envelope{}, err
 	}
-	n := binary.BigEndian.Uint32(hdr[:4])
-	if n == 0 || n > 8<<20 {
-		return Frame{}, fmt.Errorf("bad frame length %d", n)
+	var env Envelope
+	if err := json.Unmarshal(buf, &env); err != nil {
+		return Envelope{}, err
 	}
-	kind := hdr[4]
-	buf := make([]byte, n-1)
-	if _, err := io.ReadFull(c.rw, buf); err != nil {
-		return Frame{}, err
-	}
-	f := Frame{Kind: kind}
-	if kind == KindJSON {
-		var env Envelope
-		if err := json.Unmarshal(buf, &env); err != nil {
-			return Frame{}, err
-		}
-		f.Type = env.Type
-		f.Body = env.Body
-		return f, nil
-	}
-	if len(buf) < 4 {
-		return Frame{}, fmt.Errorf("short stream frame")
-	}
-	f.StreamID = binary.BigEndian.Uint32(buf[:4])
-	if kind == KindData {
-		f.Payload = buf[4:]
-	}
-	return f, nil
+	return env, nil
 }
 
 func Decode[T any](body json.RawMessage) (T, error) {
 	var v T
 	err := json.Unmarshal(body, &v)
 	return v, err
+}
+
+func WriteOpen(w io.Writer, o StreamOpen) error {
+	raw, err := json.Marshal(o)
+	if err != nil {
+		return err
+	}
+	return writeFrame(w, raw, maxJSON)
+}
+
+func ReadOpen(r io.Reader) (StreamOpen, error) {
+	buf, err := readFrame(r, maxJSON)
+	if err != nil {
+		return StreamOpen{}, err
+	}
+	var o StreamOpen
+	if err := json.Unmarshal(buf, &o); err != nil {
+		return StreamOpen{}, err
+	}
+	return o, nil
+}
+
+func WriteDatagram(w io.Writer, p []byte) error {
+	return writeFrame(w, p, maxDgram)
+}
+
+func ReadDatagram(r io.Reader) ([]byte, error) {
+	return readFrame(r, maxDgram)
+}
+
+func writeFrame(w io.Writer, p []byte, max int) error {
+	if len(p) > max {
+		return fmt.Errorf("bad frame length %d", len(p))
+	}
+	var hdr [4]byte
+	binary.BigEndian.PutUint32(hdr[:], uint32(len(p)))
+	if _, err := w.Write(hdr[:]); err != nil {
+		return err
+	}
+	_, err := w.Write(p)
+	return err
+}
+
+func readFrame(r io.Reader, max int) ([]byte, error) {
+	var hdr [4]byte
+	if _, err := io.ReadFull(r, hdr[:]); err != nil {
+		return nil, err
+	}
+	n := binary.BigEndian.Uint32(hdr[:])
+	if int(n) > max {
+		return nil, fmt.Errorf("bad frame length %d", n)
+	}
+	buf := make([]byte, n)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
 }

@@ -16,16 +16,16 @@ target "umbrad" {
   ]
 }
 
-target "umbra-agent" {
+target "umbra-node" {
   context    = "."
   dockerfile = "Dockerfile"
-  target     = "umbra-agent"
+  target     = "umbra-node"
   platforms  = ["linux/amd64", "linux/arm64"]
   tags = [
-    "${REGISTRY}/umbra-agent:${TAG}",
+    "${REGISTRY}/umbra-node:${TAG}",
   ]
 }
 
 group "default" {
-  targets = ["umbrad", "umbra-agent"]
+  targets = ["umbrad", "umbra-node"]
 }

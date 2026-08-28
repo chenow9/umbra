@@ -13,7 +13,7 @@ import { getOwnerStatus, logoutOwnerSession } from "@/lib/umbra/api";
 
 const nav = [
   { to: "/", label: "总览", icon: LayoutGrid },
-  { to: "/agents", label: "节点", icon: Radio },
+  { to: "/nodes", label: "节点", icon: Radio },
   { to: "/mappings", label: "映射", icon: GitBranch },
   { to: "/traffic", label: "流量", icon: Activity },
   { to: "/audit", label: "审计", icon: ScrollText },

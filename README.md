@@ -29,14 +29,15 @@ Pangolin 做 TCP/UDP 要改 Traefik 并重启。Orbien 要先把端口池映射�
 | 程序 | 作用 |
 |---|---|
 | `umbrad` | 公网入口。控制通道（TLS 1.3）、业务口 Listen、SPA 内核丢弃、热升级 |
-| `umbra-agent` | NAT 后节点。只连入口，按服务端下发的映射去拨本地目标 |
-| 控制台 | 总览 / 节点 / 映射 / 流量 / 审计 / 部署。与 API 共用一个 HTTP 口，第一次打开时设定口令 |
+| `umbra-node` | NAT 后节点。只连入口，按服务端下发的映射去拨本地目标 |
+| `umbra-visit` | 访客端。用服务端签发的票据在本机开一个 L4 口（TCP/UDP），入口不暴露业务端口 |
+| 控制台 | 总览 / 节点/ 映射 / 流量 / 审计 / 部署。与 API 共用一个 HTTP 口，第一次打开时设定口令 |
 
 ### 模式
 
 - **暗端口（SPA）**：未敲门的包在 Linux 入口用 nftables 丢掉（需 `CAP_NET_ADMIN`）。没有权限时退回用户态断开。
 - **公开**：显式打开的业务口（例如游戏 UDP）。
-- **Visitor**：入口不开业务口，由访客票据从内网向外连。
+- **Visitor**：入口不开业务口。签发票据后，在访问侧跑 `umbra-visit --server … --ticket … --local 127.0.0.1:2222`，本机只开 L4（TCP 或 UDP），再连到内网目标。
 
 ### 快速开始
 
@@ -63,7 +64,7 @@ sudo ./dist/umbrad_linux_amd64 \
 **3. 登记节点（控制台「登记节点」签发凭证，只显示一次）**
 
 ```bash
-./umbra-agent \
+./umbra-node \
   --server gate.example:4400 \
   --tls-ca /etc/umbra/ca.crt \
   --token umbra_boot_…
@@ -71,7 +72,7 @@ sudo ./dist/umbrad_linux_amd64 \
 
 **4. 控制台**
 
-`umbrad -http` 同时提供 API 和静态页面，默认 `:8080`。第一次打开设定口令。
+`umbrad -http` 同时提供 API 和静态页面，默认 `127.0.0.1:8080`。第一次打开设定口令。
 
 开发时 Vite 只是把 `/v1` 反代到入口进程，生产把前端构建产物放到 `-ui`，或用 nginx 反代同一个口。
 
@@ -84,7 +85,7 @@ sudo ./dist/umbrad_linux_amd64 \
 推送符合 semver 的 tag（`v1.2.3`）会构建 **linux/amd64** 和 **linux/arm64** 镜像并推到 Docker Hub：
 
 - `chenow9/umbrad`
-- `chenow9/umbra-agent`
+- `chenow9/umbra-node`
 
 标签：`1.2.3`、`1.2`；不含 `-` 的正式版才打 `latest`。预发布例如 `v0.0.1-beta` 只会推 `0.0.1-beta`。
 
@@ -106,9 +107,9 @@ UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.gate.yml up -d
 **节点**（同样 host 网络，才能把映射目标写成宿主机 `127.0.0.1`）：
 
 ```bash
-cp deploy/agent.env.example agent.env   # 填 UMBRA_SERVER / UMBRA_TOKEN
+cp deploy/node.env.example node.env   # 填 UMBRA_SERVER / UMBRA_TOKEN
 # 把入口的 ca.crt 放到当前目录
-UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.agent.yml up -d
+UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.node.yml up -d
 ```
 
 换入口程序本身不停机：
@@ -134,18 +135,20 @@ kill -USR2 $(pidof umbrad)   # 或 systemctl reload umbrad
 
 ```
 cmd/umbrad          入口
-cmd/umbra-agent     节点程序
+cmd/umbra-node     节点程序
+cmd/umbra-visit     访客端（本机 L4）
 internal/           控制通道、策略、nftables、TLS、热升级、控制面 HTTP
 src/                管理面（React；生产由 umbrad -http / -ui 提供）
 docs/               需求与接口
 scripts/            交叉编译与冒烟
 deploy/             入口 / 节点 Docker Compose
-.github/workflows   tag 触发多架构镜像
+.github/workflows   CI：vet / test / race / govulncheck；tag 才推镜像，且必须先过 CI
 ```
 
 ### 安全注意
 
 - 控制通道默认 TLS 1.3，节点必须带 `--tls-ca`。
+- 发布镜像用 Go 1.25.14（digest 钉死）。推 `v*` tag 会先跑 vet、`-race` 测试和 govulncheck，失败不推镜像。
 - 管理面只放在你自己够得到的网上，不要裸奔公网。
 - 暗端口要对 nmap 显示 filtered，入口进程需要 `CAP_NET_ADMIN`。
 - 凭证只显示一次，吊销在控制台操作。
@@ -154,6 +157,6 @@ deploy/             入口 / 节点 Docker Compose
 
 ## Umbra
 
-Self-hosted **L4 (TCP/UDP)** stealth tunnel. The server is the only source of truth: Agents carry an address and a credential; mappings are pushed live. No client config files, no gate restart, no dropped existing connections.
+Self-hosted **L4 (TCP/UDP)** stealth tunnel. The server is the only source of truth: 节点 carry an address and a credential; mappings are pushed live. No client config files, no gate restart, no dropped existing connections.
 
 Full English: [README.en.md](README.en.md).

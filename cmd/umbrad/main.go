@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -24,13 +23,14 @@ import (
 
 func main() {
 	listen := flag.String("listen", ":4400", "节点控制通道")
-	httpAddr := flag.String("http", ":8080", "控制台与 API 同一 HTTP 口")
+	httpAddr := flag.String("http", "127.0.0.1:8080", "控制台与 API 同一 HTTP 口，默认只绑回环")
 	api := flag.String("api", "", "兼容旧参数，覆盖 -http")
 	ui := flag.String("ui", "", "前端静态目录，空则用内置")
 	bind := flag.String("bind", "127.0.0.1", "入口监听地址")
 	tlsDir := flag.String("tls-dir", "/var/lib/umbra", "证书与热升级状态")
 	plain := flag.Bool("plain", false, "控制通道不加密（仅调试）")
 	stealthMode := flag.String("stealth", "auto", "nft | off | auto")
+	udpMode := flag.String("udp", envOr("UMBRA_UDP", "auto"), "UDP 数据面: auto | required | yamux")
 	stateFile := flag.String("state", "", "热升级恢复的状态文件")
 	flag.Parse()
 
@@ -44,18 +44,24 @@ func main() {
 
 	st := stealth.New(*stealthMode != "off")
 	s := gate.New(*bind, st)
+	s.SetUDPMode(gate.ParseUDPMode(*udpMode))
+	if !*plain {
+		s.SetTLS(bundle.TLS.Clone())
+	}
 
 	if *stateFile == "" {
 		*stateFile = filepath.Join(*tlsDir, "state.json")
 	}
 	var snap gate.Snapshot
 	upgraded := os.Getenv("UMBRA_UPGRADED") == "1"
-	nonce := os.Getenv("UMBRA_UPGRADE_NONCE")
 	if upgraded {
 		if raw, err := os.ReadFile(*stateFile); err == nil {
 			_ = json.Unmarshal(raw, &snap)
-			s.RestoreTokens(snap.Tokens)
-			log.Printf("upgrade: tokens restored, waiting to take entries")
+			if err := s.RestoreTokens(snap.Tokens); err != nil {
+				log.Printf("upgrade: %v", err)
+			} else {
+				log.Printf("upgrade: tokens restored")
+			}
 		}
 	}
 
@@ -63,8 +69,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if !*plain {
-		cln = tls.NewListener(cln, bundle.TLS.Clone())
+	if upc, err := netutil.ListenPacket("udp", *listen); err != nil {
+		if gate.ParseUDPMode(*udpMode) == gate.UDPRequired {
+			log.Fatalf("udp data plane listen %s: %v", *listen, err)
+		}
+		log.Printf("udp data plane listen %s: %v — UDP will fall back to yamux", *listen, err)
+	} else {
+		s.AttachUPlane(upc)
 	}
 	apiAddr := *httpAddr
 	if *api != "" {
@@ -76,14 +87,17 @@ func main() {
 	}
 	s.SetListeners(cln, aln)
 
-	agentAddr := *listen
-	if strings.HasPrefix(agentAddr, ":") {
-		agentAddr = "127.0.0.1" + agentAddr
+	nodeAddr := *listen
+	if strings.HasPrefix(nodeAddr, ":") {
+		nodeAddr = "127.0.0.1" + nodeAddr
 	}
-	con := control.New(s, filepath.Join(*tlsDir, "control.json"))
-	con.Listen = agentAddr
+	con, err := control.New(s, filepath.Join(*tlsDir, "control.json"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	con.Listen = nodeAddr
 	con.CAFile = bundle.CAFile
-	con.AgentBin = envOr("UMBRA_AGENT_BIN", "/usr/local/bin/umbra-agent")
+	con.NodeBin = envOr("UMBRA_NODE_BIN", "/usr/local/bin/umbra-node")
 	con.UIDir = *ui
 	con.UIUpstream = os.Getenv("UMBRA_UI_UPSTREAM")
 	if con.UIUpstream == "" && os.Getenv("GROK_AGENT") != "" {
@@ -95,7 +109,7 @@ func main() {
 	if *plain {
 		mode = "plain"
 	}
-	log.Printf("umbrad control %s (%s) http %s entry-bind %s stealth %s ca %s", *listen, mode, apiAddr, *bind, st.Mode(), bundle.CAFile)
+	log.Printf("umbrad control %s (%s) http %s entry-bind %s stealth %s udp %s ca %s", *listen, mode, apiAddr, *bind, st.Mode(), s.Status().UDP, bundle.CAFile)
 
 	go func() {
 		if err := s.ServeControl(cln); err != nil {
@@ -103,37 +117,32 @@ func main() {
 		}
 	}()
 	go func() {
-		if err := http.Serve(aln, con.Handler()); err != nil {
+		srv := &http.Server{
+			Handler:           con.Handler(),
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       60 * time.Second,
+			MaxHeaderBytes:    16 << 10,
+		}
+		if err := srv.Serve(aln); err != nil {
 			log.Printf("http: %v", err)
 		}
 	}()
 
 	if upgraded {
-		takeover := filepath.Join(*tlsDir, "takeover")
-		ok := false
-		for i := 0; i < 80; i++ {
-			raw, err := os.ReadFile(takeover)
-			if err == nil && nonce != "" && string(raw) == nonce {
-				ok = true
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		if !ok {
-			log.Fatal("upgrade: timed out waiting to take entries")
-		}
 		s.Restore(snap)
-		log.Printf("upgrade: entries taken over")
+		log.Printf("upgrade: entries restored pid %d", os.Getpid())
 	}
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, watchSignals()...)
 	for sig := range ch {
 		if isUpgrade(sig) {
-			log.Printf("upgrade: spawning replacement")
+			log.Printf("upgrade: releasing listeners then spawning replacement")
 			raw, _ := json.Marshal(s.Snapshot())
 			_ = os.WriteFile(*stateFile, raw, 0o600)
-			_ = os.Remove(filepath.Join(*tlsDir, "takeover"))
+			s.StopAccept()
 			cmd := exec.Command(os.Args[0], os.Args[1:]...)
 			logf, err := os.OpenFile(filepath.Join(*tlsDir, "upgrade.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 			if err == nil {
@@ -147,13 +156,10 @@ func main() {
 			cmd.Env = append(os.Environ(), "UMBRA_UPGRADED=1", "UMBRA_UPGRADE_NONCE="+nonce)
 			if err := cmd.Start(); err != nil {
 				log.Printf("upgrade spawn: %v", err)
-				continue
+				os.Exit(1)
 			}
-			time.Sleep(300 * time.Millisecond)
-			s.StopAccept()
-			_ = os.WriteFile(filepath.Join(*tlsDir, "takeover"), []byte(nonce), 0o600)
-			s.WaitIdle(30 * time.Second)
-			log.Printf("upgrade: old process draining done, pid %d takes over", cmd.Process.Pid)
+			s.WaitIdle(3 * time.Second)
+			log.Printf("upgrade: old pid %d exiting, replacement pid %d", os.Getpid(), cmd.Process.Pid)
 			os.Exit(0)
 		}
 		s.StopAccept()
@@ -183,4 +189,3 @@ func envOr(k, d string) string {
 	}
 	return d
 }
-

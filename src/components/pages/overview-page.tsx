@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { DemoButton } from "@/components/demo-button";
-import { getOverview, getTraffic, listAgents, listMappings } from "@/lib/umbra/api";
+import { getOverview, getTraffic, listNodes, listMappings } from "@/lib/umbra/api";
 import { formatBps, formatBytes, formatRelative } from "@/lib/umbra/format";
 import { actionLabel } from "@/lib/umbra/labels";
 import { StatusDot } from "@/components/status-dot";
@@ -15,11 +15,11 @@ import { RateChart } from "@/components/rate-chart";
 export function OverviewPage() {
   const overview = useQuery({ queryKey: ["umbra", "overview"], queryFn: () => getOverview() });
   const traffic = useQuery({ queryKey: ["umbra", "traffic", "24h"], queryFn: () => getTraffic({ data: { range: "24h" } }) });
-  const agents = useQuery({ queryKey: ["umbra", "agents"], queryFn: () => listAgents() });
+  const nodes = useQuery({ queryKey: ["umbra", "nodes"], queryFn: () => listNodes() });
   const mappings = useQuery({ queryKey: ["umbra", "mappings"], queryFn: () => listMappings() });
 
   const o = overview.data;
-  const empty = !overview.isLoading && (o?.agentsTotal ?? 0) === 0;
+  const empty = !overview.isLoading && (o?.nodesTotal ?? 0) === 0;
   const maps = mappings.data ?? [];
   const probed = maps.some((m) => m.bytesIn + m.bytesOut > 0);
 
@@ -39,13 +39,13 @@ export function OverviewPage() {
       ) : (
         <div className="flex flex-col gap-8">
           <NextHint
-            online={o?.agentsOnline ?? 0}
+            online={o?.nodesOnline ?? 0}
             mappings={o?.mappingsTotal ?? 0}
             probed={probed}
           />
 
           <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Stat label="在线节点" value={`${o?.agentsOnline ?? 0}`} hint={`共 ${o?.agentsTotal ?? 0}`} />
+            <Stat label="在线节点" value={`${o?.nodesOnline ?? 0}`} hint={`共 ${o?.nodesTotal ?? 0}`} />
             <Stat label="活跃映射" value={`${o?.mappingsActive ?? 0}`} hint={`共 ${o?.mappingsTotal ?? 0}`} />
             <Stat label="今日入站" value={formatBytes(o?.bytesInToday ?? 0)} hint={`现 ${formatBps(o?.bpsIn ?? 0)}`} />
             <Stat label="今日出站" value={formatBytes(o?.bytesOutToday ?? 0)} hint={`现 ${formatBps(o?.bpsOut ?? 0)}`} />
@@ -62,7 +62,7 @@ export function OverviewPage() {
             <div>
               <h2 className="mb-3 text-sm font-medium text-ink-soft">节点</h2>
               <ul className="divide-y divide-line rounded-xl bg-card shadow-border">
-                {(agents.data ?? []).slice(0, 5).map((a) => (
+                {(nodes.data ?? []).slice(0, 5).map((a) => (
                   <li key={a.id} className="flex items-center justify-between gap-3 px-4 py-3">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{a.name}</p>
@@ -119,7 +119,7 @@ function NextHint({
       <Hint>
         节点还没上线，映射无法开流。
         <Button asChild size="sm" variant="outline">
-          <Link to="/agents">去上线</Link>
+          <Link to="/nodes">去上线</Link>
         </Button>
       </Hint>
     );
@@ -187,7 +187,7 @@ function EmptyGate() {
       <div className="flex flex-wrap gap-2">
         <DemoButton />
         <Button asChild variant="ghost">
-          <Link to="/agents">手动登记</Link>
+          <Link to="/nodes">手动登记</Link>
         </Button>
       </div>
     </div>

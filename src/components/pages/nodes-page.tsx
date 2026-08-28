@@ -9,29 +9,29 @@ import { StatusDot } from "@/components/status-dot";
 import { Button } from "@/components/ui/button";
 import { TextAreaField, TextField, SelectField } from "@/components/field";
 import {
-  createAgent,
-  disconnectAgent,
-  getAgentBootstrap,
-  helloAgent,
-  listAgents,
+  createNode,
+  disconnectNode,
+  getNodeBootstrap,
+  helloNode,
+  listNodes,
   listFrames,
-  revokeAgent,
+  revokeNode,
 } from "@/lib/umbra/api";
 import { formatBytes, formatRelative } from "@/lib/umbra/format";
 import { frameLabel } from "@/lib/umbra/labels";
-import type { Agent } from "@/lib/umbra/types";
-import { ARCHS, PLATFORMS, agentInstall, platformLabel, type Arch, type Platform } from "@/lib/umbra/units";
+import type { Node } from "@/lib/umbra/types";
+import { ARCHS, PLATFORMS, nodeInstall, platformLabel, type Arch, type Platform } from "@/lib/umbra/units";
 
 type Issued = { id: string; token: string; os: Platform; arch: Arch };
 
-export function AgentsPage() {
+export function NodesPage() {
   const qc = useQueryClient();
-  const agents = useQuery({ queryKey: ["umbra", "agents"], queryFn: () => listAgents() });
+  const nodes = useQuery({ queryKey: ["umbra", "nodes"], queryFn: () => listNodes() });
   const frames = useQuery({ queryKey: ["umbra", "frames"], queryFn: () => listFrames() });
   const [composing, setComposing] = useState(false);
   const [issued, setIssued] = useState<Issued | null>(null);
-  const list = agents.data ?? [];
-  const empty = !agents.isLoading && list.length === 0;
+  const list = nodes.data ?? [];
+  const empty = !nodes.isLoading && list.length === 0;
   const showForm = composing || empty || issued !== null;
 
   function closeForm() {
@@ -59,7 +59,7 @@ export function AgentsPage() {
     >
       {showForm ? (
         <div className={empty && !issued ? "mx-auto mb-8 flex w-full max-w-xl flex-col gap-8" : undefined}>
-          <NewAgentPanel
+          <NewNodePanel
             issued={issued}
             onIssued={setIssued}
             onClose={closeForm}
@@ -78,7 +78,7 @@ export function AgentsPage() {
         <>
           <div className="flex flex-col gap-3 md:hidden">
             {list.map((a) => (
-              <AgentCard key={a.id} agent={a} />
+              <NodeCard key={a.id} node={a} />
             ))}
           </div>
           <div className="hidden overflow-x-auto rounded-xl bg-card shadow-border md:block">
@@ -96,7 +96,7 @@ export function AgentsPage() {
               </thead>
               <tbody>
                 {list.map((a) => (
-                  <AgentRow key={a.id} agent={a} />
+                  <NodeRow key={a.id} node={a} />
                 ))}
               </tbody>
             </table>
@@ -115,7 +115,7 @@ export function AgentsPage() {
               <li key={f.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2.5">
                 <span className="w-10 shrink-0 text-stone">{f.dir === "s2c" ? "S→C" : "C→S"}</span>
                 <span className="w-20 shrink-0 text-ink">{frameLabel[f.type] ?? f.type}</span>
-                <span className="hidden w-16 shrink-0 truncate text-stone sm:inline">{f.agentName}</span>
+                <span className="hidden w-16 shrink-0 truncate text-stone sm:inline">{f.nodeName}</span>
                 <span className="min-w-0 flex-1 truncate font-mono text-ink-soft">{f.body}</span>
               </li>
             ))}
@@ -126,19 +126,19 @@ export function AgentsPage() {
   );
 }
 
-function AgentActions({ agent }: { agent: Agent }) {
+function NodeActions({ node }: { node: Node }) {
   const qc = useQueryClient();
   const hello = useMutation({
-    mutationFn: () => helloAgent({ data: { id: agent.id } }),
-    onMutate: () => toast.loading("正在上线…", { id: `hello-${agent.id}` }),
+    mutationFn: () => helloNode({ data: { id: node.id } }),
+    onMutate: () => toast.loading("正在上线…", { id: `hello-${node.id}` }),
     onSuccess: () => {
-      toast.success("已 Hello，映射全量下发并 Ack", { id: `hello-${agent.id}` });
+      toast.success("已 Hello，映射全量下发并 Ack", { id: `hello-${node.id}` });
       void qc.invalidateQueries({ queryKey: ["umbra"] });
     },
-    onError: (e: Error) => toast.error(e.message, { id: `hello-${agent.id}` }),
+    onError: (e: Error) => toast.error(e.message, { id: `hello-${node.id}` }),
   });
   const bye = useMutation({
-    mutationFn: () => disconnectAgent({ data: { id: agent.id } }),
+    mutationFn: () => disconnectNode({ data: { id: node.id } }),
     onSuccess: () => {
       toast.message("节点已离线，映射等待重连");
       void qc.invalidateQueries({ queryKey: ["umbra"] });
@@ -146,7 +146,7 @@ function AgentActions({ agent }: { agent: Agent }) {
     onError: (e: Error) => toast.error(e.message),
   });
   const revoke = useMutation({
-    mutationFn: () => revokeAgent({ data: { id: agent.id } }),
+    mutationFn: () => revokeNode({ data: { id: node.id } }),
     onSuccess: () => {
       toast.message("凭证已吊销");
       void qc.invalidateQueries({ queryKey: ["umbra"] });
@@ -156,31 +156,31 @@ function AgentActions({ agent }: { agent: Agent }) {
 
   return (
     <div className="flex flex-wrap justify-end gap-1">
-      {agent.status !== "revoked" ? (
+      {node.status !== "revoked" ? (
         <Button
           size="sm"
           variant="outline"
           onClick={() => {
-            void getAgentBootstrap({ data: { id: agent.id } })
+            void getNodeBootstrap({ data: { id: node.id } })
               .then((r) => navigator.clipboard.writeText(r.token))
-              .then(() => toast.success("凭证已复制，填进客户端 UMBRA_TOKEN"))
+              .then(() => toast.success("凭证已复制，填进节点 UMBRA_TOKEN"))
               .catch((e: Error) => toast.error(e.message));
           }}
         >
           复制凭证
         </Button>
       ) : null}
-      {agent.status !== "revoked" && agent.status !== "online" ? (
+      {node.status !== "revoked" && node.status !== "online" ? (
         <Button size="sm" variant="outline" onClick={() => hello.mutate()} disabled={hello.isPending}>
           {hello.isPending ? "握手中…" : "上线"}
         </Button>
       ) : null}
-      {agent.status === "online" ? (
+      {node.status === "online" ? (
         <Button size="sm" variant="ghost" onClick={() => bye.mutate()} disabled={bye.isPending}>
           断开
         </Button>
       ) : null}
-      {agent.status !== "revoked" ? (
+      {node.status !== "revoked" ? (
         <Button size="sm" variant="ghost" onClick={() => revoke.mutate()} disabled={revoke.isPending}>
           吊销
         </Button>
@@ -189,57 +189,57 @@ function AgentActions({ agent }: { agent: Agent }) {
   );
 }
 
-function statusLabel(status: Agent["status"]) {
+function statusLabel(status: Node["status"]) {
   return status === "online" ? "在线" : status === "revoked" ? "已吊销" : "离线";
 }
 
-function AgentCard({ agent }: { agent: Agent }) {
+function NodeCard({ node }: { node: Node }) {
   return (
     <article className="rounded-xl bg-card p-4 shadow-border">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate font-medium">{agent.name}</p>
-          <p className="mt-0.5 text-xs text-stone">{platformLabel(agent.os, agent.arch)}</p>
-          {agent.comment ? <p className="mt-0.5 text-xs text-stone">{agent.comment}</p> : null}
+          <p className="truncate font-medium">{node.name}</p>
+          <p className="mt-0.5 text-xs text-stone">{platformLabel(node.os, node.arch)}</p>
+          {node.comment ? <p className="mt-0.5 text-xs text-stone">{node.comment}</p> : null}
         </div>
-        <StatusDot status={agent.status} label={statusLabel(agent.status)} />
+        <StatusDot status={node.status} label={statusLabel(node.status)} />
       </div>
       <p className="mt-3 font-mono text-xs text-ink-soft">
-        {agent.addr ?? "未连接"} · {agent.mappingCount} 映射 · {formatBytes(agent.bytesIn + agent.bytesOut)}
+        {node.addr ?? "未连接"} · {node.mappingCount} 映射 · {formatBytes(node.bytesIn + node.bytesOut)}
       </p>
-      <p className="mt-1 text-xs text-stone">{formatRelative(agent.lastSeen)}</p>
+      <p className="mt-1 text-xs text-stone">{formatRelative(node.lastSeen)}</p>
       <div className="mt-3">
-        <AgentActions agent={agent} />
+        <NodeActions node={node} />
       </div>
     </article>
   );
 }
 
-function AgentRow({ agent }: { agent: Agent }) {
+function NodeRow({ node }: { node: Node }) {
   return (
     <tr className="border-b border-line/70 last:border-0">
       <td className="px-4 py-3">
-        <div className="font-medium">{agent.name}</div>
-        <div className="text-xs text-stone">{platformLabel(agent.os, agent.arch)}</div>
-        {agent.comment ? <div className="text-xs text-stone">{agent.comment}</div> : null}
+        <div className="font-medium">{node.name}</div>
+        <div className="text-xs text-stone">{platformLabel(node.os, node.arch)}</div>
+        {node.comment ? <div className="text-xs text-stone">{node.comment}</div> : null}
       </td>
       <td className="px-4 py-3">
-        <StatusDot status={agent.status} label={statusLabel(agent.status)} />
+        <StatusDot status={node.status} label={statusLabel(node.status)} />
       </td>
-      <td className="px-4 py-3 font-mono text-xs text-ink-soft">{agent.addr ?? "—"}</td>
-      <td className="px-4 py-3 font-mono tabular-nums">{agent.mappingCount}</td>
+      <td className="px-4 py-3 font-mono text-xs text-ink-soft">{node.addr ?? "—"}</td>
+      <td className="px-4 py-3 font-mono tabular-nums">{node.mappingCount}</td>
       <td className="px-4 py-3 font-mono text-xs tabular-nums text-ink-soft">
-        {formatBytes(agent.bytesIn + agent.bytesOut)}
+        {formatBytes(node.bytesIn + node.bytesOut)}
       </td>
-      <td className="px-4 py-3 text-xs text-stone">{formatRelative(agent.lastSeen)}</td>
+      <td className="px-4 py-3 text-xs text-stone">{formatRelative(node.lastSeen)}</td>
       <td className="px-4 py-3">
-        <AgentActions agent={agent} />
+        <NodeActions node={node} />
       </td>
     </tr>
   );
 }
 
-function NewAgentPanel({
+function NewNodePanel({
   issued,
   onIssued,
   onClose,
@@ -257,16 +257,16 @@ function NewAgentPanel({
   const [arch, setArch] = useState<Arch>("amd64");
 
   const create = useMutation({
-    mutationFn: () => createAgent({ data: { name, comment, os, arch } }),
+    mutationFn: () => createNode({ data: { name, comment, os, arch } }),
     onSuccess: (res) => {
-      toast.success("凭证已签发，请复制保存", { id: "create-agent" });
+      toast.success("凭证已签发，请复制保存", { id: "create-node" });
       onIssued({ id: res.id, token: res.token, os, arch });
     },
-    onError: (e: Error) => toast.error(e.message, { id: "create-agent" }),
+    onError: (e: Error) => toast.error(e.message, { id: "create-node" }),
   });
 
   const hello = useMutation({
-    mutationFn: () => helloAgent({ data: { id: issued!.id } }),
+    mutationFn: () => helloNode({ data: { id: issued!.id } }),
     onMutate: () => toast.loading("正在上线…", { id: "hello-new" }),
     onSuccess: () => {
       toast.success("已上线，映射会立刻下发", { id: "hello-new" });
@@ -276,7 +276,7 @@ function NewAgentPanel({
     onError: (e: Error) => toast.error(e.message, { id: "hello-new" }),
   });
 
-  const installCmd = issued ? agentInstall(issued.os, issued.arch, issued.token) : "";
+  const installCmd = issued ? nodeInstall(issued.os, issued.arch, issued.token) : "";
 
   return (
     <section className="mb-8 w-full rounded-xl bg-card p-6 shadow-border sm:p-7">
@@ -284,7 +284,7 @@ function NewAgentPanel({
         <>
           <h2 className="text-base font-medium text-ink">把凭证放到内网节点上</h2>
           <p className="mt-1 text-sm leading-relaxed text-stone">
-            客户端只需要入口地址、CA 和下面这串 token。「本机演示上线」只在入口这台机器上拉 agent，不能给内网节点用。
+            客户端只需要入口地址、CA 和下面这串 token。「本机演示上线」只在入口这台机器上拉节点进程，不能给内网节点用。
           </p>
           <p className="mt-4 text-xs font-medium text-stone">UMBRA_TOKEN</p>
           <pre className="mt-1 overflow-x-auto rounded-md bg-paper-2 p-3 font-mono text-xs leading-relaxed text-ink">
@@ -335,7 +335,7 @@ function NewAgentPanel({
                 toast.error("先写名称");
                 return;
               }
-              toast.loading("正在登记…", { id: "create-agent" });
+              toast.loading("正在登记…", { id: "create-node" });
               create.mutate();
             }}
           >

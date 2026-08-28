@@ -4,7 +4,7 @@ import { getSql } from "@/lib/db";
 import { assertOwner } from "./owner.server";
 import { hashToken, newBootstrap, newId, newVisitorTicket } from "./ids";
 import type {
-  Agent,
+  Node,
   AuditItem,
   ControlFrameRow,
   Mapping,
@@ -16,16 +16,16 @@ import type {
 } from "./types";
 import type { ControlFrame, MappingWire } from "./protocol";
 import {
-  dropAgentEntries,
+  dropNodeEntries,
   dropSession,
   ensureEcho,
   grantUntilIso,
   heartbeat,
-  helloAgentChannel,
+  helloNodeChannel,
   knockChannel,
   openStreamProbe,
   revokeChannel,
-  syncAgentEntries,
+  syncNodeEntries,
   syncMappings,
   visitStream,
 } from "./hub";
@@ -38,13 +38,13 @@ import {
   gateRevoke,
   recallToken,
   rememberToken,
-  ensureAgentOnline,
-  stopAgent,
+  ensureNodeOnline,
+  stopNode,
 } from "./gate";
 import { ECHO_HOST, ECHO_PORT } from "./protocol";
-import { agentInstall, type Arch, type Platform } from "./units";
+import { nodeInstall, type Arch, type Platform } from "./units";
 
-type AgentRow = {
+type NodeRow = {
   id: string;
   name: string;
   comment: string;
@@ -63,7 +63,7 @@ type AgentRow = {
 
 type MappingRow = {
   id: string;
-  agent_id: string;
+  node_id: string;
   agent_name: string;
   agent_status: string;
   name: string;
@@ -88,14 +88,14 @@ type MappingRow = {
   updated_at: string | Date;
 };
 
-async function liveSync(agentId: string, online: boolean) {
-  const wires = await loadWires(agentId);
+async function liveSync(nodeId: string, online: boolean) {
+  const wires = await loadWires(nodeId);
   if (await gateHealth()) {
-    await dropAgentEntries(agentId);
-    await gatePutMappings(agentId, wires);
+    await dropNodeEntries(nodeId);
+    await gatePutMappings(nodeId, wires);
     return;
   }
-  const { errors } = await syncAgentEntries(agentId, wires, online);
+  const { errors } = await syncNodeEntries(nodeId, wires, online);
   if (errors.length === 0) return;
   const sql = await ownerSql();
   for (const e of errors) {
@@ -107,13 +107,13 @@ async function liveSync(agentId: string, online: boolean) {
 }
 
 async function persistProbe(
-  agentId: string,
+  nodeId: string,
   mappingId: string,
   result: { bytesIn: number; bytesOut: number; preview: string; frames: ControlFrame[] },
   action: string,
 ) {
   const sql = await ownerSql();
-  await persistFrames(agentId, result.frames);
+  await persistFrames(nodeId, result.frames);
   await sql.query(
     `update mappings
      set bytes_in = bytes_in + $1,
@@ -127,13 +127,13 @@ async function persistProbe(
     [result.bytesIn, result.bytesOut, result.preview, mappingId],
   );
   await sql.query(
-    `insert into traffic_samples (agent_id, mapping_id, bytes_in, bytes_out, conns_opened)
+    `insert into traffic_samples (node_id, mapping_id, bytes_in, bytes_out, conns_opened)
      values ($1,$2,$3,$4,1)`,
-    [agentId, mappingId, result.bytesIn, result.bytesOut],
+    [nodeId, mappingId, result.bytesIn, result.bytesOut],
   );
   await persistFrames(
-    agentId,
-    heartbeat(agentId, [
+    nodeId,
+    heartbeat(nodeId, [
       { id: mappingId, bytes_in_d: result.bytesIn, bytes_out_d: result.bytesOut, active_conns: 0 },
     ]),
   );
@@ -155,12 +155,12 @@ function asNum(v: number | string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function mapAgent(r: AgentRow): Agent {
+function mapNode(r: NodeRow): Node {
   return {
     id: r.id,
     name: r.name,
     comment: r.comment,
-    status: r.status as Agent["status"],
+    status: r.status as Node["status"],
     addr: r.addr,
     version: r.version,
     os: r.os,
@@ -177,9 +177,9 @@ function mapAgent(r: AgentRow): Agent {
 function mapMapping(r: MappingRow): Mapping {
   return {
     id: r.id,
-    agentId: r.agent_id,
-    agentName: r.agent_name,
-    agentStatus: r.agent_status as Mapping["agentStatus"],
+    nodeId: r.node_id,
+    nodeName: r.agent_name,
+    nodeStatus: r.agent_status as Mapping["nodeStatus"],
     name: r.name,
     proto: r.proto as Mapping["proto"],
     mode: r.mode as Mapping["mode"],
@@ -204,13 +204,13 @@ function mapMapping(r: MappingRow): Mapping {
   };
 }
 
-async function persistFrames(agentId: string, frames: ControlFrame[]) {
+async function persistFrames(nodeId: string, frames: ControlFrame[]) {
   if (frames.length === 0) return;
   const sql = await ownerSql();
   for (const f of frames) {
     await sql.query(
-      `insert into control_frames (ts, agent_id, dir, type, body) values ($1,$2,$3,$4,$5)`,
-      [f.ts, agentId, f.dir, f.type, JSON.stringify(f.body)],
+      `insert into control_frames (ts, node_id, dir, type, body) values ($1,$2,$3,$4,$5)`,
+      [f.ts, nodeId, f.dir, f.type, JSON.stringify(f.body)],
     );
   }
   await sql.query(
@@ -253,7 +253,7 @@ async function ownerSql() {
   return getSql();
 }
 
-async function loadWires(agentId: string): Promise<MappingWire[]> {
+async function loadWires(nodeId: string): Promise<MappingWire[]> {
   const sql = await ownerSql();
   const rows = await sql.query<{
     id: string;
@@ -271,8 +271,8 @@ async function loadWires(agentId: string): Promise<MappingWire[]> {
   }>(
     `select id, name, proto, mode, entry_port, local_host, local_port, enabled,
             max_conns, rate_kbps, allow_cidrs, idle_timeout_sec
-     from mappings where agent_id = $1`,
-    [agentId],
+     from mappings where node_id = $1`,
+    [nodeId],
   );
   return rows.map(toWire);
 }
@@ -285,10 +285,10 @@ async function audit(action: string, target: string, detail = "") {
   `;
 }
 
-async function ownedAgent(id: string) {
+async function ownedNode(id: string) {
   const sql = await ownerSql();
   const [a] = await sql.query<{ id: string; status: string; enabled: boolean }>(
-    `select id, status, enabled from agents where id = $1`,
+    `select id, status, enabled from nodes where id = $1`,
     [id],
   );
   if (!a) throw new Error("节点不存在");
@@ -299,7 +299,7 @@ async function ownedMapping(id: string) {
   const sql = await ownerSql();
   const [m] = await sql.query<{
     id: string;
-    agent_id: string;
+    node_id: string;
     mode: string;
     proto: string;
     enabled: boolean;
@@ -308,10 +308,10 @@ async function ownedMapping(id: string) {
     local_host: string;
     local_port: number;
   }>(
-    `select m.id, m.agent_id, m.mode, m.proto, m.enabled, m.name,
+    `select m.id, m.node_id, m.mode, m.proto, m.enabled, m.name,
             m.entry_port, m.local_host, m.local_port
      from mappings m
-     join agents a on a.id = m.agent_id
+     join nodes a on a.id = m.node_id
      where m.id = $1`,
     [id],
   );
@@ -348,9 +348,9 @@ function normalizeCidrs(raw: string) {
   return parts.join(",");
 }
 
-function statesFor(agentStatus: string, enabled: boolean, mode: string) {
-  if (!enabled) return { listenState: "disabled", pushState: agentStatus === "online" ? "acked" : "pending_offline" };
-  if (agentStatus !== "online") {
+function statesFor(nodeStatus: string, enabled: boolean, mode: string) {
+  if (!enabled) return { listenState: "disabled", pushState: nodeStatus === "online" ? "acked" : "pending_offline" };
+  if (nodeStatus !== "online") {
     return { listenState: "pending", pushState: "pending_offline" };
   }
   return {
@@ -365,27 +365,27 @@ const agentSelect = `
          count(m.id)::int as mapping_count,
          coalesce(sum(m.bytes_in), 0)::bigint as bytes_in,
          coalesce(sum(m.bytes_out), 0)::bigint as bytes_out
-  from agents a
-  left join mappings m on m.agent_id = a.id
+  from nodes a
+  left join mappings m on m.node_id = a.id
 `;
 
 const mappingSelect = `
-  select m.id, m.agent_id, a.name as agent_name, a.status as agent_status,
+  select m.id, m.node_id, a.name as agent_name, a.status as agent_status,
          m.name, m.proto, m.mode, m.entry_port, m.local_host, m.local_port,
          m.enabled, m.listen_state, m.listen_error, m.push_state,
          m.bytes_in, m.bytes_out, m.active_conns,
          m.last_probe_at, m.last_probe_preview, m.created_at, m.updated_at,
          m.max_conns, m.rate_kbps, m.allow_cidrs
   from mappings m
-  join agents a on a.id = m.agent_id
+  join nodes a on a.id = m.node_id
 `;
 
-export const listAgents = createServerFn({ method: "GET" }).handler(async () => {
+export const listNodes = createServerFn({ method: "GET" }).handler(async () => {
   const sql = await ownerSql();
-  const rows = await sql.query<AgentRow>(
+  const rows = await sql.query<NodeRow>(
     `${agentSelect} group by a.id order by a.created_at desc`,
   );
-  return rows.map(mapAgent);
+  return rows.map(mapNode);
 });
 
 export const listMappings = createServerFn({ method: "GET" }).handler(async () => {
@@ -400,8 +400,8 @@ export const getOverview = createServerFn({ method: "GET" }).handler(async () =>
   const sql = await ownerSql();
   const [agents] = await sql.query<{ online: number; total: number }>(
     `select
-        (select count(*)::int from agents where status = 'online' and enabled = true) as online,
-        (select count(*)::int from agents) as total`,
+        (select count(*)::int from nodes where status = 'online' and enabled = true) as online,
+        (select count(*)::int from nodes) as total`,
   );
   const [maps] = await sql.query<{ active: number; total: number }>(
     `select
@@ -427,8 +427,8 @@ export const getOverview = createServerFn({ method: "GET" }).handler(async () =>
   const in10 = asNum(rate?.bytes_in);
   const out10 = asNum(rate?.bytes_out);
   const overview: Overview = {
-    agentsOnline: agents?.online ?? 0,
-    agentsTotal: agents?.total ?? 0,
+    nodesOnline: agents?.online ?? 0,
+    nodesTotal: agents?.total ?? 0,
     mappingsActive: maps?.active ?? 0,
     mappingsTotal: maps?.total ?? 0,
     bytesInToday: asNum(today?.bytes_in),
@@ -443,7 +443,7 @@ export const getOverview = createServerFn({ method: "GET" }).handler(async () =>
   return overview;
 });
 
-export const createAgent = createServerFn({ method: "POST" })
+export const createNode = createServerFn({ method: "POST" })
   
   .validator(
     z.object({
@@ -460,10 +460,10 @@ export const createAgent = createServerFn({ method: "POST" })
     const os = data.os as Platform;
     const arch = data.arch as Arch;
     await sql`
-      insert into agents (id, name, comment, bootstrap_hash, status, os, arch)
+      insert into nodes (id, name, comment, bootstrap_hash, status, os, arch)
       values (${id}, ${data.name.trim()}, ${data.comment?.trim() ?? ""}, ${hashToken(token)}, 'offline', ${os}, ${arch})
     `;
-    await audit("agent.create", id, `${data.name.trim()} ${os}/${arch}`);
+    await audit("node.create", id, `${data.name.trim()} ${os}/${arch}`);
     rememberToken(id, token);
     if (await gateHealth()) {
       await gatePutToken(token, id).catch(() => undefined);
@@ -473,28 +473,28 @@ export const createAgent = createServerFn({ method: "POST" })
       token,
       os,
       arch,
-      installCmd: agentInstall(os, arch, token),
+      installCmd: nodeInstall(os, arch, token),
     };
   });
 
-export const helloAgent = createServerFn({ method: "POST" })
+export const helloNode = createServerFn({ method: "POST" })
   
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const sql = await ownerSql();
-    const agent = await ownedAgent(data.id);
-    if (agent.status === "revoked" || !agent.enabled) throw new Error("凭证已吊销");
+    const agent = await ownedNode(data.id);
+    if (node.status === "revoked" || !agent.enabled) throw new Error("凭证已吊销");
     await ensureEcho();
     const wires = await loadWires(data.id);
     const token = recallToken(data.id);
     if (await gateHealth()) {
       await liveSync(data.id, true);
-      await ensureAgentOnline(data.id, token);
+      await ensureNodeOnline(data.id, token);
     }
-    const { frames } = helloAgentChannel(data.id, wires);
+    const { frames } = helloNodeChannel(data.id, wires);
     await persistFrames(data.id, frames);
     await sql`
-      update agents
+      update nodes
       set status = 'online',
           last_seen = now(),
           addr = '127.0.0.1',
@@ -511,22 +511,22 @@ export const helloAgent = createServerFn({ method: "POST" })
           end,
           listen_error = null,
           updated_at = now()
-      where agent_id = ${data.id}
+      where node_id = ${data.id}
     `;
-    await audit("agent.hello", data.id, `HelloOk ${wires.length} mappings`);
+    await audit("node.hello", data.id, `HelloOk ${wires.length} mappings`);
     await liveSync(data.id, true);
     return { ok: true as const, pushed: wires.filter((m) => m.enabled).length };
   });
 
-export const disconnectAgent = createServerFn({ method: "POST" })
+export const disconnectNode = createServerFn({ method: "POST" })
   
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const sql = await ownerSql();
-    await ownedAgent(data.id);
-    stopAgent(data.id);
+    await ownedNode(data.id);
+    stopNode(data.id);
     if (await gateHealth()) await gateDisconnect(data.id).catch(() => undefined);
-    await sql`update agents set status = 'offline' where id = ${data.id} and status = 'online'`;
+    await sql`update nodes set status = 'offline' where id = ${data.id} and status = 'online'`;
     dropSession(data.id);
     await sql`
       update mappings
@@ -534,23 +534,23 @@ export const disconnectAgent = createServerFn({ method: "POST" })
           listen_state = case when enabled then 'pending' else 'disabled' end,
           active_conns = 0,
           updated_at = now()
-      where agent_id = ${data.id}
+      where node_id = ${data.id}
     `;
-    await audit("agent.disconnect", data.id, "");
+    await audit("node.disconnect", data.id, "");
     return { ok: true as const };
   });
 
-export const revokeAgent = createServerFn({ method: "POST" })
+export const revokeNode = createServerFn({ method: "POST" })
   
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const sql = await ownerSql();
-    await ownedAgent(data.id);
-    stopAgent(data.id);
+    await ownedNode(data.id);
+    stopNode(data.id);
     if (await gateHealth()) await gateRevoke(data.id).catch(() => undefined);
     await persistFrames(data.id, revokeChannel(data.id));
     await sql`
-      update agents set status = 'revoked', enabled = false, cred_fp = null
+      update nodes set status = 'revoked', enabled = false, cred_fp = null
       where id = ${data.id}
     `;
     await sql`
@@ -561,14 +561,14 @@ export const revokeAgent = createServerFn({ method: "POST" })
           enabled = false,
           active_conns = 0,
           updated_at = now()
-      where agent_id = ${data.id}
+      where node_id = ${data.id}
     `;
-    await audit("agent.revoke", data.id, "");
+    await audit("node.revoke", data.id, "");
     return { ok: true as const };
   });
 
 const mappingInput = z.object({
-  agentId: z.string(),
+  nodeId: z.string(),
   name: z.string().min(1).max(64),
   proto: z.enum(["tcp", "udp"]),
   mode: z.enum(["visitor", "spa", "public"]),
@@ -592,8 +592,8 @@ export const createMapping = createServerFn({ method: "POST" })
       throw new Error("公开或暗端口模式必须指定入口端口");
     }
     const sql = await ownerSql();
-    const agent = await ownedAgent(data.agentId);
-    if (agent.status === "revoked" || !agent.enabled) throw new Error("节点已吊销");
+    const agent = await ownedNode(data.nodeId);
+    if (node.status === "revoked" || !agent.enabled) throw new Error("节点已吊销");
     if (entryPort != null) {
       const [hit] = await sql.query<{ id: string }>(
         `select id from mappings where proto = $1 and entry_port = $2`,
@@ -602,18 +602,18 @@ export const createMapping = createServerFn({ method: "POST" })
       if (hit) throw new Error(`入口 ${data.proto}/${entryPort} 已被占用`);
     }
     const id = newId("map");
-    const st = statesFor(agent.status, true, data.mode);
+    const st = statesFor(node.status, true, data.mode);
     const maxConns = data.maxConns ?? 64;
     const rateKbps = data.rateKbps ?? 0;
     const allowCidrs = normalizeCidrs(data.allowCidrs ?? "");
     await sql.query(
       `insert into mappings (
-         id, agent_id, name, proto, mode, entry_port, local_host, local_port,
+         id, node_id, name, proto, mode, entry_port, local_host, local_port,
          enabled, listen_state, push_state, max_conns, rate_kbps, allow_cidrs, updated_at
        ) values ($1,$2,$3,$4,$5,$6,$7,$8,true,$9,$10,$11,$12,$13,now())`,
       [
         id,
-        data.agentId,
+        data.nodeId,
         data.name.trim(),
         data.proto,
         data.mode,
@@ -632,7 +632,7 @@ export const createMapping = createServerFn({ method: "POST" })
       id,
       `${data.name} ${data.proto} ${data.mode} → ${agent.id}`,
     );
-    if (agent.status === "online") {
+    if (node.status === "online") {
       const [created] = await sql.query<{
         id: string;
         name: string;
@@ -653,12 +653,12 @@ export const createMapping = createServerFn({ method: "POST" })
         [id],
       );
       if (created) {
-        const { frames } = syncMappings(data.agentId, [toWire(created)], []);
-        await persistFrames(data.agentId, frames);
+        const { frames } = syncMappings(data.nodeId, [toWire(created)], []);
+        await persistFrames(data.nodeId, frames);
         await audit("mapping.push", id, "MappingSync upsert");
       }
     }
-    await liveSync(data.agentId, agent.status === "online");
+    await liveSync(data.nodeId, node.status === "online");
     const [row] = await sql.query<MappingRow>(
       `${mappingSelect} where m.id = $1`,
       [id],
@@ -687,18 +687,18 @@ export const setMappingPolicy = createServerFn({ method: "POST" })
       [data.maxConns, data.rateKbps, allowCidrs, data.id],
     );
     const [agent] = await sql.query<{ status: string }>(
-      `select status from agents where id = $1`,
-      [m.agent_id],
+      `select status from nodes where id = $1`,
+      [m.node_id],
     );
     if (agent?.status === "online") {
-      const wires = await loadWires(m.agent_id);
+      const wires = await loadWires(m.node_id);
       const spec = wires.find((w) => w.id === data.id);
       if (spec) {
-        const { frames } = syncMappings(m.agent_id, [spec], []);
-        await persistFrames(m.agent_id, frames);
+        const { frames } = syncMappings(m.node_id, [spec], []);
+        await persistFrames(m.node_id, frames);
       }
     }
-    await liveSync(m.agent_id, agent?.status === "online");
+    await liveSync(m.node_id, agent?.status === "online");
     await audit("mapping.policy", data.id, `${data.maxConns}路 ${data.rateKbps}kbps ${allowCidrs || "any"}`);
     return { ok: true as const };
   });
@@ -710,8 +710,8 @@ export const setMappingEnabled = createServerFn({ method: "POST" })
     const sql = await ownerSql();
     const m = await ownedMapping(data.id);
     const [agent] = await sql.query<{ status: string }>(
-      `select status from agents where id = $1`,
-      [m.agent_id],
+      `select status from nodes where id = $1`,
+      [m.node_id],
     );
     const st = statesFor(agent?.status ?? "offline", data.enabled, m.mode);
     await sql`
@@ -724,18 +724,18 @@ export const setMappingEnabled = createServerFn({ method: "POST" })
       where id = ${data.id}
     `;
     if (agent?.status === "online") {
-      const wires = await loadWires(m.agent_id);
+      const wires = await loadWires(m.node_id);
       const spec = wires.find((w) => w.id === data.id);
       if (spec) {
         const { frames } = data.enabled
-          ? syncMappings(m.agent_id, [spec], [])
-          : syncMappings(m.agent_id, [], [data.id]);
-        await persistFrames(m.agent_id, frames);
+          ? syncMappings(m.node_id, [spec], [])
+          : syncMappings(m.node_id, [], [data.id]);
+        await persistFrames(m.node_id, frames);
         await audit("mapping.push", data.id, data.enabled ? "enable" : "disable");
       }
     }
     await audit(data.enabled ? "mapping.enable" : "mapping.disable", data.id, "");
-    await liveSync(m.agent_id, agent?.status === "online");
+    await liveSync(m.node_id, agent?.status === "online");
     return { ok: true as const };
   });
 
@@ -746,22 +746,22 @@ export const deleteMapping = createServerFn({ method: "POST" })
     const sql = await ownerSql();
     const m = await ownedMapping(data.id);
     const [agent] = await sql.query<{ status: string }>(
-      `select status from agents where id = $1`,
-      [m.agent_id],
+      `select status from nodes where id = $1`,
+      [m.node_id],
     );
     if (agent?.status === "online") {
-      const { frames } = syncMappings(m.agent_id, [], [data.id]);
-      await persistFrames(m.agent_id, frames);
+      const { frames } = syncMappings(m.node_id, [], [data.id]);
+      await persistFrames(m.node_id, frames);
     }
     await sql`delete from mappings where id = ${data.id}`;
     await audit("mapping.delete", data.id, "drain");
-    await liveSync(m.agent_id, agent?.status === "online");
+    await liveSync(m.node_id, agent?.status === "online");
     return { ok: true as const };
   });
 
 export const pulse = createServerFn({ method: "POST" }).handler(async () => {
   const sql = await ownerSql();
-  await sql`update agents set last_seen = now() where status = 'online' and enabled = true`;
+  await sql`update nodes set last_seen = now() where status = 'online' and enabled = true`;
   return { ok: true as const };
 });
 
@@ -770,24 +770,24 @@ export const listFrames = createServerFn({ method: "GET" }).handler(async () => 
   const rows = await sql.query<{
     id: number;
     ts: string | Date;
-    agent_id: string;
+    node_id: string;
     agent_name: string;
     dir: string;
     type: string;
     body: string;
   }>(
-    `select f.id, f.ts, f.agent_id, coalesce(a.name, '') as agent_name,
+    `select f.id, f.ts, f.node_id, coalesce(a.name, '') as agent_name,
             f.dir, f.type, f.body
      from control_frames f
-     left join agents a on a.id = f.agent_id
+     left join nodes a on a.id = f.node_id
      order by f.ts desc, f.id desc
      limit 40`,
   );
   const out: ControlFrameRow[] = rows.map((r) => ({
     id: r.id,
     ts: asIso(r.ts) ?? "",
-    agentId: r.agent_id,
-    agentName: r.agent_name,
+    nodeId: r.node_id,
+    nodeName: r.agent_name,
     dir: r.dir as ControlFrameRow["dir"],
     type: r.type,
     body: r.body,
@@ -813,19 +813,19 @@ export const probeMapping = createServerFn({ method: "POST" })
     const sql = await ownerSql();
     const m = await ownedMapping(data.id);
     const [agent] = await sql.query<{ status: string; enabled: boolean }>(
-      `select status, enabled from agents where id = $1`,
-      [m.agent_id],
+      `select status, enabled from nodes where id = $1`,
+      [m.node_id],
     );
-    if (!agent || agent.status !== "online" || !agent.enabled) {
+    if (!agent || node.status !== "online" || !agent.enabled) {
       throw new Error("节点不在线，无法开流");
     }
     await ensureEcho();
-    const spec = (await loadWires(m.agent_id)).find((w) => w.id === m.id);
+    const spec = (await loadWires(m.node_id)).find((w) => w.id === m.id);
     if (!spec) throw new Error("映射不存在");
     const payload = `umbra-probe ${m.id} ${new Date().toISOString()}\n`;
     try {
-      const result = await openStreamProbe(m.agent_id, spec, payload);
-      await persistProbe(m.agent_id, m.id, result, "mapping.probe");
+      const result = await openStreamProbe(m.node_id, spec, payload);
+      await persistProbe(m.node_id, m.id, result, "mapping.probe");
       const out: ProbeResult = {
         bytesIn: result.bytesIn,
         bytesOut: result.bytesOut,
@@ -834,7 +834,7 @@ export const probeMapping = createServerFn({ method: "POST" })
       return out;
     } catch (err) {
       const frames = (err as { frames?: ControlFrame[] }).frames;
-      if (frames) await persistFrames(m.agent_id, frames);
+      if (frames) await persistFrames(m.node_id, frames);
       const message = err instanceof Error ? err.message : "探测失败";
       if (!message.includes("未授权") && !message.includes("访客模式")) {
         await sql.query(
@@ -855,7 +855,7 @@ export const knockMapping = createServerFn({ method: "POST" })
     if (m.mode !== "spa" || !m.enabled) throw new Error("只有启用的暗端口需要敲门");
     const { until, frames } = knockChannel(m.id);
     if (await gateHealth()) await gateKnock(m.id).catch(() => undefined);
-    await persistFrames(m.agent_id, frames);
+    await persistFrames(m.node_id, frames);
     await audit("mapping.knock", m.id, "SPA grant 60s");
     return { until: new Date(until).toISOString() };
   });
@@ -879,7 +879,7 @@ export const issueVisitor = createServerFn({ method: "POST" })
     const issued: VisitorIssued = {
       id,
       ticket,
-      visitCmd: `umbra visit --gate gate:4400 --ticket ${ticket} --local 2222`,
+      visitCmd: `umbra-visit --server gate:4400 --ticket ${ticket} --local 127.0.0.1:2222`,
       expiresAt: expires.toISOString(),
     };
     return issued;
@@ -892,19 +892,19 @@ export const visitMapping = createServerFn({ method: "POST" })
     const sql = await ownerSql();
     const m = await ownedMapping(data.id);
     const [agent] = await sql.query<{ status: string; enabled: boolean }>(
-      `select status, enabled from agents where id = $1`,
-      [m.agent_id],
+      `select status, enabled from nodes where id = $1`,
+      [m.node_id],
     );
-    if (!agent || agent.status !== "online" || !agent.enabled) {
+    if (!agent || node.status !== "online" || !agent.enabled) {
       throw new Error("节点不在线，无法探访");
     }
     await ensureEcho();
-    const spec = (await loadWires(m.agent_id)).find((w) => w.id === m.id);
+    const spec = (await loadWires(m.node_id)).find((w) => w.id === m.id);
     if (!spec) throw new Error("映射不存在");
     const payload = `umbra-visit ${m.id} ${new Date().toISOString()}\n`;
     try {
-      const result = await visitStream(m.agent_id, spec, payload);
-      await persistProbe(m.agent_id, m.id, result, "mapping.visit");
+      const result = await visitStream(m.node_id, spec, payload);
+      await persistProbe(m.node_id, m.id, result, "mapping.visit");
       const out: ProbeResult = {
         bytesIn: result.bytesIn,
         bytesOut: result.bytesOut,
@@ -913,7 +913,7 @@ export const visitMapping = createServerFn({ method: "POST" })
       return out;
     } catch (err) {
       const frames = (err as { frames?: ControlFrame[] }).frames;
-      if (frames) await persistFrames(m.agent_id, frames);
+      if (frames) await persistFrames(m.node_id, frames);
       throw new Error(err instanceof Error ? err.message : "探访失败");
     }
   });
@@ -924,7 +924,7 @@ export const getTraffic = createServerFn({ method: "GET" })
     z.object({
       range: z.enum(["1h", "24h", "7d"]).optional(),
       mappingId: z.string().optional(),
-      agentId: z.string().optional(),
+      nodeId: z.string().optional(),
     }),
   )
   .handler(async ({ data }) => {
@@ -938,9 +938,9 @@ export const getTraffic = createServerFn({ method: "GET" })
       params.push(data.mappingId);
       clauses.push(`mapping_id = $${params.length}`);
     }
-    if (data.agentId) {
-      params.push(data.agentId);
-      clauses.push(`agent_id = $${params.length}`);
+    if (data.nodeId) {
+      params.push(data.nodeId);
+      clauses.push(`node_id = $${params.length}`);
     }
     const where = clauses.join(" and ");
     const series = await sql.query<{ ts: string | Date; bytes_in: number | string; bytes_out: number | string }>(
@@ -982,7 +982,7 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
   await ensureEcho();
 
   let [agent] = await sql.query<{ id: string; status: string; enabled: boolean }>(
-    `select id, status, enabled from agents
+    `select id, status, enabled from nodes
      where name = '演示节点' and status <> 'revoked'
      order by created_at desc limit 1`,
   );
@@ -990,23 +990,23 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
     const id = newId("agt");
     const token = newBootstrap();
     await sql`
-      insert into agents (id, name, comment, bootstrap_hash, status)
+      insert into nodes (id, name, comment, bootstrap_hash, status)
       values (${id}, '演示节点', '预览内嵌节点，映射由服务端下发', ${hashToken(token)}, 'offline')
     `;
-    await audit("agent.create", id, "演示节点");
+    await audit("node.create", id, "演示节点");
     agent = { id, status: "offline", enabled: true };
   }
-  const demoToken = recallToken(agent.id) ?? newBootstrap();
-  rememberToken(agent.id, demoToken);
+  const demoToken = recallToken(node.id) ?? newBootstrap();
+  rememberToken(node.id, demoToken);
   if (await gateHealth()) {
-    await gatePutToken(demoToken, agent.id).catch(() => undefined);
+    await gatePutToken(demoToken, node.id).catch(() => undefined);
   }
 
-  const wiresBefore = await loadWires(agent.id);
-  const { frames: helloFrames } = helloAgentChannel(agent.id, wiresBefore);
-  await persistFrames(agent.id, helloFrames);
+  const wiresBefore = await loadWires(node.id);
+  const { frames: helloFrames } = helloNodeChannel(node.id, wiresBefore);
+  await persistFrames(node.id, helloFrames);
   await sql`
-    update agents
+    update nodes
     set status = 'online', last_seen = now(), addr = '127.0.0.1', version = '0.4.0'
     where id = ${agent.id}
   `;
@@ -1020,10 +1020,10 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
         end,
         listen_error = null,
         updated_at = now()
-    where agent_id = ${agent.id}
+    where node_id = ${agent.id}
   `;
-  await audit("agent.hello", agent.id, "demo HelloOk");
-  await liveSync(agent.id, true);
+  await audit("node.hello", node.id, "demo HelloOk");
+  await liveSync(node.id, true);
 
   let [mapping] = await sql.query<{
     id: string;
@@ -1036,7 +1036,7 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
     enabled: boolean;
   }>(
     `select id, name, proto, mode, entry_port, local_host, local_port, enabled
-     from mappings where agent_id = $1 and name = '回声' limit 1`,
+     from mappings where node_id = $1 and name = '回声' limit 1`,
     [agent.id],
   );
 
@@ -1053,10 +1053,10 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
     const id = newId("map");
     await sql.query(
       `insert into mappings (
-         id, agent_id, name, proto, mode, entry_port, local_host, local_port,
+         id, node_id, name, proto, mode, entry_port, local_host, local_port,
          enabled, listen_state, push_state, updated_at
        ) values ($1,$2,'回声','tcp','spa',$3,$4,$5,true,'listening','acked',now())`,
-      [id, agent.id, entryPort, ECHO_HOST, ECHO_PORT],
+      [id, node.id, entryPort, ECHO_HOST, ECHO_PORT],
     );
     const [created] = await sql.query<{
       id: string;
@@ -1074,17 +1074,17 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
     );
     mapping = created;
     if (created) {
-      const { frames } = syncMappings(agent.id, [toWire(created)], []);
-      await persistFrames(agent.id, frames);
+      const { frames } = syncMappings(node.id, [toWire(created)], []);
+      await persistFrames(node.id, frames);
       await audit("mapping.create", id, "回声 spa → echo");
       await audit("mapping.push", id, "MappingSync upsert");
     }
   }
 
   if (!mapping) throw new Error("演示映射创建失败");
-  await liveSync(agent.id, true);
+  await liveSync(node.id, true);
   if (await gateHealth()) {
-    const up = await ensureAgentOnline(agent.id, demoToken);
+    const up = await ensureNodeOnline(node.id, demoToken);
     if (!up) {
       /* 入口不在就走控制台内的回声，不能空等 */
     }
@@ -1093,20 +1093,20 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
   const payload = `umbra-probe ${mapping.id} ${new Date().toISOString()}\n`;
   let dropped = false;
   try {
-    await openStreamProbe(agent.id, toWire(mapping), payload);
+    await openStreamProbe(node.id, toWire(mapping), payload);
   } catch (err) {
     dropped = true;
     const frames = (err as { frames?: ControlFrame[] }).frames;
-    if (frames) await persistFrames(agent.id, frames);
+    if (frames) await persistFrames(node.id, frames);
   }
   const knocked = knockChannel(mapping.id);
   if (await gateHealth()) await gateKnock(mapping.id).catch(() => undefined);
-  await persistFrames(agent.id, knocked.frames);
+  await persistFrames(node.id, knocked.frames);
   await audit("mapping.knock", mapping.id, "demo SPA");
-  const tcpSpec = (await loadWires(agent.id)).find((w) => w.id === mapping.id);
+  const tcpSpec = (await loadWires(node.id)).find((w) => w.id === mapping.id);
   if (!tcpSpec) throw new Error("演示映射丢失");
-  const result = await openStreamProbe(agent.id, tcpSpec, payload);
-  await persistProbe(agent.id, mapping.id, result, "mapping.probe");
+  const result = await openStreamProbe(node.id, tcpSpec, payload);
+  await persistProbe(node.id, mapping.id, result, "mapping.probe");
 
   let [udpMap] = await sql.query<{
     id: string;
@@ -1119,7 +1119,7 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
     enabled: boolean;
   }>(
     `select id, name, proto, mode, entry_port, local_host, local_port, enabled
-     from mappings where agent_id = $1 and name = '游戏口' limit 1`,
+     from mappings where node_id = $1 and name = '游戏口' limit 1`,
     [agent.id],
   );
   if (!udpMap) {
@@ -1135,10 +1135,10 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
     const id = newId("map");
     await sql.query(
       `insert into mappings (
-         id, agent_id, name, proto, mode, entry_port, local_host, local_port,
+         id, node_id, name, proto, mode, entry_port, local_host, local_port,
          enabled, listen_state, push_state, max_conns, allow_cidrs, updated_at
        ) values ($1,$2,'游戏口','udp','public',$3,$4,$5,true,'listening','acked',8,'127.0.0.0/8',now())`,
-      [id, agent.id, entryPort, ECHO_HOST, ECHO_PORT],
+      [id, node.id, entryPort, ECHO_HOST, ECHO_PORT],
     );
     const [created] = await sql.query<{
       id: string;
@@ -1156,8 +1156,8 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
     );
     udpMap = created;
     if (created) {
-      const { frames } = syncMappings(agent.id, [toWire(created)], []);
-      await persistFrames(agent.id, frames);
+      const { frames } = syncMappings(node.id, [toWire(created)], []);
+      await persistFrames(node.id, frames);
       await audit("mapping.create", id, "游戏口 udp public");
     }
   }
@@ -1166,16 +1166,16 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
     `update mappings set max_conns = 8, allow_cidrs = '127.0.0.0/8', updated_at = now() where id = $1`,
     [udpMap.id],
   );
-  await liveSync(agent.id, true);
-  const udpSpec = (await loadWires(agent.id)).find((w) => w.id === udpMap.id);
+  await liveSync(node.id, true);
+  const udpSpec = (await loadWires(node.id)).find((w) => w.id === udpMap.id);
   if (!udpSpec) throw new Error("UDP 映射丢失");
   const udpPayload = `umbra-udp ${udpMap.id} ${new Date().toISOString()}\n`;
-  const udpResult = await openStreamProbe(agent.id, udpSpec, udpPayload);
-  await persistProbe(agent.id, udpMap.id, udpResult, "mapping.probe");
-  await audit("demo.run", agent.id, dropped ? "drop → knock → tcp + udp" : "knock → tcp + udp");
+  const udpResult = await openStreamProbe(node.id, udpSpec, udpPayload);
+  await persistProbe(node.id, udpMap.id, udpResult, "mapping.probe");
+  await audit("demo.run", node.id, dropped ? "drop → knock → tcp + udp" : "knock → tcp + udp");
 
   const out: DemoResult = {
-    agentId: agent.id,
+    nodeId: node.id,
     mappingId: mapping.id,
     bytesIn: result.bytesIn,
     bytesOut: result.bytesOut,

@@ -9,13 +9,13 @@ type UdpSess = {
 
 type Entry = {
   mappingId: string;
-  agentId: string;
+  nodeId: string;
   mode: string;
   proto: "tcp" | "udp";
   port: number;
   localHost: string;
   localPort: number;
-  agentOnline: boolean;
+  nodeOnline: boolean;
   maxConns: number;
   rateKbps: number;
   allowCidrs: string;
@@ -203,14 +203,14 @@ export function stopEntry(mappingId: string): Promise<void> {
   });
 }
 
-export function markAgentOnline(agentId: string, online: boolean) {
+export function markNodeOnline(nodeId: string, online: boolean) {
   for (const e of entries().values()) {
-    if (e.agentId === agentId) e.agentOnline = online;
+    if (e.nodeId === nodeId) e.nodeOnline = online;
   }
 }
 
-export async function dropAgentEntries(agentId: string) {
-  const ids = [...entries().values()].filter((e) => e.agentId === agentId).map((e) => e.mappingId);
+export async function dropNodeEntries(nodeId: string) {
+  const ids = [...entries().values()].filter((e) => e.nodeId === nodeId).map((e) => e.mappingId);
   await Promise.all(ids.map((id) => stopEntry(id)));
 }
 
@@ -224,7 +224,7 @@ function handleConn(mappingId: string, sock: net.Socket) {
     sock.destroy();
     return;
   }
-  if (!e.agentOnline) {
+  if (!e.nodeOnline) {
     sock.destroy();
     return;
   }
@@ -261,7 +261,7 @@ function handleConn(mappingId: string, sock: net.Socket) {
 
 function handleUdp(e: Entry, msg: Buffer, rinfo: dgram.RemoteInfo) {
   if (e.mode === "spa" && !isGranted(e.mappingId)) return;
-  if (!e.agentOnline || !e.udp) return;
+  if (!e.nodeOnline || !e.udp) return;
   if (admit(e, rinfo.address) !== "ok") return;
   if (!takeRate(e, msg.length)) return;
   e.udpSessions ??= new Map();
@@ -304,7 +304,7 @@ function handleUdp(e: Entry, msg: Buffer, rinfo: dgram.RemoteInfo) {
 }
 
 export function syncEntry(
-  spec: MappingWire & { agentId: string; agentOnline: boolean },
+  spec: MappingWire & { nodeId: string; nodeOnline: boolean },
 ): Promise<{ ok: boolean; error?: string }> {
   if (!spec.enabled || spec.mode === "visitor" || spec.entry_port == null) {
     return stopEntry(spec.id).then(() => ({ ok: true }));
@@ -320,8 +320,8 @@ export function syncEntry(
     cur.localPort === spec.local_port &&
     cur.mode === spec.mode
   ) {
-    cur.agentOnline = spec.agentOnline;
-    cur.agentId = spec.agentId;
+    cur.nodeOnline = spec.nodeOnline;
+    cur.nodeId = spec.nodeId;
     applyPolicy(cur, spec);
     return Promise.resolve({ ok: true });
   }
@@ -338,13 +338,13 @@ export function syncEntry(
             if (err.code === "EADDRINUSE") {
               entries().set(spec.id, {
                 mappingId: spec.id,
-                agentId: spec.agentId,
+                nodeId: spec.nodeId,
                 mode: spec.mode,
                 proto: "udp",
                 port,
                 localHost: spec.local_host,
                 localPort: spec.local_port,
-                agentOnline: spec.agentOnline,
+                nodeOnline: spec.nodeOnline,
                 ...policyOf(spec),
               });
               resolve({ ok: true });
@@ -355,13 +355,13 @@ export function syncEntry(
           udp.bind(port, "127.0.0.1", () => {
             entries().set(spec.id, {
               mappingId: spec.id,
-              agentId: spec.agentId,
+              nodeId: spec.nodeId,
               mode: spec.mode,
               proto: "udp",
               port,
               localHost: spec.local_host,
               localPort: spec.local_port,
-              agentOnline: spec.agentOnline,
+              nodeOnline: spec.nodeOnline,
               udp,
               ...policyOf(spec),
             });
@@ -374,13 +374,13 @@ export function syncEntry(
           if (err.code === "EADDRINUSE") {
             entries().set(spec.id, {
               mappingId: spec.id,
-              agentId: spec.agentId,
+              nodeId: spec.nodeId,
               mode: spec.mode,
               proto: "tcp",
               port,
               localHost: spec.local_host,
               localPort: spec.local_port,
-              agentOnline: spec.agentOnline,
+              nodeOnline: spec.nodeOnline,
               ...policyOf(spec),
             });
             resolve({ ok: true });
@@ -391,14 +391,14 @@ export function syncEntry(
         server.listen(port, "127.0.0.1", () => {
           entries().set(spec.id, {
             mappingId: spec.id,
-            agentId: spec.agentId,
+            nodeId: spec.nodeId,
             mode: spec.mode,
             proto: "tcp",
             port,
             localHost: spec.local_host,
             localPort: spec.local_port,
             tcp: server,
-            agentOnline: spec.agentOnline,
+            nodeOnline: spec.nodeOnline,
             ...policyOf(spec),
           });
           resolve({ ok: true });
@@ -407,18 +407,18 @@ export function syncEntry(
   );
 }
 
-export async function syncAgentEntries(
-  agentId: string,
+export async function syncNodeEntries(
+  nodeId: string,
   wires: MappingWire[],
-  agentOnline: boolean,
+  nodeOnline: boolean,
 ) {
   const want = new Set(wires.map((w) => w.id));
   for (const e of [...entries().values()]) {
-    if (e.agentId === agentId && !want.has(e.mappingId)) await stopEntry(e.mappingId);
+    if (e.nodeId === nodeId && !want.has(e.mappingId)) await stopEntry(e.mappingId);
   }
   const errors: { id: string; error: string }[] = [];
   for (const w of wires) {
-    const r = await syncEntry({ ...w, agentId, agentOnline });
+    const r = await syncEntry({ ...w, nodeId, nodeOnline });
     if (!r.ok && r.error) errors.push({ id: w.id, error: r.error });
   }
   return { errors };
