@@ -1234,19 +1234,20 @@ func (c *Console) putToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	old, oldUntil, oldPrev, oldPrevUntil := rec.TokenHash, rec.TokenUntil, rec.PrevHash, rec.PrevUntil
-	if old != "" && old != hash {
-		c.revokeHash(old)
-	}
-	c.revokeHash(oldPrev)
 	rec.TokenHash, rec.TokenUntil = hash, until
 	rec.PrevHash, rec.PrevUntil, rec.Token = "", time.Time{}, ""
-	c.installToken(hash, rec.ID, until)
 	if err := c.save(); err != nil {
 		rec.TokenHash, rec.TokenUntil, rec.PrevHash, rec.PrevUntil = old, oldUntil, oldPrev, oldPrevUntil
 		c.mu.Unlock()
 		persistFail(w)
 		return
 	}
+	if old != "" && old != hash {
+		c.revokeHash(old)
+	}
+	c.revokeHash(oldPrev)
+	_ = c.saveTomb()
+	c.installToken(hash, rec.ID, until)
 	c.mu.Unlock()
 	w.WriteHeader(204)
 }

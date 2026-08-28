@@ -677,11 +677,6 @@ func TestRotateKeepsGraceThenNewExpiry(t *testing.T) {
 }
 
 func TestRotateExpiredTokenHasNoGrace(t *testing.T) {
-	oldTTL, oldGrace := gate.TokenTTL, gate.TokenGrace
-	gate.TokenTTL = 50 * time.Millisecond
-	gate.TokenGrace = 2 * time.Second
-	t.Cleanup(func() { gate.TokenTTL = oldTTL; gate.TokenGrace = oldGrace })
-
 	c, srv, _ := newTestConsole(t)
 	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
 	var created struct {
@@ -692,15 +687,15 @@ func TestRotateExpiredTokenHasNoGrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	res.Body.Close()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if c.Gate.LookupToken(created.Token) == "" {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	c.mu.Lock()
+	rec := c.nodes[created.ID]
+	past := time.Now().Add(-time.Second)
+	rec.TokenUntil = past
+	h := rec.TokenHash
+	c.mu.Unlock()
+	c.Gate.SetTokenHashUntil(h, created.ID, past)
 	if c.Gate.LookupToken(created.Token) != "" {
-		t.Fatal("token should expire before rotate")
+		t.Fatal("expired token should not authenticate")
 	}
 	res = doJSON(t, srv, "POST", "/v1/nodes/"+created.ID+"/rotate", nil, nil)
 	var rotated struct {
@@ -711,6 +706,9 @@ func TestRotateExpiredTokenHasNoGrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("rotate %d", res.StatusCode)
+	}
 	if rotated.GraceSec != 0 {
 		t.Fatalf("expired rotate graceSec=%d want 0", rotated.GraceSec)
 	}
@@ -719,6 +717,23 @@ func TestRotateExpiredTokenHasNoGrace(t *testing.T) {
 	}
 	if c.Gate.LookupToken(rotated.Token) != created.ID {
 		t.Fatal("new token must work")
+	}
+}
+
+func TestPutTokenPersistFailDoesNotPublish(t *testing.T) {
+	c, srv, dir := newTestConsole(t)
+	plain := "umbra_boot_putfail"
+	if err := os.Chmod(dir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+	res := doJSON(t, srv, "PUT", "/v1/tokens/"+plain, map[string]string{"node_id": "nde_put"}, nil)
+	body := readBody(t, res)
+	if res.StatusCode != 500 {
+		t.Fatalf("put token persist fail %d %s", res.StatusCode, body)
+	}
+	if c.Gate.LookupToken(plain) != "" {
+		t.Fatal("failed persist must not publish token to gate")
 	}
 }
 

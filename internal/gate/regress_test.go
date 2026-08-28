@@ -147,6 +147,76 @@ func TestRevokeDuringHandshakeRejectsEnroll(t *testing.T) {
 	}
 }
 
+func TestRevokeLinearizedAgainstEnroll(t *testing.T) {
+	old := handshakeDeadlineNs.Swap(int64(8 * time.Second))
+	defer handshakeDeadlineNs.Store(old)
+	s, addr := startGate(t)
+	for round := 0; round < 60; round++ {
+		id := "nde" + itoa(round)
+		tok := "tok" + itoa(round)
+		s.SetToken(tok, id)
+		raw, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held := s.sessionHeld("127.0.0.1")
+		if err := preface.Write(raw, preface.KindNode, tok); err != nil {
+			_ = raw.Close()
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if s.sessionHeld("127.0.0.1") > held {
+				break
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			s.Revoke(id)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			sess, err := yamux.Client(raw, muxcfg.Config())
+			if err != nil {
+				return
+			}
+			defer sess.Close()
+			st, err := sess.OpenStream()
+			if err != nil {
+				return
+			}
+			wc := wire.NewConn(st)
+			_ = wc.SendJSON("Enroll", map[string]string{"hostname": "x", "os": "linux", "arch": "amd64"})
+			_ = wc.SendJSON("Hello", map[string]string{"node_id": id, "version": "test"})
+			_ = st.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+			_, _ = wc.Read()
+		}()
+		close(start)
+		wg.Wait()
+		if s.LookupToken(tok) != "" {
+			_ = raw.Close()
+			t.Fatalf("round %d: token survived revoke", round)
+		}
+		for _, n := range s.Status().Nodes {
+			if n.ID == id {
+				_ = raw.Close()
+				t.Fatalf("round %d: node still published after revoke: online=%v", round, n.Online)
+			}
+		}
+		_ = raw.Close()
+		wait := time.Now().Add(2 * time.Second)
+		for time.Now().Before(wait) && s.sessionHeld("127.0.0.1") > held {
+			time.Sleep(2 * time.Millisecond)
+		}
+	}
+}
+
 func TestExpiryDuringHandshakeRejectsEnroll(t *testing.T) {
 	old := handshakeDeadlineNs.Swap(int64(8 * time.Second))
 	defer handshakeDeadlineNs.Store(old)

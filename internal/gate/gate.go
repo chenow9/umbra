@@ -748,6 +748,12 @@ func (s *Server) mappingByID(id string) (Mapping, string, bool) {
 func (s *Server) Revoke(nodeID string) {
 	s.mu.Lock()
 	ac := s.nodes[nodeID]
+	delete(s.nodes, nodeID)
+	for h, e := range s.tok {
+		if e.NodeID == nodeID {
+			delete(s.tok, h)
+		}
+	}
 	ids := []string{}
 	for id, e := range s.ent {
 		if e.nodeID == nodeID {
@@ -755,23 +761,19 @@ func (s *Server) Revoke(nodeID string) {
 		}
 	}
 	s.mu.Unlock()
-	if ac != nil && ac.conn != nil {
-		_ = ac.conn.SendJSON("Revoked", map[string]any{})
+	if ac != nil {
+		if ac.conn != nil {
+			_ = ac.conn.SendJSON("Revoked", map[string]any{})
+		}
 		if ac.sess != nil {
 			_ = ac.sess.Close()
+		} else if ac.raw != nil {
+			_ = ac.raw.Close()
 		}
 	}
 	for _, id := range ids {
 		s.stopEntry(id)
 	}
-	s.mu.Lock()
-	delete(s.nodes, nodeID)
-	for h, e := range s.tok {
-		if e.NodeID == nodeID {
-			delete(s.tok, h)
-		}
-	}
-	s.mu.Unlock()
 }
 
 func (s *Server) Disconnect(nodeID string) {
