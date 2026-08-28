@@ -11,7 +11,7 @@ import { TextAreaField, TextField, SelectField } from "@/components/field";
 import {
   createNode,
   disconnectNode,
-  getNodeBootstrap,
+  rotateNodeToken,
   helloNode,
   listNodes,
   listFrames,
@@ -161,13 +161,16 @@ function NodeActions({ node }: { node: Node }) {
           size="sm"
           variant="outline"
           onClick={() => {
-            void getNodeBootstrap({ data: { id: node.id } })
-              .then((r) => navigator.clipboard.writeText(r.token))
-              .then(() => toast.success("凭证已复制，填进节点 UMBRA_TOKEN"))
+            if (!window.confirm("轮换后请立刻把新凭证写到节点。旧凭证大约 90 秒内仍可用。")) {
+              return;
+            }
+            void rotateNodeToken({ data: { id: node.id } })
+              .then((r) => navigator.clipboard.writeText(r.token).then(() => r))
+              .then((r) => toast.success(`新凭证已复制，旧凭证宽限 ${r.graceSec} 秒`))
               .catch((e: Error) => toast.error(e.message));
           }}
         >
-          复制凭证
+          轮换凭证
         </Button>
       ) : null}
       {node.status !== "revoked" && node.status !== "online" ? (
@@ -208,6 +211,9 @@ function NodeCard({ node }: { node: Node }) {
         {node.addr ?? "未连接"} · {node.mappingCount} 映射 · {formatBytes(node.bytesIn + node.bytesOut)}
       </p>
       <p className="mt-1 text-xs text-stone">{formatRelative(node.lastSeen)}</p>
+      {node.tokenExpiresAt ? (
+        <p className="mt-1 text-xs text-stone">凭证 {formatRelative(node.tokenExpiresAt)} 到期</p>
+      ) : null}
       <div className="mt-3">
         <NodeActions node={node} />
       </div>
@@ -231,7 +237,12 @@ function NodeRow({ node }: { node: Node }) {
       <td className="px-4 py-3 font-mono text-xs tabular-nums text-ink-soft">
         {formatBytes(node.bytesIn + node.bytesOut)}
       </td>
-      <td className="px-4 py-3 text-xs text-stone">{formatRelative(node.lastSeen)}</td>
+      <td className="px-4 py-3 text-xs text-stone">
+        {formatRelative(node.lastSeen)}
+        {node.tokenExpiresAt ? (
+          <div>凭证 {formatRelative(node.tokenExpiresAt)} 到期</div>
+        ) : null}
+      </td>
       <td className="px-4 py-3">
         <NodeActions node={node} />
       </td>
@@ -284,7 +295,7 @@ function NewNodePanel({
         <>
           <h2 className="text-base font-medium text-ink">把凭证放到内网节点上</h2>
           <p className="mt-1 text-sm leading-relaxed text-stone">
-            客户端只需要入口地址、CA 和下面这串 token。「本机演示上线」只在入口这台机器上拉节点进程，不能给内网节点用。
+            这串 token 只显示一次，请马上复制到节点。之后只能轮换，不能再从控制台读出旧凭证。「本机演示上线」只在入口这台机器上拉节点进程。
           </p>
           <p className="mt-4 text-xs font-medium text-stone">UMBRA_TOKEN</p>
           <pre className="mt-1 overflow-x-auto rounded-md bg-paper-2 p-3 font-mono text-xs leading-relaxed text-ink">

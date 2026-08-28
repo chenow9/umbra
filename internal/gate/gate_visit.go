@@ -46,7 +46,7 @@ func (s *Server) runVisitor(raw net.Conn, sess *yamux.Session, wc *wire.Conn, fi
 	visID := "vis_" + hexCookie(newUDPCookie())[:16]
 	keys := s.issueUDP(raw)
 	s.mu.Lock()
-	vu := &visitUDP{id: visID, mapID: m.ID, nodeID: nodeID, proto: m.Proto, mode: m.Mode}
+	vu := &visitUDP{id: visID, mapID: m.ID, nodeID: nodeID, proto: m.Proto, mode: m.Mode, mux: sess}
 	if keys != nil {
 		vu.cookie, vu.in, vu.out = keys.cookie, keys.in, keys.out
 	}

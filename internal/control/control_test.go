@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"umbra/internal/gate"
 	"umbra/internal/stealth"
@@ -109,8 +111,69 @@ func TestRevokeFailsWhenPersistUnwritable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), created.Token) {
-		t.Fatal("token must remain on disk when revoke persist fails")
+	if strings.Contains(string(raw), created.Token) {
+		t.Fatal("plaintext token must not be stored")
+	}
+	if !strings.Contains(string(raw), gate.TicketHash(created.Token)) {
+		t.Fatal("token hash must remain on disk when revoke persist fails")
+	}
+}
+
+func TestPersistStoresTokenHashNotPlaintext(t *testing.T) {
+	c, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
+	var created struct {
+		ID    string `json:"id"`
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	raw, err := os.ReadFile(c.Persist)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), created.Token) {
+		t.Fatal("plaintext token leaked to control.json")
+	}
+	if !strings.Contains(string(raw), gate.TicketHash(created.Token)) {
+		t.Fatal("token hash missing from control.json")
+	}
+	res = doJSON(t, srv, "GET", "/v1/nodes/"+created.ID+"/bootstrap", nil, nil)
+	if res.StatusCode != http.StatusGone {
+		t.Fatalf("bootstrap %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+}
+
+func TestLoadMigratesPlainToken(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "control.json")
+	plain := "umbra_boot_legacy"
+	doc := persistFile{
+		Nodes: []*nodeRec{{ID: "nde_a", Name: "a", Token: plain, Status: "offline", Enabled: true}},
+	}
+	raw, _ := json.Marshal(doc)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g := gate.New("127.0.0.1", stealth.New(false))
+	c, err := New(g, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.nodes["nde_a"].Token != "" {
+		t.Fatal("legacy plaintext must be dropped")
+	}
+	if c.nodes["nde_a"].TokenHash != gate.TicketHash(plain) {
+		t.Fatal("legacy token must be hashed")
+	}
+	if g.LookupToken(plain) != "nde_a" {
+		t.Fatal("migrated hash must still authenticate")
+	}
+	if c.nodes["nde_a"].TokenUntil.IsZero() {
+		t.Fatal("legacy token must receive an expiry")
 	}
 }
 
@@ -193,13 +256,17 @@ func TestSetupRejectsTrailingJSON(t *testing.T) {
 func TestPortConflictOnEnableAndLegacyPut(t *testing.T) {
 	_, srv, _ := newTestConsole(t)
 	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
-	var n1 struct{ ID string `json:"id"` }
+	var n1 struct {
+		ID string `json:"id"`
+	}
 	if err := json.NewDecoder(res.Body).Decode(&n1); err != nil {
 		t.Fatal(err)
 	}
 	res.Body.Close()
 	res = doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n2"}, nil)
-	var n2 struct{ ID string `json:"id"` }
+	var n2 struct {
+		ID string `json:"id"`
+	}
 	if err := json.NewDecoder(res.Body).Decode(&n2); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +283,9 @@ func TestPortConflictOnEnableAndLegacyPut(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("first mapping %d %s", res.StatusCode, readBody(t, res))
 	}
-	var m1 struct{ ID string `json:"id"` }
+	var m1 struct {
+		ID string `json:"id"`
+	}
 	if err := json.NewDecoder(res.Body).Decode(&m1); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +304,9 @@ func TestPortConflictOnEnableAndLegacyPut(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("other port %d %s", res.StatusCode, readBody(t, res))
 	}
-	var m2 struct{ ID string `json:"id"` }
+	var m2 struct {
+		ID string `json:"id"`
+	}
 	if err := json.NewDecoder(res.Body).Decode(&m2); err != nil {
 		t.Fatal(err)
 	}
@@ -312,4 +383,320 @@ func TestLoadDisablesConflictingPorts(t *testing.T) {
 	if c.maps["m2"].Spec.Enabled {
 		t.Fatal("conflicting mapping must be disabled on restore")
 	}
+}
+
+func cookieClient(t *testing.T) *http.Client {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &http.Client{Jar: jar}
+}
+
+func TestOwnerSessionLogoutRevokesCopy(t *testing.T) {
+	c, srv, _ := newTestConsole(t)
+	c.SkipAuth = false
+	cli := cookieClient(t)
+	setupReq, _ := http.NewRequest("POST", srv.URL+"/v1/setup", strings.NewReader(`{"password":"abcdefgh"}`))
+	setupReq.Header.Set("content-type", "application/json")
+	res, err := cli.Do(setupReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		t.Fatalf("setup %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+
+	res, err = cli.Get(srv.URL + "/v1/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		t.Fatalf("authed %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+
+	u := res.Request.URL
+	stolen, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stolen.SetCookies(u, cli.Jar.Cookies(u))
+	thief := &http.Client{Jar: stolen}
+	res, err = thief.Get(srv.URL + "/v1/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		t.Fatalf("copied cookie should work before logout: %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/logout", nil)
+	res, err = cli.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readBody(t, res)
+
+	res, err = thief.Get(srv.URL + "/v1/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("copied cookie after logout %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+}
+
+func TestPasswordChangeRevokesAllSessions(t *testing.T) {
+	c, srv, _ := newTestConsole(t)
+	c.SkipAuth = false
+	a := cookieClient(t)
+	bcli := cookieClient(t)
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/setup", strings.NewReader(`{"password":"abcdefgh"}`))
+	req.Header.Set("content-type", "application/json")
+	res, err := a.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readBody(t, res)
+	req, _ = http.NewRequest("POST", srv.URL+"/v1/login", strings.NewReader(`{"password":"abcdefgh"}`))
+	req.Header.Set("content-type", "application/json")
+	res, err = bcli.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		t.Fatalf("login %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+
+	req, _ = http.NewRequest("POST", srv.URL+"/v1/password", strings.NewReader(`{"current":"abcdefgh","new":"newpassword"}`))
+	req.Header.Set("content-type", "application/json")
+	res, err = a.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		t.Fatalf("password %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+
+	res, err = bcli.Get(srv.URL + "/v1/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("other session after password change %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+	res, err = a.Get(srv.URL + "/v1/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		t.Fatalf("current session after password change %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+}
+
+func TestPersistEnvelopeChecksumAndPrev(t *testing.T) {
+	c, srv, dir := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("create %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+	raw, err := os.ReadFile(c.Persist)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var box persistBox
+	if err := json.Unmarshal(raw, &box); err != nil {
+		t.Fatal(err)
+	}
+	if box.Schema != persistSchema || box.Checksum == "" || len(box.Payload) == 0 {
+		t.Fatalf("envelope %+v", box)
+	}
+	if persistChecksum(compactJSON(box.Payload)) != box.Checksum {
+		t.Fatal("stored checksum mismatch")
+	}
+
+	res = doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n2"}, nil)
+	readBody(t, res)
+	prev, err := os.ReadFile(c.Persist + ".prev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(prev), `"n1"`) && !strings.Contains(string(prev), "n1") {
+		// payload is compact JSON; node name is inside
+		var prevBox persistBox
+		if err := json.Unmarshal(prev, &prevBox); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(prevBox.Payload), "n1") {
+			t.Fatalf("prev should be previous generation: %s", prevBox.Payload)
+		}
+	}
+
+	bad := append([]byte{}, raw...)
+	if i := strings.Index(string(bad), box.Checksum); i >= 0 {
+		bad[i] = '0'
+		if bad[i] == raw[i] {
+			bad[i] = '1'
+		}
+	} else {
+		t.Fatal("checksum not in file")
+	}
+	if err := os.WriteFile(c.Persist, bad, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(c.Persist + ".prev")
+	g := gate.New("127.0.0.1", stealth.New(false))
+	if _, err := New(g, c.Persist); err == nil {
+		t.Fatal("tampered checksum without prev must fail closed")
+	}
+
+	if err := os.WriteFile(c.Persist+".prev", raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(c.Persist, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g = gate.New("127.0.0.1", stealth.New(false))
+	c2, err := New(g, c.Persist)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c2.nodes) == 0 {
+		t.Fatal("corrupt current should restore previous generation")
+	}
+
+	if err := os.WriteFile(c.Persist, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(c.Persist+".prev", []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g = gate.New("127.0.0.1", stealth.New(false))
+	if _, err := New(g, c.Persist); err == nil {
+		t.Fatal("corrupt current and prev must fail closed")
+	}
+
+	unknown := persistBox{Schema: persistSchema + 9, Checksum: persistChecksum([]byte(`{}`)), Payload: []byte(`{}`)}
+	raw, _ = json.Marshal(unknown)
+	if err := os.WriteFile(filepath.Join(dir, "other.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g = gate.New("127.0.0.1", stealth.New(false))
+	if _, err := New(g, filepath.Join(dir, "other.json")); err == nil {
+		t.Fatal("unknown schema must fail closed")
+	}
+}
+
+func TestNodeTokenExpiryForced(t *testing.T) {
+	old := gate.TokenTTL
+	gate.TokenTTL = 80 * time.Millisecond
+	t.Cleanup(func() { gate.TokenTTL = old })
+
+	c, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
+	var created struct {
+		ID        string `json:"id"`
+		Token     string `json:"token"`
+		ExpiresAt string `json:"expiresAt"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if created.Token == "" || created.ExpiresAt == "" {
+		t.Fatal("issue must return expiry")
+	}
+	if c.Gate.LookupToken(created.Token) != created.ID {
+		t.Fatal("token must work before expiry")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c.Gate.LookupToken(created.Token) == "" {
+			return
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	t.Fatal("expired token must stop authenticating")
+}
+
+func TestRotateKeepsGraceThenNewExpiry(t *testing.T) {
+	oldTTL, oldGrace := gate.TokenTTL, gate.TokenGrace
+	gate.TokenTTL = time.Hour
+	gate.TokenGrace = 80 * time.Millisecond
+	t.Cleanup(func() { gate.TokenTTL = oldTTL; gate.TokenGrace = oldGrace })
+
+	c, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
+	var created struct {
+		ID    string `json:"id"`
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	res = doJSON(t, srv, "POST", "/v1/nodes/"+created.ID+"/rotate", nil, nil)
+	var rotated struct {
+		Token     string `json:"token"`
+		GraceSec  int    `json:"graceSec"`
+		ExpiresAt string `json:"expiresAt"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&rotated); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if rotated.Token == "" || rotated.ExpiresAt == "" {
+		t.Fatal("rotate must return token and expiry")
+	}
+	if c.Gate.LookupToken(created.Token) != created.ID || c.Gate.LookupToken(rotated.Token) != created.ID {
+		t.Fatal("both hashes must work during grace")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c.Gate.LookupToken(created.Token) == "" {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	if c.Gate.LookupToken(created.Token) != "" {
+		t.Fatal("old token must expire after grace")
+	}
+	if c.Gate.LookupToken(rotated.Token) != created.ID {
+		t.Fatal("new token must remain after grace")
+	}
+}
+
+func TestOwnerSessionExpires(t *testing.T) {
+	c, srv, _ := newTestConsole(t)
+	c.SkipAuth = false
+	old := sessionTTL
+	sessionTTL = 40 * time.Millisecond
+	t.Cleanup(func() { sessionTTL = old })
+	cli := cookieClient(t)
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/setup", strings.NewReader(`{"password":"abcdefgh"}`))
+	req.Header.Set("content-type", "application/json")
+	res, err := cli.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readBody(t, res)
+	time.Sleep(80 * time.Millisecond)
+	res, err = cli.Get(srv.URL + "/v1/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expired session %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
 }

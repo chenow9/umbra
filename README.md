@@ -54,7 +54,7 @@ go 1.24+
 ```bash
 sudo ./dist/umbrad_linux_amd64 \
   -listen :4400 \
-  -http :8080 \
+  -http 127.0.0.1:8080 \
   -bind 0.0.0.0 \
   -tls-dir /var/lib/umbra
 ```
@@ -102,7 +102,7 @@ UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.gate.yml up -d
 # 证书在 named volume umbra-tls → /var/lib/umbra/ca.crt
 ```
 
-`-http :8080` 不要裸奔公网；可改成 `127.0.0.1:8080`，再用 SSH 隧道访问。
+管理口默认只绑回环。绑到非回环地址必须加 `-http-tls-cert`/`-http-tls-key`（或 `-http-tls` 复用 tls-dir 证书），否则拒绝启动。不要裸 HTTP 上公网。
 
 **节点**（同样 host 网络，才能把映射目标写成宿主机 `127.0.0.1`）：
 
@@ -149,7 +149,7 @@ deploy/             入口 / 节点 Docker Compose
 
 - 控制通道默认 TLS 1.3，节点必须带 `--tls-ca`。
 - 发布镜像用 Go 1.25.14（digest 钉死）。推 `v*` tag 会先跑 vet、`-race` 测试和 govulncheck，失败不推镜像。
-- 管理面只放在你自己够得到的网上，不要裸奔公网。
+- 管理面默认 `127.0.0.1`；非回环必须 TLS。节点凭证有过期时间，过期前轮换。
 - 暗端口要对 nmap 显示 filtered，入口进程需要 `CAP_NET_ADMIN`。
 - 凭证只显示一次，吊销在控制台操作。
 

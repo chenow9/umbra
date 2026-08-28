@@ -12,6 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hashicorp/yamux"
+
+	"umbra/internal/muxcfg"
 	"umbra/internal/node"
 	"umbra/internal/preface"
 	"umbra/internal/stealth"
@@ -878,4 +881,217 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(b[i:])
+}
+
+func TestMappingAckMarksGeneration(t *testing.T) {
+	s, addr := startGate(t)
+	s.SetToken("tok", "nde1")
+	port := pickPort(t)
+	s.PutMappings("nde1", []wire.Mapping{{
+		ID: "map_ack", Name: "t", Proto: "tcp", Mode: "public",
+		EntryPort: &port, LocalHost: "127.0.0.1", LocalPort: 9,
+		Enabled: true, MaxConns: 8, IdleTimeoutSec: 30, Generation: 3,
+	}})
+	go func() { _ = node.Run(addr, "tok", nil) }()
+	waitOnline(t, s, "nde1")
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		st := s.MappingStats()["map_ack"]
+		if st.Acked && st.Generation == 3 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	st := s.MappingStats()["map_ack"]
+	t.Fatalf("acked=%v gen=%d", st.Acked, st.Generation)
+}
+
+func TestTCPIdleTimeoutReleasesQuota(t *testing.T) {
+	echo, echoPort := startEchoTCP(t)
+	defer echo.Close()
+	s, addr := startGate(t)
+	s.SetToken("tok", "nde1")
+	pub := pickPort(t)
+	port := pub
+	s.PutMappings("nde1", []wire.Mapping{{
+		ID: "map_idle", Name: "t", Proto: "tcp", Mode: "public",
+		EntryPort: &port, LocalHost: "127.0.0.1", LocalPort: echoPort,
+		Enabled: true, MaxConns: 8, IdleTimeoutSec: 1,
+	}})
+	go func() { _ = node.Run(addr, "tok", nil) }()
+	waitOnline(t, s, "nde1")
+	c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", itoa(pub)), 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.MappingStats()["map_idle"].Active == 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("active=%d after idle timeout", s.MappingStats()["map_idle"].Active)
+}
+
+func TestVisitorReconnectKeepsLocalPort(t *testing.T) {
+	echo, echoPort := startEchoTCP(t)
+	defer echo.Close()
+	s, addr := startGate(t)
+	s.SetToken("tok", "nde1")
+	s.PutMappings("nde1", []wire.Mapping{{
+		ID: "map_re", Name: "v", Proto: "tcp", Mode: "visitor",
+		LocalHost: "127.0.0.1", LocalPort: echoPort,
+		Enabled: true, MaxConns: 8, IdleTimeoutSec: 30,
+	}})
+	ticket := "umbra_vis_re"
+	s.SetTicket(TicketHash(ticket), "map_re", time.Now().Add(time.Hour))
+	go func() { _ = node.Run(addr, "tok", nil) }()
+	waitOnline(t, s, "nde1")
+	ready := make(chan string, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = visit.Run(ctx, visit.Config{
+			Server: addr, Ticket: ticket, Local: "127.0.0.1:0",
+			OnListen: func(_, a string) { ready <- a },
+		})
+	}()
+	var local string
+	select {
+	case local = <-ready:
+	case <-time.After(3 * time.Second):
+		t.Fatal("visit did not listen")
+	}
+	round := func() {
+		t.Helper()
+		c, err := net.DialTimeout("tcp", local, 2*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		msg := []byte("re-hi")
+		if _, err := c.Write(msg); err != nil {
+			t.Fatal(err)
+		}
+		buf := make([]byte, len(msg))
+		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		if _, err := io.ReadFull(c, buf); err != nil {
+			t.Fatal(err)
+		}
+		if string(buf) != string(msg) {
+			t.Fatalf("got %q", buf)
+		}
+	}
+	round()
+	s.mu.Lock()
+	for _, v := range s.visits {
+		if v.mux != nil {
+			_ = v.mux.Close()
+		}
+	}
+	s.mu.Unlock()
+	deadline := time.Now().Add(4 * time.Second)
+	var last error
+	for time.Now().Before(deadline) {
+		c, err := net.DialTimeout("tcp", local, 400*time.Millisecond)
+		if err != nil {
+			last = err
+			time.Sleep(80 * time.Millisecond)
+			continue
+		}
+		msg := []byte("re-hi")
+		_, err = c.Write(msg)
+		if err != nil {
+			_ = c.Close()
+			last = err
+			time.Sleep(80 * time.Millisecond)
+			continue
+		}
+		buf := make([]byte, len(msg))
+		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_, err = io.ReadFull(c, buf)
+		_ = c.Close()
+		if err == nil && string(buf) == string(msg) {
+			return
+		}
+		last = err
+		time.Sleep(80 * time.Millisecond)
+	}
+	t.Fatalf("visitor did not recover on same port: %v", last)
+}
+
+func TestRotateTokenGraceThenExpires(t *testing.T) {
+	s, addr := startGate(t)
+	oldTok, newTok := "tok-old", "tok-new"
+	s.SetToken(oldTok, "nde1")
+	done := make(chan error, 1)
+	go func() { done <- node.Run(addr, oldTok, nil) }()
+	waitOnline(t, s, "nde1")
+	s.RotateToken("nde1", TicketHash(oldTok), TicketHash(newTok), 200*time.Millisecond)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("rotate must disconnect current session")
+	}
+	if s.LookupToken(oldTok) != "nde1" || s.LookupToken(newTok) != "nde1" {
+		t.Fatal("both hashes must work during grace")
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if s.LookupToken(oldTok) == "" {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	if s.LookupToken(oldTok) != "" {
+		t.Fatal("old token must expire after grace")
+	}
+	if s.LookupToken(newTok) != "nde1" {
+		t.Fatal("new token must remain")
+	}
+	go func() { _ = node.Run(addr, newTok, nil) }()
+	waitOnline(t, s, "nde1")
+}
+
+func TestEnrollIgnoresBootstrapBody(t *testing.T) {
+	s, addr := startGate(t)
+	s.SetToken("tok-a", "nde_a")
+	s.SetToken("tok-b", "nde_b")
+	raw, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if err := preface.Write(raw, preface.KindNode, "tok-a"); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := yamux.Client(raw, muxcfg.Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	st, err := sess.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wc := wire.NewConn(st)
+	if err := wc.SendJSON("Enroll", map[string]string{
+		"bootstrap": "tok-b", "hostname": "x", "os": "linux", "arch": "amd64",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wc.Read(); err != nil {
+		t.Fatal(err)
+	}
+	if err := wc.SendJSON("Hello", map[string]string{"node_id": "nde_b", "version": "test"}); err != nil {
+		t.Fatal(err)
+	}
+	waitOnline(t, s, "nde_a")
+	for _, n := range s.Status().Nodes {
+		if n.ID == "nde_b" && n.Online {
+			t.Fatal("enroll body bootstrap must not override preface identity")
+		}
+	}
 }

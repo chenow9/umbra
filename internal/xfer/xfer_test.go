@@ -209,3 +209,56 @@ func TestCopyBidirectionalHardErrorClosesBoth(t *testing.T) {
 	}
 	_ = backend.Close()
 }
+
+func TestCopyBidirectionalHangAfterFIN(t *testing.T) {
+	old := ClosingTimeout
+	ClosingTimeout = 80 * time.Millisecond
+	t.Cleanup(func() { ClosingTimeout = old })
+
+	lnSrc, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lnSrc.Close()
+	lnDst, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lnDst.Close()
+	srcCh := make(chan net.Conn, 1)
+	dstCh := make(chan net.Conn, 1)
+	go func() { c, _ := lnSrc.Accept(); srcCh <- c }()
+	go func() { c, _ := lnDst.Accept(); dstCh <- c }()
+	client, err := net.Dial("tcp", lnSrc.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	backend, err := net.Dial("tcp", lnDst.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend.Close()
+	src := <-srcCh
+	dst := <-dstCh
+	done := make(chan struct{})
+	go func() {
+		CopyBidirectional(dst, src, nil, nil)
+		close(done)
+	}()
+	if _, err := client.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(backend, buf); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.(*net.TCPConn).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("backend hang after FIN must be bounded by ClosingTimeout")
+	}
+}

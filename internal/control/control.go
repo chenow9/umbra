@@ -1,7 +1,7 @@
 package control
 
 import (
-	"crypto/hmac"
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -23,7 +23,11 @@ import (
 	"umbra/internal/wire"
 )
 
+const persistSchema = 1
+
 var errPersist = errors.New("状态未能落盘")
+
+var sessionTTL = 12 * time.Hour
 
 type Console struct {
 	Gate       *gate.Server
@@ -34,6 +38,7 @@ type Console struct {
 	UIUpstream string
 	SkipAuth   bool
 	Persist    string
+	TrustProxy string
 
 	mu          sync.Mutex
 	ownerHash   string
@@ -41,6 +46,7 @@ type Console struct {
 	nodes       map[string]*nodeRec
 	maps        map[string]*mapRec
 	tickets     map[string]*ticketRec
+	sessions    map[string]*ownerSess
 	audit       []auditRec
 	frames      []frameRec
 	samples     []sampleRec
@@ -48,11 +54,22 @@ type Console struct {
 	seq         int64
 }
 
+type ownerSess struct {
+	Exp  time.Time
+	Last time.Time
+}
+
 type nodeRec struct {
-	ID, Name, Comment, OS, Arch, Version, Addr, Token, Status string
-	Enabled                                                   bool
-	Created                                                   time.Time
-	LastSeen                                                  *time.Time
+	ID, Name, Comment, OS, Arch, Version, Addr, Status string
+	Token                                              string    `json:"token,omitempty"`
+	TokenHash                                          string    `json:"token_hash,omitempty"`
+	TokenUntil                                         time.Time `json:"token_until,omitempty"`
+	PrevHash                                           string    `json:"prev_hash,omitempty"`
+	PrevUntil                                          time.Time `json:"prev_until,omitempty"`
+	Enabled                                            bool
+	Created                                            time.Time
+	LastSeen                                           *time.Time
+	revealed                                           string
 }
 
 type mapRec struct {
@@ -110,30 +127,63 @@ type hit struct {
 	t time.Time
 }
 
+type persistSess struct {
+	Hash string `json:"hash"`
+	Exp  int64  `json:"exp"`
+}
+
 type persistFile struct {
-	OwnerHash   string       `json:"owner_hash"`
-	OwnerSecret string       `json:"owner_secret"`
-	Nodes       []*nodeRec   `json:"nodes"`
-	LegacyNodes []*nodeRec   `json:"agents,omitempty"`
-	Maps        []*mapRec    `json:"maps"`
-	Tickets     []*ticketRec `json:"tickets"`
-	Audit       []auditRec   `json:"audit"`
+	OwnerHash   string        `json:"owner_hash"`
+	OwnerSecret string        `json:"owner_secret"`
+	Nodes       []*nodeRec    `json:"nodes"`
+	LegacyNodes []*nodeRec    `json:"agents,omitempty"`
+	Maps        []*mapRec     `json:"maps"`
+	Tickets     []*ticketRec  `json:"tickets"`
+	Sessions    []persistSess `json:"sessions,omitempty"`
+	Audit       []auditRec    `json:"audit"`
+}
+
+type persistBox struct {
+	Schema   int             `json:"schema"`
+	Checksum string          `json:"checksum"`
+	Payload  json.RawMessage `json:"payload"`
 }
 
 func New(g *gate.Server, persist string) (*Console, error) {
 	c := &Console{
-		Gate:    g,
-		Persist: persist,
-		nodes:   map[string]*nodeRec{},
-		maps:    map[string]*mapRec{},
-		tickets: map[string]*ticketRec{},
-		hits:    map[string]hit{},
+		Gate:     g,
+		Persist:  persist,
+		nodes:    map[string]*nodeRec{},
+		maps:     map[string]*mapRec{},
+		tickets:  map[string]*ticketRec{},
+		sessions: map[string]*ownerSess{},
+		hits:     map[string]hit{},
 	}
 	if err := c.load(); err != nil {
 		return nil, err
 	}
+	g.SetObserver(c)
 	go c.sampleLoop()
 	return c, nil
+}
+
+func (c *Console) Audit(action, target, detail string) {
+	c.mu.Lock()
+	c.logAudit(action, target, detail)
+	c.mu.Unlock()
+}
+
+func (c *Console) Frame(nodeID, dir, typ, body string) {
+	c.mu.Lock()
+	c.logFrame(nodeID, dir, typ, body)
+	c.mu.Unlock()
+}
+
+func bumpGeneration(m *wire.Mapping) {
+	m.Generation++
+	if m.Generation <= 0 {
+		m.Generation = 1
+	}
 }
 
 func (c *Console) sampleLoop() {
@@ -162,6 +212,47 @@ func (c *Console) sampleLoop() {
 	}
 }
 
+func persistChecksum(payload []byte) string {
+	sum := sha256.Sum256(compactJSON(payload))
+	return hex.EncodeToString(sum[:])
+}
+
+func compactJSON(raw []byte) []byte {
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, raw); err != nil {
+		return raw
+	}
+	return buf.Bytes()
+}
+
+func decodePersist(raw []byte) (persistFile, error) {
+	var p persistFile
+	if len(raw) == 0 {
+		return p, fmt.Errorf("control.json 损坏，拒绝以空配置启动: empty")
+	}
+	var box persistBox
+	if err := json.Unmarshal(raw, &box); err != nil {
+		return p, fmt.Errorf("control.json 损坏，拒绝以空配置启动: %w", err)
+	}
+	if box.Schema == 0 && len(box.Payload) == 0 && box.Checksum == "" {
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return p, fmt.Errorf("control.json 损坏，拒绝以空配置启动: %w", err)
+		}
+		return p, nil
+	}
+	if box.Schema != persistSchema {
+		return p, fmt.Errorf("control.json schema %d 无法识别，拒绝启动", box.Schema)
+	}
+	payload := compactJSON(box.Payload)
+	if box.Checksum == "" || persistChecksum(payload) != box.Checksum {
+		return p, fmt.Errorf("control.json 校验和错误，拒绝以空配置启动")
+	}
+	if err := json.Unmarshal(box.Payload, &p); err != nil {
+		return p, fmt.Errorf("control.json 损坏，拒绝以空配置启动: %w", err)
+	}
+	return p, nil
+}
+
 func (c *Console) load() error {
 	raw, err := os.ReadFile(c.Persist)
 	if err != nil {
@@ -170,19 +261,58 @@ func (c *Console) load() error {
 		}
 		return err
 	}
-	var p persistFile
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return fmt.Errorf("control.json 损坏，拒绝以空配置启动: %w", err)
+	p, err := decodePersist(raw)
+	if err != nil {
+		prev, perr := os.ReadFile(c.Persist + ".prev")
+		if perr != nil {
+			return err
+		}
+		p, perr = decodePersist(prev)
+		if perr != nil {
+			return fmt.Errorf("%v; 上一代备份也不可用: %w", err, perr)
+		}
+		log.Printf("control.json 不可用，已从上一代备份恢复")
 	}
 	c.ownerHash, c.ownerSecret = p.OwnerHash, p.OwnerSecret
 	legacy := p.Nodes
 	if len(legacy) == 0 {
 		legacy = p.LegacyNodes
 	}
+	nowLoad := time.Now()
+	migratedTTL := false
 	for _, a := range legacy {
+		if a.Token != "" {
+			if a.TokenHash == "" {
+				a.TokenHash = gate.TicketHash(a.Token)
+			}
+			a.Token = ""
+		}
+		a.revealed = ""
 		c.nodes[a.ID] = a
-		if a.Token != "" && a.Status != "revoked" {
-			c.Gate.SetToken(a.Token, a.ID)
+		if a.Status == "revoked" {
+			continue
+		}
+		if a.TokenHash != "" {
+			until := a.TokenUntil
+			if until.IsZero() {
+				until = nowLoad.Add(gate.TokenTTL)
+				a.TokenUntil = until
+				migratedTTL = true
+			}
+			if until.After(nowLoad) {
+				c.installToken(a.TokenHash, a.ID, until)
+			} else {
+				a.TokenHash = ""
+				a.TokenUntil = time.Time{}
+			}
+		}
+		if a.PrevHash != "" && a.PrevUntil.After(nowLoad) {
+			c.Gate.SetTokenHashUntil(a.PrevHash, a.ID, a.PrevUntil)
+			h, until := a.PrevHash, a.PrevUntil
+			time.AfterFunc(time.Until(until), func() { c.Gate.ExpireTokenHash(h) })
+		} else {
+			a.PrevHash = ""
+			a.PrevUntil = time.Time{}
 		}
 	}
 	byNode := map[string][]wire.Mapping{}
@@ -199,6 +329,9 @@ func (c *Console) load() error {
 				log.Printf("restore: disable %s: %v", m.Spec.ID, err)
 				m.Spec.Enabled = false
 			}
+		}
+		if m.Spec.Generation <= 0 {
+			m.Spec.Generation = 1
 		}
 		c.maps[m.Spec.ID] = m
 		byNode[m.NodeID] = append(byNode[m.NodeID], m.Spec)
@@ -218,13 +351,44 @@ func (c *Console) load() error {
 		c.tickets[t.ID] = t
 		c.Gate.SetTicket(t.Hash, t.MappingID, t.Expires)
 	}
+	for _, s := range p.Sessions {
+		if s.Hash == "" {
+			continue
+		}
+		exp := time.Unix(s.Exp, 0)
+		if now.After(exp) {
+			continue
+		}
+		c.sessions[s.Hash] = &ownerSess{Exp: exp, Last: now}
+	}
+	if migratedTTL {
+		if err := c.save(); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (c *Console) installToken(hash, nodeID string, until time.Time) time.Time {
+	if until.IsZero() {
+		until = time.Now().Add(gate.TokenTTL)
+	}
+	c.Gate.SetTokenHashUntil(hash, nodeID, until)
+	delay := time.Until(until)
+	if delay < time.Millisecond {
+		delay = time.Millisecond
+	}
+	h := hash
+	time.AfterFunc(delay, func() { c.Gate.ExpireTokenHash(h) })
+	return until
 }
 
 func (c *Console) save() error {
 	p := persistFile{OwnerHash: c.ownerHash, OwnerSecret: c.ownerSecret}
 	for _, a := range c.nodes {
 		cp := *a
+		cp.Token = ""
+		cp.revealed = ""
 		p.Nodes = append(p.Nodes, &cp)
 	}
 	for _, m := range c.maps {
@@ -235,13 +399,31 @@ func (c *Console) save() error {
 		cp := *t
 		p.Tickets = append(p.Tickets, &cp)
 	}
+	now := time.Now()
+	for h, s := range c.sessions {
+		if s == nil || now.After(s.Exp) {
+			delete(c.sessions, h)
+			continue
+		}
+		p.Sessions = append(p.Sessions, persistSess{Hash: h, Exp: s.Exp.Unix()})
+	}
 	p.Audit = c.audit
 	if len(p.Audit) > 200 {
 		p.Audit = p.Audit[len(p.Audit)-200:]
 	}
-	raw, err := json.MarshalIndent(p, "", "  ")
+	payload, err := json.Marshal(p)
 	if err != nil {
 		log.Printf("persist marshal: %v", err)
+		return fmt.Errorf("%w: %v", errPersist, err)
+	}
+	box := persistBox{Schema: persistSchema, Checksum: persistChecksum(payload), Payload: payload}
+	raw, err := json.MarshalIndent(box, "", "  ")
+	if err != nil {
+		log.Printf("persist marshal: %v", err)
+		return fmt.Errorf("%w: %v", errPersist, err)
+	}
+	if err := backupPrev(c.Persist); err != nil {
+		log.Printf("persist prev: %v", err)
 		return fmt.Errorf("%w: %v", errPersist, err)
 	}
 	if err := writeAtomic(c.Persist, raw, 0o600); err != nil {
@@ -249,6 +431,17 @@ func (c *Console) save() error {
 		return fmt.Errorf("%w: %v", errPersist, err)
 	}
 	return nil
+}
+
+func backupPrev(path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return writeAtomic(path+".prev", raw, 0o600)
 }
 
 func writeAtomic(path string, raw []byte, mode os.FileMode) error {
@@ -443,42 +636,76 @@ func (c *Console) login(pw, ip string) error {
 	return nil
 }
 
-func (c *Console) cookieValue() string {
-	exp := time.Now().Add(7 * 24 * time.Hour).Unix()
-	nonce := make([]byte, 8)
-	_, _ = rand.Read(nonce)
-	payload := fmt.Sprintf("%d:%s", exp, hex.EncodeToString(nonce))
-	mac := hmac.New(sha256.New, []byte(c.ownerSecret))
-	mac.Write([]byte(payload))
-	return payload + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+func newNodeToken() (plain, hash string) {
+	plain = "umbra_boot_" + newID("t")[2:]
+	hash = gate.TicketHash(plain)
+	return
+}
+
+func (c *Console) issueSessionLocked() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	sid := hex.EncodeToString(b[:])
+	now := time.Now()
+	c.sessions[gate.TicketHash(sid)] = &ownerSess{Exp: now.Add(sessionTTL), Last: now}
+	c.pruneSessionsLocked(32)
+	return sid
+}
+
+func (c *Console) pruneSessionsLocked(max int) {
+	for len(c.sessions) > max {
+		oldest := ""
+		var t time.Time
+		for h, s := range c.sessions {
+			if s == nil {
+				delete(c.sessions, h)
+				break
+			}
+			if oldest == "" || s.Last.Before(t) {
+				oldest, t = h, s.Last
+			}
+		}
+		if oldest == "" {
+			return
+		}
+		delete(c.sessions, oldest)
+	}
+}
+
+func (c *Console) dropSessionLocked(sid string) {
+	if sid == "" {
+		return
+	}
+	delete(c.sessions, gate.TicketHash(sid))
+}
+
+func (c *Console) dropAllSessionsLocked() {
+	c.sessions = map[string]*ownerSess{}
+}
+
+func (c *Console) touchSessionLocked(sid string) bool {
+	if sid == "" {
+		return false
+	}
+	h := gate.TicketHash(sid)
+	s := c.sessions[h]
+	now := time.Now()
+	if s == nil || now.After(s.Exp) {
+		delete(c.sessions, h)
+		return false
+	}
+	s.Last = now
+	if time.Until(s.Exp) < sessionTTL/2 {
+		s.Exp = now.Add(sessionTTL)
+		_ = c.save()
+	}
+	return true
 }
 
 func (c *Console) validCookie(raw string) bool {
 	c.mu.Lock()
-	sec := c.ownerSecret
-	c.mu.Unlock()
-	if raw == "" || sec == "" {
-		return false
-	}
-	var payload, sig string
-	for i := len(raw) - 1; i >= 0; i-- {
-		if raw[i] == '.' {
-			payload, sig = raw[:i], raw[i+1:]
-			break
-		}
-	}
-	if payload == "" || sig == "" {
-		return false
-	}
-	mac := hmac.New(sha256.New, []byte(sec))
-	mac.Write([]byte(payload))
-	want := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	if subtle.ConstantTimeCompare([]byte(sig), []byte(want)) != 1 {
-		return false
-	}
-	var exp int64
-	fmt.Sscanf(payload, "%d:", &exp)
-	return time.Now().Unix() < exp
+	defer c.mu.Unlock()
+	return c.touchSessionLocked(raw)
 }
 
 func (c *Console) authStatus(cookie string) map[string]bool {

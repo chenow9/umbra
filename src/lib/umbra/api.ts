@@ -86,7 +86,7 @@ export function createNode({
 }: {
   data: { name: string; comment?: string; os: string; arch: string };
 }) {
-  return api<{ id: string; token: string; os: string; arch: string }>("/v1/nodes", {
+  return api<{ id: string; token: string; os: string; arch: string; expiresAt?: string }>("/v1/nodes", {
     method: "POST",
     body: JSON.stringify(data),
   });
@@ -94,6 +94,16 @@ export function createNode({
 
 export function getNodeBootstrap({ data }: { data: { id: string } }) {
   return api<{ token: string }>(`/v1/nodes/${encodeURIComponent(data.id)}/bootstrap`);
+}
+
+export function rotateNodeToken({ data }: { data: { id: string } }) {
+  return api<{ token: string; graceSec: number; expiresAt?: string }>(`/v1/nodes/${encodeURIComponent(data.id)}/rotate`, {
+    method: "POST",
+  });
+}
+
+export function logoutAllOwnerSessions() {
+  return api<{ ok: true }>("/v1/logout-all", { method: "POST" });
 }
 
 export function helloNode({ data }: { data: { id: string } }) {

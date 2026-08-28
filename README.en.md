@@ -50,7 +50,7 @@ go 1.24+
 ```bash
 sudo ./dist/umbrad_linux_amd64 \
   -listen :4400 \
-  -http :8080 \
+  -http 127.0.0.1:8080 \
   -bind 0.0.0.0 \
   -tls-dir /var/lib/umbra
 ```
@@ -97,7 +97,7 @@ UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.gate.yml up -d
 # open http://gate:8080 and set a password on first visit
 ```
 
-Do not publish `-http :8080` to the internet. Bind `127.0.0.1:8080` and use an SSH tunnel if needed.
+The console binds loopback by default. A non-loopback `-http` address requires `-http-tls-cert`/`-http-tls-key` (or `-http-tls` to reuse the gate certs). Plain HTTP on a public address is refused at startup.
 
 **Node** (host networking so mappings can target the host's `127.0.0.1`):
 
@@ -144,6 +144,6 @@ deploy/             gate / node Compose files
 
 - Control channel is TLS 1.3; nodes require `--tls-ca`.
 - Release images are built with Go 1.25.14 (digest-pinned). A `v*` tag runs vet, `-race` tests, and govulncheck before any push.
-- Keep the console on a network you already reach. Do not publish it.
+- Console defaults to `127.0.0.1`; non-loopback binds require TLS. Node tokens expire and must be rotated.
 - For nmap `filtered` on dark ports, run the gate with `CAP_NET_ADMIN`.
 - Bootstrap tokens are shown once; revoke them in the console.

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -17,6 +19,7 @@ import (
 	"umbra/internal/control"
 	"umbra/internal/gate"
 	"umbra/internal/netutil"
+	"umbra/internal/obs"
 	"umbra/internal/stealth"
 	"umbra/internal/tlscfg"
 )
@@ -25,6 +28,10 @@ func main() {
 	listen := flag.String("listen", ":4400", "节点控制通道")
 	httpAddr := flag.String("http", "127.0.0.1:8080", "控制台与 API 同一 HTTP 口，默认只绑回环")
 	api := flag.String("api", "", "兼容旧参数，覆盖 -http")
+	httpTLS := flag.Bool("http-tls", false, "管理口使用 tls-dir 里的 gate 证书")
+	httpCert := flag.String("http-tls-cert", envOr("UMBRA_HTTP_TLS_CERT", ""), "管理口证书，非回环必须")
+	httpKey := flag.String("http-tls-key", envOr("UMBRA_HTTP_TLS_KEY", ""), "管理口私钥")
+	httpTrust := flag.String("http-trust-proxy", envOr("UMBRA_HTTP_TRUST_PROXY", ""), "可信反代 CIDR，才信 X-Forwarded-Proto")
 	ui := flag.String("ui", "", "前端静态目录，空则用内置")
 	bind := flag.String("bind", "127.0.0.1", "入口监听地址")
 	tlsDir := flag.String("tls-dir", "/var/lib/umbra", "证书与热升级状态")
@@ -32,7 +39,9 @@ func main() {
 	stealthMode := flag.String("stealth", "auto", "nft | off | auto")
 	udpMode := flag.String("udp", envOr("UMBRA_UDP", "auto"), "UDP 数据面: auto | required | yamux")
 	stateFile := flag.String("state", "", "热升级恢复的状态文件")
+	pprofAddr := flag.String("pprof", envOr("UMBRA_PPROF", "127.0.0.1:6060"), "本机 pprof 监听，空则关闭")
 	flag.Parse()
+	obs.Init()
 
 	if err := os.MkdirAll(*tlsDir, 0o700); err != nil {
 		log.Fatal(err)
@@ -81,6 +90,19 @@ func main() {
 	if *api != "" {
 		apiAddr = *api
 	}
+	certFile, keyFile := *httpCert, *httpKey
+	if *httpTLS {
+		if certFile == "" {
+			certFile = filepath.Join(*tlsDir, "gate.crt")
+		}
+		if keyFile == "" {
+			keyFile = filepath.Join(*tlsDir, "gate.key")
+		}
+	}
+	hasHTTPTLS := certFile != "" && keyFile != ""
+	if err := control.CheckHTTPBind(apiAddr, hasHTTPTLS); err != nil {
+		log.Fatal(err)
+	}
 	aln, err := listenAPI(apiAddr)
 	if err != nil {
 		log.Fatal(err)
@@ -104,28 +126,38 @@ func main() {
 		con.UIUpstream = "http://127.0.0.1:8080"
 	}
 	con.SkipAuth = os.Getenv("UMBRA_LOGIN") == "off" || os.Getenv("GROK_AGENT") != "" || os.Getenv("GROK_PROJECT_ID") != ""
+	con.TrustProxy = *httpTrust
 
 	mode := "tls1.3"
 	if *plain {
 		mode = "plain"
 	}
-	log.Printf("umbrad control %s (%s) http %s entry-bind %s stealth %s udp %s ca %s", *listen, mode, apiAddr, *bind, st.Mode(), s.Status().UDP, bundle.CAFile)
+	httpMode := "http"
+	if hasHTTPTLS {
+		httpMode = "https"
+	}
+	log.Printf("umbrad control %s (%s) %s %s entry-bind %s stealth %s udp %s ca %s", *listen, mode, httpMode, apiAddr, *bind, st.Mode(), s.Status().UDP, bundle.CAFile)
 
+	if *pprofAddr != "" && *pprofAddr != "off" {
+		go servePprof(*pprofAddr)
+	}
 	go func() {
 		if err := s.ServeControl(cln); err != nil {
 			log.Printf("control: %v", err)
 		}
 	}()
 	go func() {
-		srv := &http.Server{
-			Handler:           con.Handler(),
-			ReadHeaderTimeout: 5 * time.Second,
-			ReadTimeout:       15 * time.Second,
-			WriteTimeout:      30 * time.Second,
-			IdleTimeout:       60 * time.Second,
-			MaxHeaderBytes:    16 << 10,
+		srv := control.NewHTTPServer(con.Handler())
+		var err error
+		if hasHTTPTLS {
+			if srv.TLSConfig == nil {
+				srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13}
+			}
+			err = srv.ServeTLS(aln, certFile, keyFile)
+		} else {
+			err = srv.Serve(aln)
 		}
-		if err := srv.Serve(aln); err != nil {
+		if err != nil {
 			log.Printf("http: %v", err)
 		}
 	}()
@@ -181,6 +213,22 @@ func listenAPI(addr string) (net.Listener, error) {
 		return ln, nil
 	}
 	return net.Listen("tcp", addr)
+}
+
+func servePprof(addr string) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Printf("pprof %s: %v", addr, err)
+		return
+	}
+	log.Printf("pprof %s", ln.Addr())
+	_ = http.Serve(ln, mux)
 }
 
 func envOr(k, d string) string {

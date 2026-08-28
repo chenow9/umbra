@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	maxJSON  = 1 << 20
+	maxJSON  = 256 << 10
 	maxDgram = 64 << 10
 )
 
@@ -31,6 +31,7 @@ type Mapping struct {
 	RateKbps       int    `json:"rate_kbps"`
 	AllowCidrs     string `json:"allow_cidrs"`
 	IdleTimeoutSec int    `json:"idle_timeout_sec"`
+	Generation     int64  `json:"generation,omitempty"`
 }
 
 type StreamOpen struct {

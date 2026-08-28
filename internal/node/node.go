@@ -21,6 +21,8 @@ import (
 
 const Version = "0.6.0"
 
+var ErrRevoked = fmt.Errorf("credential revoked")
+
 type session struct {
 	server string
 	raw    net.Conn
@@ -65,11 +67,10 @@ func Run(server, token string, tlsConf *tls.Config) error {
 	wc := wire.NewConn(ctrl)
 	host, _ := os.Hostname()
 	if err := wc.SendJSON("Enroll", map[string]string{
-		"bootstrap": token,
-		"hostname":  host,
-		"os":        runtime.GOOS,
-		"arch":      runtime.GOARCH,
-		"version":   Version,
+		"hostname": host,
+		"os":       runtime.GOOS,
+		"arch":     runtime.GOARCH,
+		"version":  Version,
 	}); err != nil {
 		return err
 	}
@@ -198,7 +199,7 @@ func onJSON(rt *session, c *wire.Conn, env wire.Envelope) error {
 		}
 		align(rt.have, rt.haveMu, b.Mappings)
 		for _, m := range b.Mappings {
-			_ = c.SendJSON("MappingAck", map[string]any{"id": m.ID, "ok": true})
+			_ = c.SendJSON("MappingAck", map[string]any{"id": m.ID, "ok": true, "generation": m.Generation})
 		}
 		if b.UDPMode == "required" || b.UDPMode == "uplane-required" || b.UDPMode == "uplane" {
 			if b.UDPCookie == "" || rt.id == "" {
@@ -221,7 +222,7 @@ func onJSON(rt *session, c *wire.Conn, env wire.Envelope) error {
 		rt.haveMu.Unlock()
 		align(rt.have, rt.haveMu, b.Upsert)
 		for _, m := range b.Upsert {
-			_ = c.SendJSON("MappingAck", map[string]any{"id": m.ID, "ok": true})
+			_ = c.SendJSON("MappingAck", map[string]any{"id": m.ID, "ok": true, "generation": m.Generation})
 		}
 		for _, id := range b.Delete {
 			_ = c.SendJSON("MappingAck", map[string]any{"id": id, "ok": true})
@@ -229,7 +230,7 @@ func onJSON(rt *session, c *wire.Conn, env wire.Envelope) error {
 	case "Dropped":
 		return fmt.Errorf("dropped")
 	case "Revoked":
-		return fmt.Errorf("credential revoked")
+		return ErrRevoked
 	}
 	return nil
 }

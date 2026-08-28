@@ -2,7 +2,7 @@ export type NodeStatus = "online" | "offline" | "revoked";
 export type Proto = "tcp" | "udp";
 export type MappingMode = "visitor" | "spa" | "public";
 export type ListenState = "pending" | "listening" | "ready" | "disabled" | "error";
-export type PushState = "acked" | "pending_offline" | "error";
+export type PushState = "acked" | "pending" | "pending_offline" | "error";
 
 export type Node = {
   id: string;
@@ -16,6 +16,7 @@ export type Node = {
   lastSeen: string | null;
   enabled: boolean;
   createdAt: string;
+  tokenExpiresAt?: string;
   mappingCount: number;
   bytesIn: number;
   bytesOut: number;

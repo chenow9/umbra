@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 
 	"umbra/internal/muxcfg"
 	"umbra/internal/preface"
+	"umbra/internal/retry"
 	"umbra/internal/wire"
 	"umbra/internal/xfer"
 )
@@ -24,7 +27,67 @@ type Config struct {
 	OnListen func(network, addr string)
 }
 
+type localBind struct {
+	proto string
+	ln    net.Listener
+	pc    *net.UDPConn
+}
+
+func (b *localBind) close() {
+	if b == nil {
+		return
+	}
+	if b.ln != nil {
+		_ = b.ln.Close()
+		b.ln = nil
+	}
+	if b.pc != nil {
+		_ = b.pc.Close()
+		b.pc = nil
+	}
+}
+
 func Run(ctx context.Context, cfg Config) error {
+	bind := &localBind{}
+	defer bind.close()
+	backoff := retry.Initial
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		served := false
+		err := dialAndServe(ctx, cfg, bind, &served)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err != nil && !retryableVisit(err) {
+			return err
+		}
+		if served {
+			backoff = retry.Initial
+		}
+		if err != nil {
+			log.Printf("visit: %v — retry in ~%s", err, backoff)
+		}
+		if !retry.Sleep(ctx, backoff) {
+			return nil
+		}
+		backoff = retry.Next(backoff)
+	}
+}
+
+func retryableVisit(err error) bool {
+	if err == nil {
+		return true
+	}
+	s := err.Error()
+	if strings.Contains(s, "bad_ticket") || strings.Contains(s, "no_mapping") || strings.Contains(s, "acl") {
+		return false
+	}
+	return true
+}
+
+func dialAndServe(ctx context.Context, cfg Config, bind *localBind, served *bool) error {
 	d := net.Dialer{Timeout: 8 * time.Second}
 	raw, err := d.Dial("tcp", cfg.Server)
 	if err != nil {
@@ -83,45 +146,102 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
+	if err := ensureBind(cfg, ok.Proto, bind); err != nil {
+		return err
+	}
+	if served != nil {
+		*served = true
+	}
+	sessCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		select {
+		case <-sessCtx.Done():
+		case <-sess.CloseChan():
+			cancel()
+		}
+	}()
 	if ok.Proto == "udp" {
 		required := ok.UDPMode == "required" || ok.UDPMode == "uplane-required" || ok.UDPMode == "uplane"
 		if required && (ok.VisitID == "" || ok.UDPCookie == "") {
 			return fmt.Errorf("uplane required but missing cookie")
 		}
 		if ok.VisitID != "" && ok.UDPCookie != "" {
-			err := serveUDPPlane(ctx, cfg, raw, ok.VisitID, ok.UDPCookie, ok.MappingID)
+			err := serveUDPPlane(sessCtx, cfg, raw, ok.VisitID, ok.UDPCookie, ok.MappingID, bind.pc)
 			if err == nil {
 				return nil
 			}
 			if required {
 				return err
 			}
-			return serveUDP(ctx, sess, cfg, ok.MappingID)
+			return serveUDP(sessCtx, sess, bind.pc, ok.MappingID)
 		}
-		return serveUDP(ctx, sess, cfg, ok.MappingID)
+		return serveUDP(sessCtx, sess, bind.pc, ok.MappingID)
 	}
-	return serveTCP(ctx, sess, cfg, ok.MappingID)
+	return serveTCP(sessCtx, sess, bind.ln, ok.MappingID)
 }
 
-func serveTCP(ctx context.Context, sess *yamux.Session, cfg Config, mappingID string) error {
+func ensureBind(cfg Config, proto string, bind *localBind) error {
+	if bind.proto != "" && bind.proto != proto {
+		return fmt.Errorf("visit proto changed from %s to %s", bind.proto, proto)
+	}
+	if proto == "udp" {
+		if bind.pc != nil {
+			return nil
+		}
+		addr, err := net.ResolveUDPAddr("udp", cfg.Local)
+		if err != nil {
+			return err
+		}
+		pc, err := net.ListenUDP("udp", addr)
+		if err != nil {
+			return err
+		}
+		bind.proto, bind.pc = proto, pc
+		if cfg.OnListen != nil {
+			cfg.OnListen("udp", pc.LocalAddr().String())
+		}
+		return nil
+	}
+	if bind.ln != nil {
+		return nil
+	}
 	ln, err := net.Listen("tcp", cfg.Local)
 	if err != nil {
 		return err
 	}
-	defer ln.Close()
+	bind.proto, bind.ln = proto, ln
 	if cfg.OnListen != nil {
 		cfg.OnListen("tcp", ln.Addr().String())
 	}
+	return nil
+}
+
+func serveTCP(ctx context.Context, sess *yamux.Session, ln net.Listener, mappingID string) error {
+	if ln == nil {
+		return fmt.Errorf("no local tcp listener")
+	}
 	go func() {
 		<-ctx.Done()
-		_ = ln.Close()
+		if tl, ok := ln.(*net.TCPListener); ok {
+			_ = tl.SetDeadline(time.Now())
+		}
 		_ = sess.Close()
 	}()
 	for {
+		if tl, ok := ln.(*net.TCPListener); ok {
+			_ = tl.SetDeadline(time.Now().Add(time.Second))
+		}
 		c, err := ln.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil
+				return ctx.Err()
+			}
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				if sess.IsClosed() {
+					return fmt.Errorf("session closed")
+				}
+				continue
 			}
 			return err
 		}
@@ -143,22 +263,13 @@ func serveTCP(ctx context.Context, sess *yamux.Session, cfg Config, mappingID st
 	}
 }
 
-func serveUDP(ctx context.Context, sess *yamux.Session, cfg Config, mappingID string) error {
-	addr, err := net.ResolveUDPAddr("udp", cfg.Local)
-	if err != nil {
-		return err
-	}
-	pc, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		return err
-	}
-	defer pc.Close()
-	if cfg.OnListen != nil {
-		cfg.OnListen("udp", pc.LocalAddr().String())
+func serveUDP(ctx context.Context, sess *yamux.Session, pc *net.UDPConn, mappingID string) error {
+	if pc == nil {
+		return fmt.Errorf("no local udp listener")
 	}
 	go func() {
 		<-ctx.Done()
-		_ = pc.Close()
+		_ = pc.SetReadDeadline(time.Now())
 		_ = sess.Close()
 	}()
 
@@ -170,10 +281,17 @@ func serveUDP(ctx context.Context, sess *yamux.Session, cfg Config, mappingID st
 	rows := map[string]*sessRow{}
 	buf := make([]byte, 64*1024)
 	for {
+		_ = pc.SetReadDeadline(time.Now().Add(time.Second))
 		n, raddr, err := pc.ReadFromUDP(buf)
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil
+				return ctx.Err()
+			}
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				if sess.IsClosed() {
+					return fmt.Errorf("session closed")
+				}
+				continue
 			}
 			return err
 		}

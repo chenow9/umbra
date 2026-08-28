@@ -1,13 +1,15 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"log"
 	"os"
-	"time"
 
 	"umbra/internal/node"
+	"umbra/internal/retry"
 	"umbra/internal/tlscfg"
 )
 
@@ -31,18 +33,21 @@ func main() {
 		}
 		tlsConf = c
 	}
-	backoff := time.Second
+	backoff := retry.Initial
+	ctx := context.Background()
 	for {
 		if err := node.Run(*server, *token, tlsConf); err != nil {
-			log.Printf("node: %v — retry in %s", err, backoff)
-			time.Sleep(backoff)
-			backoff *= 2
-			if backoff > 30*time.Second {
-				backoff = 30 * time.Second
+			if errors.Is(err, node.ErrRevoked) {
+				log.Fatal(err)
 			}
+			log.Printf("node: %v — retry in ~%s", err, backoff)
+			if !retry.Sleep(ctx, backoff) {
+				return
+			}
+			backoff = retry.Next(backoff)
 			continue
 		}
-		backoff = time.Second
+		backoff = retry.Initial
 	}
 }
 

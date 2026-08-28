@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hashicorp/yamux"
+
 	"umbra/internal/policy"
 	"umbra/internal/uplane"
 )
@@ -39,6 +41,7 @@ type visitUDP struct {
 	nodeID string
 	proto  string
 	mode   string
+	mux    *yamux.Session
 }
 
 type udpCred struct {

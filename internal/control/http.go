@@ -28,19 +28,19 @@ var uiFS embed.FS
 
 func (c *Console) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("content-type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	})
+	mux.HandleFunc("GET /health", c.getHealth)
 	mux.HandleFunc("GET /v1/auth", c.getAuth)
 	mux.HandleFunc("POST /v1/setup", c.postSetup)
 	mux.HandleFunc("POST /v1/login", c.postLogin)
 	mux.HandleFunc("POST /v1/logout", c.postLogout)
+	mux.HandleFunc("POST /v1/logout-all", c.need(c.postLogoutAll))
+	mux.HandleFunc("POST /v1/password", c.need(c.postPassword))
 
 	mux.HandleFunc("GET /v1/overview", c.need(c.getOverview))
 	mux.HandleFunc("GET /v1/nodes", c.need(c.getNodes))
 	mux.HandleFunc("POST /v1/nodes", c.need(c.postNode))
 	mux.HandleFunc("GET /v1/nodes/{id}/bootstrap", c.need(c.getBootstrap))
+	mux.HandleFunc("POST /v1/nodes/{id}/rotate", c.need(c.postRotate))
 	mux.HandleFunc("POST /v1/nodes/{id}/hello", c.need(c.postHello))
 	mux.HandleFunc("POST /v1/nodes/{id}/disconnect", c.need(c.postDisconnect))
 	mux.HandleFunc("POST /v1/nodes/{id}/revoke", c.need(c.postRevoke))
@@ -192,6 +192,35 @@ func persistFail(w http.ResponseWriter) {
 	writeErr(w, http.StatusInternalServerError, "状态未能落盘")
 }
 
+func (c *Console) getHealth(w http.ResponseWriter, _ *http.Request) {
+	ph := c.Gate.PlaneHealth()
+	persistOK := true
+	if c.Persist != "" {
+		if st, err := os.Stat(c.Persist); err != nil {
+			persistOK = os.IsNotExist(err)
+		} else if st.Size() == 0 {
+			persistOK = false
+		}
+	}
+	ok := ph.Control && persistOK
+	if ph.UDP == "required" && !ph.UPlane {
+		ok = false
+	}
+	status := http.StatusOK
+	if !ok {
+		status = http.StatusServiceUnavailable
+	}
+	w.Header().Set("content-type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(struct {
+		OK      bool   `json:"ok"`
+		Control bool   `json:"control"`
+		UPlane  bool   `json:"uplane"`
+		Persist bool   `json:"persist"`
+		UDP     string `json:"udp"`
+	}{OK: ok, Control: ph.Control, UPlane: ph.UPlane, Persist: persistOK, UDP: ph.UDP})
+}
+
 func (c *Console) getAuth(w http.ResponseWriter, r *http.Request) {
 	ck, _ := r.Cookie("umbra_owner")
 	raw := ""
@@ -237,16 +266,87 @@ func (c *Console) postLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Console) postLogout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: "umbra_owner", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	sid := readOwnerCookie(r)
+	c.mu.Lock()
+	c.dropSessionLocked(sid)
+	_ = c.save()
+	c.mu.Unlock()
+	clearOwnerCookie(w)
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-func (c *Console) setCookie(w http.ResponseWriter, r *http.Request) {
-	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+func (c *Console) postLogoutAll(w http.ResponseWriter, _ *http.Request) {
+	c.mu.Lock()
+	c.dropAllSessionsLocked()
+	_ = c.save()
+	c.mu.Unlock()
+	clearOwnerCookie(w)
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (c *Console) postPassword(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Current string `json:"current"`
+		New     string `json:"new"`
+	}
+	if !jsonBody(w, r, &b) {
+		return
+	}
+	c.mu.Lock()
+	stored := c.ownerHash
+	c.mu.Unlock()
+	if stored == "" || !checkPassword(b.Current, stored) {
+		writeErr(w, 400, "口令不对")
+		return
+	}
+	if len(b.New) < 8 || len(b.New) > 128 {
+		writeErr(w, 400, "口令至少 8 位")
+		return
+	}
+	h, err := hashPassword(b.New)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	c.mu.Lock()
+	c.ownerHash = h
+	c.dropAllSessionsLocked()
+	sid := c.issueSessionLocked()
+	if err := c.save(); err != nil {
+		c.mu.Unlock()
+		persistFail(w)
+		return
+	}
+	c.mu.Unlock()
+	c.writeOwnerCookie(w, r, sid)
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func readOwnerCookie(r *http.Request) string {
+	ck, _ := r.Cookie("umbra_owner")
+	if ck == nil {
+		return ""
+	}
+	return ck.Value
+}
+
+func clearOwnerCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{Name: "umbra_owner", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+}
+
+func (c *Console) writeOwnerCookie(w http.ResponseWriter, r *http.Request, sid string) {
 	http.SetCookie(w, &http.Cookie{
-		Name: "umbra_owner", Value: c.cookieValue(), Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, MaxAge: 7 * 24 * 3600, Secure: secure,
+		Name: "umbra_owner", Value: sid, Path: "/", HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, MaxAge: int(sessionTTL.Seconds()), Secure: c.cookieSecure(r),
 	})
+}
+
+func (c *Console) setCookie(w http.ResponseWriter, r *http.Request) {
+	c.mu.Lock()
+	sid := c.issueSessionLocked()
+	_ = c.save()
+	c.mu.Unlock()
+	c.writeOwnerCookie(w, r, sid)
 }
 
 func (c *Console) live() map[string]gateNode {
@@ -301,12 +401,17 @@ func (c *Console) getNodes(w http.ResponseWriter, _ *http.Request) {
 		if a.LastSeen != nil {
 			last = a.LastSeen.UTC().Format(time.RFC3339)
 		}
+		exp := ""
+		if !a.TokenUntil.IsZero() {
+			exp = a.TokenUntil.UTC().Format(time.RFC3339)
+		}
 		out = append(out, map[string]any{
 			"id": a.ID, "name": a.Name, "comment": a.Comment, "status": st,
 			"addr": addr, "version": ver, "os": os, "arch": arch,
 			"lastSeen": last, "enabled": a.Enabled && a.Status != "revoked",
-			"createdAt":    a.Created.UTC().Format(time.RFC3339),
-			"mappingCount": n, "bytesIn": in, "bytesOut": outB,
+			"createdAt":      a.Created.UTC().Format(time.RFC3339),
+			"tokenExpiresAt": exp,
+			"mappingCount":   n, "bytesIn": in, "bytesOut": outB,
 		})
 	}
 	writeJSON(w, out)
@@ -324,14 +429,16 @@ func (c *Console) postNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := newID("nde")
-	tok := "umbra_boot_" + newID("t")[2:]
+	plain, hash := newNodeToken()
+	until := time.Now().Add(gate.TokenTTL)
 	c.mu.Lock()
 	rec := &nodeRec{
 		ID: id, Name: strings.TrimSpace(b.Name), Comment: strings.TrimSpace(b.Comment),
-		OS: b.OS, Arch: b.Arch, Token: tok, Status: "offline", Enabled: true, Created: time.Now(),
+		OS: b.OS, Arch: b.Arch, TokenHash: hash, TokenUntil: until, Status: "offline", Enabled: true, Created: time.Now(),
+		revealed: plain,
 	}
 	c.nodes[id] = rec
-	c.Gate.SetToken(tok, id)
+	c.installToken(hash, id, until)
 	c.logAudit("node.create", id, rec.Name+" "+rec.OS+"/"+rec.Arch)
 	if err := c.save(); err != nil {
 		delete(c.nodes, id)
@@ -341,19 +448,50 @@ func (c *Console) postNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.mu.Unlock()
-	writeJSON(w, map[string]any{"id": id, "token": tok, "os": rec.OS, "arch": rec.Arch})
+	writeJSON(w, map[string]any{
+		"id": id, "token": plain, "os": rec.OS, "arch": rec.Arch,
+		"expiresAt": until.UTC().Format(time.RFC3339),
+	})
 }
 
 func (c *Console) getBootstrap(w http.ResponseWriter, r *http.Request) {
+	writeErr(w, http.StatusGone, "凭证只在签发或轮换时显示，请轮换后重新配置节点")
+}
+
+func (c *Console) postRotate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	c.mu.Lock()
 	a := c.nodes[id]
-	c.mu.Unlock()
-	if a == nil || a.Status == "revoked" || a.Token == "" {
-		writeErr(w, 404, "没有可用凭证")
+	if a == nil || a.Status == "revoked" {
+		c.mu.Unlock()
+		writeErr(w, 404, "节点不存在")
 		return
 	}
-	writeJSON(w, map[string]any{"token": a.Token})
+	plain, hash := newNodeToken()
+	old := a.TokenHash
+	oldUntil := a.TokenUntil
+	grace := gate.TokenGrace
+	until := time.Now().Add(gate.TokenTTL)
+	a.TokenHash = hash
+	a.TokenUntil = until
+	a.PrevHash = old
+	a.PrevUntil = time.Now().Add(grace)
+	a.Token = ""
+	a.revealed = plain
+	c.logAudit("node.rotate", id, "")
+	if err := c.save(); err != nil {
+		a.TokenHash, a.TokenUntil, a.PrevHash, a.PrevUntil, a.revealed = old, oldUntil, "", time.Time{}, ""
+		c.mu.Unlock()
+		persistFail(w)
+		return
+	}
+	c.mu.Unlock()
+	c.Gate.RotateTokenUntil(id, old, hash, until, grace)
+	c.installToken(hash, id, until)
+	writeJSON(w, map[string]any{
+		"token": plain, "graceSec": int(grace.Seconds()),
+		"expiresAt": until.UTC().Format(time.RFC3339),
+	})
 }
 
 func (c *Console) postHello(w http.ResponseWriter, r *http.Request) {
@@ -362,7 +500,7 @@ func (c *Console) postHello(w http.ResponseWriter, r *http.Request) {
 	a := c.nodes[id]
 	tok := ""
 	if a != nil {
-		tok = a.Token
+		tok = a.revealed
 	}
 	c.mu.Unlock()
 	if a == nil {
@@ -391,8 +529,6 @@ func (c *Console) postHello(w http.ResponseWriter, r *http.Request) {
 		now := time.Now()
 		a.LastSeen = &now
 	}
-	c.logFrame(id, "c2s", "Hello", "hello")
-	c.logFrame(id, "s2c", "HelloOk", "mappings pushed")
 	c.logAudit("node.hello", id, "HelloOk")
 	if err := c.save(); err != nil {
 		c.mu.Unlock()
@@ -426,13 +562,19 @@ func (c *Console) postRevoke(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "节点不存在")
 		return
 	}
-	prevStatus, prevEnabled, prevToken := a.Status, a.Enabled, a.Token
+	prevStatus, prevEnabled := a.Status, a.Enabled
+	prevHash, prevPrev, prevUntil, prevRevealed := a.TokenHash, a.PrevHash, a.PrevUntil, a.revealed
 	a.Status = "revoked"
 	a.Enabled = false
 	a.Token = ""
+	a.TokenHash = ""
+	a.PrevHash = ""
+	a.PrevUntil = time.Time{}
+	a.revealed = ""
 	c.logAudit("node.revoke", id, "")
 	if err := c.save(); err != nil {
-		a.Status, a.Enabled, a.Token = prevStatus, prevEnabled, prevToken
+		a.Status, a.Enabled = prevStatus, prevEnabled
+		a.TokenHash, a.PrevHash, a.PrevUntil, a.revealed = prevHash, prevPrev, prevUntil, prevRevealed
 		c.mu.Unlock()
 		persistFail(w)
 		return
@@ -459,19 +601,35 @@ func (c *Console) getMappings(w http.ResponseWriter, _ *http.Request) {
 		}
 		in, outB, active := m.BytesIn, m.BytesOut, 0
 		listen, push, listenErr := m.ListenState, m.PushState, m.ListenError
-		if s, ok := stats[m.Spec.ID]; ok {
+		if !m.Spec.Enabled {
+			listen, push, listenErr = "disabled", "acked", ""
+		} else if s, ok := stats[m.Spec.ID]; ok {
 			in, outB, active = s.In, s.Out, s.Active
 			if s.Error != "" {
-				listen, listenErr, push = "error", s.Error, "error"
-			} else if ast == "online" && m.Spec.Enabled {
-				if m.Spec.Mode == "visitor" {
-					listen, push = "ready", "acked"
-				} else if s.Listening {
-					listen, push = "listening", "acked"
-				}
+				listen, listenErr = "error", s.Error
+			} else if m.Spec.Mode == "visitor" {
+				listen, listenErr = "ready", ""
+			} else if s.Listening {
+				listen, listenErr = "listening", ""
+			} else {
+				listen, listenErr = "pending", ""
 			}
-		} else if ast == "online" && m.Spec.Enabled && m.Spec.Mode == "visitor" {
-			listen, push = "ready", "acked"
+			if ast != "online" {
+				push = "pending_offline"
+			} else if s.Error != "" {
+				push = "error"
+			} else if s.Acked {
+				push = "acked"
+			} else {
+				push = "pending"
+			}
+		} else if ast == "online" && m.Spec.Mode == "visitor" {
+			listen, push = "ready", "pending"
+		} else if ast != "online" {
+			push = "pending_offline"
+			if listen == "" {
+				listen = "pending"
+			}
 		}
 		port := any(nil)
 		if m.Spec.EntryPort != nil {
@@ -490,7 +648,7 @@ func (c *Console) getMappings(w http.ResponseWriter, _ *http.Request) {
 			"pushState": push, "bytesIn": in, "bytesOut": outB, "activeConns": active,
 			"lastProbeAt": last, "lastProbePreview": m.LastPreview, "grantUntil": grant,
 			"maxConns": m.Spec.MaxConns, "rateKbps": m.Spec.RateKbps, "allowCidrs": m.Spec.AllowCidrs,
-			"udpVia": stats[m.Spec.ID].UDPVia,
+			"udpVia":    stats[m.Spec.ID].UDPVia,
 			"createdAt": m.Created.UTC().Format(time.RFC3339),
 			"updatedAt": m.Updated.UTC().Format(time.RFC3339),
 		})
@@ -612,6 +770,7 @@ func (c *Console) postMapping(w http.ResponseWriter, r *http.Request) {
 		ID: id, Name: strings.TrimSpace(b.Name), Proto: b.Proto, Mode: b.Mode,
 		EntryPort: b.EntryPort, LocalHost: strings.TrimSpace(b.LocalHost), LocalPort: b.LocalPort,
 		Enabled: true, MaxConns: max, RateKbps: b.RateKbps, AllowCidrs: b.AllowCidrs, IdleTimeoutSec: 60,
+		Generation: 1,
 	}
 	now := time.Now()
 	c.mu.Lock()
@@ -664,6 +823,7 @@ func (c *Console) postEnabled(w http.ResponseWriter, r *http.Request) {
 	}
 	prev := m.Spec.Enabled
 	m.Spec.Enabled = b.Enabled
+	bumpGeneration(&m.Spec)
 	m.Updated = time.Now()
 	aid := m.NodeID
 	if err := c.save(); err != nil {
@@ -1014,7 +1174,9 @@ func (c *Console) putToken(w http.ResponseWriter, r *http.Request) {
 	if !jsonBody(w, r, &b) {
 		return
 	}
-	c.Gate.SetToken(r.PathValue("token"), b.NodeID)
+	plain := r.PathValue("token")
+	until := time.Now().Add(gate.TokenTTL)
+	c.Gate.SetTokenHashUntil(gate.TicketHash(plain), b.NodeID, until)
 	w.WriteHeader(204)
 }
 
@@ -1046,10 +1208,16 @@ func (c *Console) putMaps(w http.ResponseWriter, r *http.Request) {
 		if existing := c.maps[spec.ID]; existing != nil {
 			cp := *existing
 			prev[spec.ID] = &cp
+			oldGen := existing.Spec.Generation
 			existing.Spec = spec
+			existing.Spec.Generation = oldGen
+			bumpGeneration(&existing.Spec)
 			existing.NodeID = id
 			existing.Updated = now
 		} else {
+			if spec.Generation <= 0 {
+				spec.Generation = 1
+			}
 			c.maps[spec.ID] = &mapRec{Spec: spec, NodeID: id, Created: now, Updated: now}
 			created = append(created, spec.ID)
 		}
@@ -1081,12 +1249,29 @@ func (c *Console) postDemo(w http.ResponseWriter, _ *http.Request) {
 	}
 	if demo == nil {
 		id := newID("nde")
-		tok := "umbra_boot_" + newID("t")[2:]
-		demo = &nodeRec{ID: id, Name: "演示节点", Comment: "本机演示", OS: "linux", Arch: "amd64", Token: tok, Status: "offline", Enabled: true, Created: time.Now()}
+		plain, hash := newNodeToken()
+		until := time.Now().Add(gate.TokenTTL)
+		demo = &nodeRec{ID: id, Name: "演示节点", Comment: "本机演示", OS: "linux", Arch: "amd64", TokenHash: hash, TokenUntil: until, Status: "offline", Enabled: true, Created: time.Now(), revealed: plain}
 		c.nodes[id] = demo
-		c.Gate.SetToken(tok, id)
+		c.installToken(hash, id, until)
+		_ = c.save()
 	}
-	tok := demo.Token
+	if demo.revealed == "" {
+		plain, hash := newNodeToken()
+		old := demo.TokenHash
+		until := time.Now().Add(gate.TokenTTL)
+		demo.TokenHash = hash
+		demo.TokenUntil = until
+		demo.PrevHash = old
+		demo.PrevUntil = time.Now().Add(gate.TokenGrace)
+		demo.revealed = plain
+		_ = c.save()
+		c.mu.Unlock()
+		c.Gate.RotateTokenUntil(demo.ID, old, hash, until, gate.TokenGrace)
+		c.installToken(hash, demo.ID, until)
+		c.mu.Lock()
+	}
+	tok := demo.revealed
 	aid := demo.ID
 	c.mu.Unlock()
 	c.spawnNode(tok)

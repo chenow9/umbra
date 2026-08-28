@@ -405,7 +405,7 @@ async function main() {
       await sleep(100);
     }
   }
-  must("升级后全新 TCP 检查 health", health.includes("200") && health.includes(`{"ok":true}`), healthErr || health.slice(0, 80));
+  must("升级后全新 TCP 检查 health", health.includes("200") && health.includes(`"ok":true`), healthErr || health.slice(0, 120));
 
   let up = false;
   for (let i = 0; i < 40; i += 1) {

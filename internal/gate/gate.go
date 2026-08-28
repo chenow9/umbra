@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
@@ -63,6 +64,7 @@ type Mapping = wire.Mapping
 
 type nodeConn struct {
 	id        string
+	credHash  string
 	addr      string
 	os        string
 	arch      string
@@ -119,19 +121,19 @@ func ParseUDPMode(s string) UDPMode {
 }
 
 type entry struct {
-	spec      Mapping
-	nodeID    string
-	ln        net.Listener
-	pc        net.PacketConn
-	listenErr string
-	mu        sync.Mutex
-	window    policy.Window
-	udpSess   map[string]*udpSess
-	active    atomic.Int32
-	in        atomic.Int64
-	out       atomic.Int64
-	pin       atomic.Int64
-	pout      atomic.Int64
+	spec         Mapping
+	nodeID       string
+	ln           net.Listener
+	pc           net.PacketConn
+	listenErr    string
+	mu           sync.Mutex
+	window       policy.Window
+	udpSess      map[string]*udpSess
+	active       atomic.Int32
+	in           atomic.Int64
+	out          atomic.Int64
+	pin          atomic.Int64
+	pout         atomic.Int64
 	stopCh       chan struct{}
 	stopOnce     sync.Once
 	udpViaUplane atomic.Bool
@@ -143,16 +145,29 @@ type ticketEnt struct {
 	Until     time.Time
 }
 
+type tokenEnt struct {
+	NodeID string
+	Until  time.Time
+}
+
+// TokenGrace is how long a replaced node credential remains valid
+// so the operator can update the node before the old hash is dropped.
+var TokenGrace = 90 * time.Second
+
+// TokenTTL is the lifetime of a current node credential. Zero Until
+// is only for tests; the control plane always sets an expiry.
+var TokenTTL = 90 * 24 * time.Hour
+
 type Server struct {
-	bind     string
-	stealth  *stealth.Engine
-	tls      *tls.Config
-	mu       sync.Mutex
-	tok      map[string]string
-	nodes    map[string]*nodeConn
-	ent      map[string]*entry
-	want     map[string][]Mapping
-	grant    map[string]time.Time
+	bind      string
+	stealth   *stealth.Engine
+	tls       *tls.Config
+	mu        sync.Mutex
+	tok       map[string]tokenEnt
+	nodes     map[string]*nodeConn
+	ent       map[string]*entry
+	want      map[string][]Mapping
+	grant     map[string]time.Time
 	tix       map[string]ticketEnt
 	visits    map[string]*visitUDP
 	ctrl      net.Listener
@@ -163,6 +178,14 @@ type Server struct {
 	sessQuota *ipQuota
 	splices   atomic.Int32
 	draining  atomic.Bool
+	acked     map[string]int64
+	ackErr    map[string]bool
+	obs       Observer
+}
+
+type Observer interface {
+	Audit(action, target, detail string)
+	Frame(nodeID, dir, typ, body string)
 }
 
 func New(bind string, st *stealth.Engine) *Server {
@@ -170,19 +193,41 @@ func New(bind string, st *stealth.Engine) *Server {
 		st = stealth.New(false)
 	}
 	return &Server{
-		bind:    bind,
-		stealth: st,
-		tok:     map[string]string{},
-		nodes:   map[string]*nodeConn{},
-		ent:     map[string]*entry{},
-		want:    map[string][]Mapping{},
-		grant:   map[string]time.Time{},
+		bind:      bind,
+		stealth:   st,
+		tok:       map[string]tokenEnt{},
+		nodes:     map[string]*nodeConn{},
+		ent:       map[string]*entry{},
+		want:      map[string][]Mapping{},
+		grant:     map[string]time.Time{},
 		tix:       map[string]ticketEnt{},
 		visits:    map[string]*visitUDP{},
 		udpMode:   UDPAuto,
 		hsQuota:   newIPQuota(maxHandshake, maxHandshakePerIP),
 		sessQuota: newIPQuota(maxSessions, maxSessionsPerIP),
+		acked:     map[string]int64{},
+		ackErr:    map[string]bool{},
 	}
+}
+
+func (s *Server) SetObserver(o Observer) { s.obs = o }
+
+func (s *Server) noteAudit(action, target, detail string) {
+	if s.obs != nil {
+		s.obs.Audit(action, target, detail)
+	}
+}
+
+func (s *Server) noteFrame(nodeID, dir, typ string, body []byte) {
+	if s.obs == nil {
+		return
+	}
+	const max = 240
+	b := string(body)
+	if len(b) > max {
+		b = b[:max] + "…"
+	}
+	s.obs.Frame(nodeID, dir, typ, b)
 }
 
 func (s *Server) SetUDPMode(m UDPMode) {
@@ -266,10 +311,10 @@ func (s *Server) ServeControl(ln net.Listener) error {
 	}
 }
 
-func (s *Server) admitHS(ip string) bool    { return s.hsQuota.acquire(ip) }
-func (s *Server) releaseHS(ip string)       { s.hsQuota.release(ip) }
-func (s *Server) admitSess(ip string) bool  { return s.sessQuota.acquire(ip) }
-func (s *Server) releaseSess(ip string)     { s.sessQuota.release(ip) }
+func (s *Server) admitHS(ip string) bool      { return s.hsQuota.acquire(ip) }
+func (s *Server) releaseHS(ip string)         { s.hsQuota.release(ip) }
+func (s *Server) admitSess(ip string) bool    { return s.sessQuota.acquire(ip) }
+func (s *Server) releaseSess(ip string)       { s.sessQuota.release(ip) }
 func (s *Server) handshakeHeld(ip string) int { return s.hsQuota.held(ip) }
 func (s *Server) sessionHeld(ip string) int   { return s.sessQuota.held(ip) }
 
@@ -277,6 +322,7 @@ func (s *Server) handleConn(raw net.Conn) {
 	defer raw.Close()
 	ip := policy.NormalizeIP(raw.RemoteAddr().String())
 	if !s.admitHS(ip) {
+		slog.Info("handshake rejected", "ip", ip, "reason", "quota")
 		return
 	}
 	hsHeld := true
@@ -299,11 +345,14 @@ func (s *Server) handleConn(raw net.Conn) {
 	if err != nil {
 		return
 	}
+	var enrollID, enrollHash string
 	switch kind {
 	case preface.KindNode:
-		if s.lookupToken(cred) == "" {
+		id, h, ok := s.lookupCred(cred)
+		if !ok {
 			return
 		}
+		enrollID, enrollHash = id, h
 	case preface.KindVisit:
 		if _, ok := s.lookupTicket(TicketHash(cred)); !ok {
 			return
@@ -339,7 +388,7 @@ func (s *Server) handleConn(raw net.Conn) {
 	_ = raw.SetDeadline(time.Time{})
 	switch env.Type {
 	case "Enroll":
-		s.runNode(raw, sess, wc, env)
+		s.runNode(raw, sess, wc, env, enrollID, enrollHash)
 	case "Visit":
 		s.runVisitor(raw, sess, wc, env)
 	default:
@@ -347,12 +396,14 @@ func (s *Server) handleConn(raw net.Conn) {
 	}
 }
 
-func (s *Server) runNode(raw net.Conn, sess *yamux.Session, wc *wire.Conn, first wire.Envelope) {
+func (s *Server) runNode(raw net.Conn, sess *yamux.Session, wc *wire.Conn, first wire.Envelope, nodeID, credHash string) {
 	var ac *nodeConn
-	if err := s.onJSON(raw, sess, wc, &ac, first); err != nil {
+	if err := s.onJSON(raw, sess, wc, &ac, first, nodeID, credHash); err != nil {
 		log.Printf("node json: %v", err)
 		return
 	}
+	var nmsg int
+	var win time.Time
 	for {
 		env, err := wc.Read()
 		if err != nil {
@@ -361,7 +412,16 @@ func (s *Server) runNode(raw net.Conn, sess *yamux.Session, wc *wire.Conn, first
 			}
 			return
 		}
-		if err := s.onJSON(raw, sess, wc, &ac, env); err != nil {
+		now := time.Now()
+		if now.Sub(win) > time.Second {
+			win, nmsg = now, 0
+		}
+		nmsg++
+		if nmsg > 64 {
+			slog.Info("control flood", "node", nodeID, "reason", "rate")
+			continue
+		}
+		if err := s.onJSON(raw, sess, wc, &ac, env, nodeID, credHash); err != nil {
 			log.Printf("node json: %v", err)
 			if ac != nil {
 				s.offline(ac)
@@ -371,26 +431,25 @@ func (s *Server) runNode(raw net.Conn, sess *yamux.Session, wc *wire.Conn, first
 	}
 }
 
-func (s *Server) onJSON(raw net.Conn, sess *yamux.Session, wc *wire.Conn, ac **nodeConn, env wire.Envelope) error {
+func (s *Server) onJSON(raw net.Conn, sess *yamux.Session, wc *wire.Conn, ac **nodeConn, env wire.Envelope, nodeID, credHash string) error {
 	switch env.Type {
 	case "Enroll":
 		var b struct {
-			Bootstrap string `json:"bootstrap"`
-			Hostname  string `json:"hostname"`
-			OS        string `json:"os"`
-			Arch      string `json:"arch"`
-			Version   string `json:"version"`
+			Hostname string `json:"hostname"`
+			OS       string `json:"os"`
+			Arch     string `json:"arch"`
+			Version  string `json:"version"`
 		}
 		if err := json.Unmarshal(env.Body, &b); err != nil {
 			return err
 		}
-		id := s.lookupToken(b.Bootstrap)
+		id := nodeID
 		if id == "" {
 			_ = wc.SendJSON("Dropped", map[string]string{"reason": "bad_token"})
-			return fmt.Errorf("bad token")
+			return fmt.Errorf("missing preface identity")
 		}
 		sessn := &nodeConn{
-			id: id, addr: policy.NormalizeIP(raw.RemoteAddr().String()),
+			id: id, credHash: credHash, addr: policy.NormalizeIP(raw.RemoteAddr().String()),
 			os: b.OS, arch: b.Arch, ver: b.Version, raw: raw, sess: sess, conn: wc, online: false,
 		}
 		s.mu.Lock()
@@ -404,6 +463,8 @@ func (s *Server) onJSON(raw net.Conn, sess *yamux.Session, wc *wire.Conn, ac **n
 		s.nodes[id] = sessn
 		s.mu.Unlock()
 		*ac = sessn
+		s.noteFrame(id, "c2s", "Enroll", env.Body)
+		s.noteAudit("node.enroll", id, policy.NormalizeIP(raw.RemoteAddr().String()))
 		return wc.SendJSON("EnrollOk", map[string]string{"node_id": id})
 	case "Hello":
 		var b struct {
@@ -411,36 +472,58 @@ func (s *Server) onJSON(raw net.Conn, sess *yamux.Session, wc *wire.Conn, ac **n
 			Version string `json:"version"`
 		}
 		_ = json.Unmarshal(env.Body, &b)
+		s.mu.Lock()
 		if *ac == nil {
-			s.mu.Lock()
 			found := s.nodes[b.NodeID]
-			s.mu.Unlock()
 			if found == nil {
+				s.mu.Unlock()
 				return fmt.Errorf("unknown agent")
 			}
-			found.conn = wc
-			found.sess = sess
-			found.raw = raw
-			found.online = true
-			found.addr = policy.NormalizeIP(raw.RemoteAddr().String())
 			*ac = found
 		}
+		cur := *ac
+		cur.conn = wc
+		cur.sess = sess
+		cur.raw = raw
+		cur.online = true
+		cur.addr = policy.NormalizeIP(raw.RemoteAddr().String())
 		if b.Version != "" {
-			(*ac).ver = b.Version
+			cur.ver = b.Version
 		}
-		(*ac).online = true
-		maps := s.mappingsFor((*ac).id)
+		id := cur.id
+		s.mu.Unlock()
+		maps := s.mappingsFor(id)
 		hello := map[string]any{"mappings": maps, "udp_mode": string(s.udpMode)}
 		if keys := s.issueUDP(raw); keys != nil {
 			s.mu.Lock()
-			(*ac).udpCookie = keys.cookie
-			(*ac).udpIn = keys.in
-			(*ac).udpOut = keys.out
+			cur.udpCookie = keys.cookie
+			cur.udpIn = keys.in
+			cur.udpOut = keys.out
 			s.mu.Unlock()
 			hello["udp_cookie"] = hexCookie(keys.cookie)
 		}
+		s.noteFrame(id, "s2c", "HelloOk", nil)
 		return wc.SendJSON("HelloOk", hello)
-	case "MappingAck", "Heartbeat":
+	case "MappingAck":
+		var b struct {
+			ID         string `json:"id"`
+			OK         bool   `json:"ok"`
+			Generation int64  `json:"generation"`
+		}
+		_ = json.Unmarshal(env.Body, &b)
+		nid := ""
+		if ac != nil && *ac != nil {
+			nid = (*ac).id
+		}
+		s.recordAck(b.ID, b.Generation, b.OK)
+		s.noteFrame(nid, "c2s", "MappingAck", env.Body)
+		if b.OK {
+			s.noteAudit("mapping.ack", b.ID, fmt.Sprintf("generation %d", b.Generation))
+		} else {
+			s.noteAudit("mapping.ack_fail", b.ID, fmt.Sprintf("generation %d", b.Generation))
+		}
+		return nil
+	case "Heartbeat":
 		return nil
 	default:
 		return nil
@@ -459,17 +542,44 @@ func (s *Server) mappingsFor(nodeID string) []Mapping {
 
 func (s *Server) offline(ac *nodeConn) {
 	s.mu.Lock()
-	if s.nodes[ac.id] == ac {
-		ac.online = false
-		s.clearNodeUDP(ac)
+	if s.nodes[ac.id] != ac {
+		s.mu.Unlock()
+		return
 	}
+	ac.online = false
+	s.clearNodeUDP(ac)
+	id := ac.id
 	s.mu.Unlock()
+	s.noteAudit("node.offline", id, "")
 }
 
+func (s *Server) LookupToken(token string) string { return s.lookupToken(token) }
+
 func (s *Server) lookupToken(token string) string {
+	id, _, ok := s.lookupCred(token)
+	if !ok {
+		return ""
+	}
+	return id
+}
+
+func (s *Server) lookupCred(token string) (nodeID, hash string, ok bool) {
+	hash = TicketHash(token)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.tok[TicketHash(token)]
+	e, found := s.tok[hash]
+	if !found {
+		return "", hash, false
+	}
+	if tokenExpired(e.Until) {
+		delete(s.tok, hash)
+		return "", hash, false
+	}
+	return e.NodeID, hash, true
+}
+
+func tokenExpired(until time.Time) bool {
+	return !until.IsZero() && !time.Now().Before(until)
 }
 
 func (s *Server) SetToken(token, nodeID string) {
@@ -477,9 +587,51 @@ func (s *Server) SetToken(token, nodeID string) {
 }
 
 func (s *Server) SetTokenHash(hash, nodeID string) {
+	s.SetTokenHashUntil(hash, nodeID, time.Time{})
+}
+
+func (s *Server) SetTokenHashUntil(hash, nodeID string, until time.Time) {
+	if hash == "" || nodeID == "" {
+		return
+	}
 	s.mu.Lock()
-	s.tok[hash] = nodeID
+	s.tok[hash] = tokenEnt{NodeID: nodeID, Until: until}
 	s.mu.Unlock()
+}
+
+func (s *Server) RotateToken(nodeID, oldHash, newHash string, grace time.Duration) {
+	s.RotateTokenUntil(nodeID, oldHash, newHash, time.Now().Add(TokenTTL), grace)
+}
+
+func (s *Server) RotateTokenUntil(nodeID, oldHash, newHash string, until time.Time, grace time.Duration) {
+	if grace <= 0 {
+		grace = TokenGrace
+	}
+	if until.IsZero() {
+		until = time.Now().Add(TokenTTL)
+	}
+	s.SetTokenHashUntil(newHash, nodeID, until)
+	if oldHash != "" && oldHash != newHash {
+		s.SetTokenHashUntil(oldHash, nodeID, time.Now().Add(grace))
+		time.AfterFunc(grace, func() { s.ExpireTokenHash(oldHash) })
+	}
+	s.Disconnect(nodeID)
+}
+
+func (s *Server) ExpireTokenHash(h string) {
+	s.mu.Lock()
+	e, ok := s.tok[h]
+	kick := ""
+	if ok && tokenExpired(e.Until) {
+		delete(s.tok, h)
+		if ac := s.nodes[e.NodeID]; ac != nil && ac.credHash == h {
+			kick = e.NodeID
+		}
+	}
+	s.mu.Unlock()
+	if kick != "" {
+		s.Disconnect(kick)
+	}
 }
 
 func (s *Server) SetTicket(hash, mappingID string, until time.Time) {
@@ -556,8 +708,8 @@ func (s *Server) Revoke(nodeID string) {
 	}
 	s.mu.Lock()
 	delete(s.nodes, nodeID)
-	for h, id := range s.tok {
-		if id == nodeID {
+	for h, e := range s.tok {
+		if e.NodeID == nodeID {
 			delete(s.tok, h)
 		}
 	}
@@ -635,7 +787,50 @@ func (s *Server) PutMappings(nodeID string, maps []Mapping) {
 	s.mu.Unlock()
 	if ac != nil && ac.online && ac.conn != nil {
 		_ = ac.conn.SendJSON("MappingSync", map[string]any{"upsert": maps, "delete": []string{}})
+		s.noteFrame(nodeID, "s2c", "MappingSync", nil)
 	}
+}
+
+func (s *Server) recordAck(id string, gen int64, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == "" {
+		return
+	}
+	if !ok {
+		s.ackErr[id] = true
+		return
+	}
+	delete(s.ackErr, id)
+	want := int64(0)
+	if e := s.ent[id]; e != nil {
+		want = e.spec.Generation
+	} else {
+		for _, maps := range s.want {
+			for _, m := range maps {
+				if m.ID == id {
+					want = m.Generation
+				}
+			}
+		}
+	}
+	if gen == 0 || gen == want {
+		if want == 0 {
+			s.acked[id] = 1
+		} else {
+			s.acked[id] = want
+		}
+	}
+}
+
+func ackedOK(acked int64, gen int64, failed bool) bool {
+	if failed {
+		return false
+	}
+	if gen <= 0 {
+		return acked > 0
+	}
+	return acked >= gen
 }
 
 func (s *Server) ensureEntry(nodeID string, m Mapping) {
@@ -871,10 +1066,13 @@ func (s *Server) handleTCP(e *entry, c net.Conn, via string) {
 		return
 	}
 	if !policy.CidrAllowed(ip, e.spec.AllowCidrs) {
+		slog.Info("acl drop", "mapping", e.spec.ID, "ip", ip)
+		s.noteAudit("acl.drop", e.spec.ID, ip)
 		_ = c.Close()
 		return
 	}
 	if !e.reserve() {
+		slog.Info("maxconns drop", "mapping", e.spec.ID, "ip", ip)
 		_ = c.Close()
 		return
 	}
@@ -960,11 +1158,20 @@ type idleConn struct {
 	idle time.Duration
 }
 
-func (c *idleConn) Read(p []byte) (int, error) {
+func (c *idleConn) touch() {
 	if c.idle > 0 {
-		_ = c.Conn.SetReadDeadline(time.Now().Add(c.idle))
+		_ = c.Conn.SetDeadline(time.Now().Add(c.idle))
 	}
+}
+
+func (c *idleConn) Read(p []byte) (int, error) {
+	c.touch()
 	return c.Conn.Read(p)
+}
+
+func (c *idleConn) Write(p []byte) (int, error) {
+	c.touch()
+	return c.Conn.Write(p)
 }
 
 func (c *idleConn) CloseWrite() error {
@@ -993,6 +1200,7 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 			continue
 		}
 		if !policy.CidrAllowed(ip, e.spec.AllowCidrs) {
+			slog.Info("acl drop", "mapping", e.spec.ID, "ip", ip, "proto", "udp")
 			continue
 		}
 		if !e.take(n) {
@@ -1302,6 +1510,24 @@ type MapStat struct {
 	Error                 string
 	Listening             bool
 	UDPVia                string
+	Generation            int64
+	Acked                 bool
+}
+
+type PlaneHealth struct {
+	Control bool   `json:"control"`
+	UPlane  bool   `json:"uplane"`
+	UDP     string `json:"udp"`
+}
+
+func (s *Server) PlaneHealth() PlaneHealth {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return PlaneHealth{
+		Control: s.ctrl != nil && !s.draining.Load(),
+		UPlane:  s.udpPC != nil,
+		UDP:     string(s.udpMode),
+	}
 }
 
 func (s *Server) MappingStats() map[string]MapStat {
@@ -1325,18 +1551,20 @@ func (s *Server) MappingStats() map[string]MapStat {
 			PacketsIn: e.pin.Load(), PacketsOut: e.pout.Load(),
 			Active: int(e.active.Load()), NodeID: e.nodeID,
 			Error: e.listenErr, Listening: listen && e.listenErr == "",
-			UDPVia: via,
+			UDPVia: via, Generation: e.spec.Generation,
+			Acked: ackedOK(s.acked[id], e.spec.Generation, s.ackErr[id]),
 		}
 	}
 	return out
 }
 
 type Snapshot struct {
-	Tokens  map[string]string    `json:"tokens"`
-	Maps    map[string][]Mapping `json:"maps"`
-	Grants  map[string]int64     `json:"grants"`
-	Tickets map[string]int64     `json:"tickets"`
-	TicketM map[string]string    `json:"ticket_maps"`
+	Tokens     map[string]string    `json:"tokens"`
+	TokenUntil map[string]int64     `json:"token_until,omitempty"`
+	Maps       map[string][]Mapping `json:"maps"`
+	Grants     map[string]int64     `json:"grants"`
+	Tickets    map[string]int64     `json:"tickets"`
+	TicketM    map[string]string    `json:"ticket_maps"`
 }
 
 func (s *Server) Snapshot() Snapshot {
@@ -1349,8 +1577,16 @@ func (s *Server) Snapshot() Snapshot {
 		}
 	}
 	tok := map[string]string{}
-	for k, v := range s.tok {
-		tok[k] = v
+	until := map[string]int64{}
+	now := time.Now()
+	for k, e := range s.tok {
+		if !e.Until.IsZero() && now.After(e.Until) {
+			continue
+		}
+		tok[k] = e.NodeID
+		if !e.Until.IsZero() {
+			until[k] = e.Until.UnixMilli()
+		}
 	}
 	maps := map[string][]Mapping{}
 	for k, v := range s.want {
@@ -1366,7 +1602,7 @@ func (s *Server) Snapshot() Snapshot {
 			}
 		}
 	}
-	return Snapshot{Tokens: tok, Maps: maps, Grants: g, Tickets: tixExp, TicketM: tixMap}
+	return Snapshot{Tokens: tok, TokenUntil: until, Maps: maps, Grants: g, Tickets: tixExp, TicketM: tixMap}
 }
 
 func tokenHashOK(s string) bool {
@@ -1378,14 +1614,36 @@ func tokenHashOK(s string) bool {
 }
 
 func (s *Server) RestoreTokens(tokens map[string]string) error {
+	return s.restoreTokens(tokens, nil)
+}
+
+func (s *Server) restoreTokens(tokens map[string]string, until map[string]int64) error {
 	skipped := 0
+	now := time.Now()
 	for tok, id := range tokens {
 		if !tokenHashOK(tok) {
 			skipped++
 			log.Printf("restore: refusing raw-token snapshot for %s", id)
 			continue
 		}
-		s.SetTokenHash(tok, id)
+		if ms, ok := until[tok]; ok {
+			t := time.UnixMilli(ms)
+			if !t.After(now) {
+				continue
+			}
+			s.SetTokenHashUntil(tok, id, t)
+			delay := time.Until(t)
+			if delay < time.Millisecond {
+				delay = time.Millisecond
+			}
+			h := tok
+			time.AfterFunc(delay, func() { s.ExpireTokenHash(h) })
+			continue
+		}
+		exp := now.Add(TokenTTL)
+		s.SetTokenHashUntil(tok, id, exp)
+		h := tok
+		time.AfterFunc(TokenTTL, func() { s.ExpireTokenHash(h) })
 	}
 	if skipped > 0 {
 		return fmt.Errorf("refusing raw-token snapshot (%d entries)", skipped)
@@ -1394,7 +1652,7 @@ func (s *Server) RestoreTokens(tokens map[string]string) error {
 }
 
 func (s *Server) Restore(snap Snapshot) {
-	if err := s.RestoreTokens(snap.Tokens); err != nil {
+	if err := s.restoreTokens(snap.Tokens, snap.TokenUntil); err != nil {
 		log.Printf("restore tokens: %v", err)
 	}
 	for id, maps := range snap.Maps {

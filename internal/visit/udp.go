@@ -11,7 +11,7 @@ import (
 	"umbra/internal/uplane"
 )
 
-func serveUDPPlane(ctx context.Context, cfg Config, tlsConn net.Conn, visitID, cookieHex, mappingID string) error {
+func serveUDPPlane(ctx context.Context, cfg Config, tlsConn net.Conn, visitID, cookieHex, mappingID string, pc *net.UDPConn) error {
 	cookie, err := hex.DecodeString(cookieHex)
 	if err != nil || len(cookie) != 16 {
 		if err == nil {
@@ -41,22 +41,13 @@ func serveUDPPlane(ctx context.Context, cfg Config, tlsConn net.Conn, visitID, c
 		_, _ = uc.Write(raw)
 	}
 
-	laddr, err := net.ResolveUDPAddr("udp", cfg.Local)
-	if err != nil {
-		return err
-	}
-	pc, err := net.ListenUDP("udp", laddr)
-	if err != nil {
-		return err
-	}
-	defer pc.Close()
-	if cfg.OnListen != nil {
-		cfg.OnListen("udp", pc.LocalAddr().String())
+	if pc == nil {
+		return fmt.Errorf("no local udp listener")
 	}
 	go func() {
 		<-ctx.Done()
-		_ = pc.Close()
 		_ = uc.Close()
+		_ = pc.SetReadDeadline(time.Now())
 	}()
 
 	var mu sync.Mutex
@@ -69,7 +60,7 @@ func serveUDPPlane(ctx context.Context, cfg Config, tlsConn net.Conn, visitID, c
 		for {
 			n, err := uc.Read(buf)
 			if err != nil {
-				_ = pc.Close()
+				_ = uc.Close()
 				return
 			}
 			_, pkt, err := in.Decode(buf[:n])
@@ -91,10 +82,17 @@ func serveUDPPlane(ctx context.Context, cfg Config, tlsConn net.Conn, visitID, c
 	buf := uplane.GetBuf()
 	defer uplane.PutBuf(buf)
 	for {
+		_ = pc.SetReadDeadline(time.Now().Add(time.Second))
 		n, raddr, err := pc.ReadFromUDP(buf)
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil
+				return ctx.Err()
+			}
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				continue
 			}
 			return err
 		}

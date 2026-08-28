@@ -15,7 +15,8 @@ export const listenLabel: Record<string, string> = {
 };
 
 export const pushLabel: Record<string, string> = {
-  acked: "已下发",
+  acked: "已确认",
+  pending: "已下发",
   pending_offline: "等待上线",
   error: "下发失败",
 };
@@ -39,7 +40,12 @@ export const frameLabel: Record<string, string> = {
 
 export const actionLabel: Record<string, string> = {
   "node.create": "登记节点",
+  "node.enroll": "节点登记",
+  "node.offline": "节点离线",
+  "node.rotate": "轮换凭证",
   "node.hello": "Hello 全量下发",
+  "mapping.ack": "映射确认",
+  "acl.drop": "ACL 丢弃",
   "mapping.push": "MappingSync",
   "mapping.probe": "探测开流",
   "mapping.knock": "SPA 敲门",
