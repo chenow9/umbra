@@ -40,6 +40,10 @@ export type Mapping = {
   bytesIn: number;
   bytesOut: number;
   activeConns: number;
+  udpActive?: number;
+  udpDropMaxConns?: number;
+  udpDropPerIP?: number;
+  udpDropRate?: number;
   lastProbeAt: string | null;
   lastProbePreview: string | null;
   grantUntil: string | null;

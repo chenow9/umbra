@@ -222,6 +222,7 @@ function MappingCard({ mapping: m }: { mapping: Mapping }) {
       </p>
       <p className="mt-1 text-xs text-stone">
         {pushLabel[m.pushState] ?? m.pushState} · 入 {formatBytes(m.bytesIn)} / 出 {formatBytes(m.bytesOut)}
+        {m.proto === "udp" ? ` · udp_active ${m.udpActive ?? m.activeConns} · drop maxconns ${m.udpDropMaxConns ?? 0}` : ""}
       </p>
       {m.listenError ? <p className="mt-1 text-xs text-rose">{m.listenError}</p> : null}
       <ProbeNote mapping={m} />
@@ -257,6 +258,12 @@ function MappingRow({ mapping: m }: { mapping: Mapping }) {
         入 {formatBytes(m.bytesIn)}
         <br />
         出 {formatBytes(m.bytesOut)}
+        {m.proto === "udp" ? (
+          <>
+            <br />
+            udp_active {m.udpActive ?? m.activeConns} · drop maxconns {m.udpDropMaxConns ?? 0}
+          </>
+        ) : null}
       </td>
       <td className="px-4 py-3">
         <MappingActions mapping={m} />

@@ -44,13 +44,6 @@ func (c *Console) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/nodes/{id}/hello", c.need(c.postHello))
 	mux.HandleFunc("POST /v1/nodes/{id}/disconnect", c.need(c.postDisconnect))
 	mux.HandleFunc("POST /v1/nodes/{id}/revoke", c.need(c.postRevoke))
-	mux.HandleFunc("GET /v1/agents", c.need(c.getNodes))
-	mux.HandleFunc("POST /v1/agents", c.need(c.postNode))
-	mux.HandleFunc("GET /v1/agents/{id}/bootstrap", c.need(c.getBootstrap))
-	mux.HandleFunc("POST /v1/agents/{id}/rotate", c.need(c.postRotate))
-	mux.HandleFunc("POST /v1/agents/{id}/hello", c.need(c.postHello))
-	mux.HandleFunc("POST /v1/agents/{id}/disconnect", c.need(c.postDisconnect))
-	mux.HandleFunc("POST /v1/agents/{id}/revoke", c.need(c.postRevoke))
 	mux.HandleFunc("GET /v1/mappings", c.need(c.getMappings))
 	mux.HandleFunc("POST /v1/mappings", c.need(c.postMapping))
 	mux.HandleFunc("POST /v1/mappings/{id}/enabled", c.need(c.postEnabled))
@@ -80,6 +73,10 @@ func (c *Console) Handler() http.Handler {
 		}
 		if r.URL.Path == "/health" || strings.HasPrefix(r.URL.Path, "/v1/") {
 			mux.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path == "/agents" || strings.HasPrefix(r.URL.Path, "/agents/") {
+			http.Redirect(w, r, "/nodes"+strings.TrimPrefix(r.URL.Path, "/agents"), http.StatusMovedPermanently)
 			return
 		}
 		c.serveUI(w, r)
@@ -217,15 +214,29 @@ func (c *Console) getHealth(w http.ResponseWriter, _ *http.Request) {
 	if !ok {
 		status = http.StatusServiceUnavailable
 	}
+	st := c.Gate.Status()
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(struct {
-		OK      bool   `json:"ok"`
-		Control bool   `json:"control"`
-		UPlane  bool   `json:"uplane"`
-		Persist bool   `json:"persist"`
-		UDP     string `json:"udp"`
-	}{OK: ok, Control: ph.Control, UPlane: ph.UPlane, Persist: persistOK, UDP: ph.UDP})
+		OK                bool   `json:"ok"`
+		Control           bool   `json:"control"`
+		UPlane            bool   `json:"uplane"`
+		Persist           bool   `json:"persist"`
+		UDP               string `json:"udp"`
+		Active            int    `json:"active"`
+		UDPActive         int    `json:"udpActive"`
+		UDPDropMaxConns   int64  `json:"udpDropMaxConns"`
+		UDPDropPerIP      int64  `json:"udpDropPerIP"`
+		UDPDropRate       int64  `json:"udpDropRate"`
+		UDPMaxFlowsPerIP  int    `json:"udpMaxFlowsPerIP"`
+		UDPNewFlowsPerSec int    `json:"udpNewFlowsPerSec"`
+		UDPNewFlowsPerMap int    `json:"udpNewFlowsPerMap"`
+	}{
+		OK: ok, Control: ph.Control, UPlane: ph.UPlane, Persist: persistOK, UDP: ph.UDP,
+		Active: st.Active, UDPActive: st.UDPActive,
+		UDPDropMaxConns: st.UDPDropMaxConns, UDPDropPerIP: st.UDPDropPerIP, UDPDropRate: st.UDPDropRate,
+		UDPMaxFlowsPerIP: st.UDPMaxFlowsPerIP, UDPNewFlowsPerSec: st.UDPNewFlowsPerSec, UDPNewFlowsPerMap: st.UDPNewFlowsPerMap,
+	})
 }
 
 func (c *Console) getAuth(w http.ResponseWriter, r *http.Request) {
@@ -644,11 +655,13 @@ func (c *Console) getMappings(w http.ResponseWriter, _ *http.Request) {
 			}
 		}
 		in, outB, active := m.BytesIn, m.BytesOut, 0
+		udpActive, dropMax, dropIP, dropRate := 0, int64(0), int64(0), int64(0)
 		listen, push, listenErr := m.ListenState, m.PushState, m.ListenError
 		if !m.Spec.Enabled {
 			listen, push, listenErr = "disabled", "acked", ""
 		} else if s, ok := stats[m.Spec.ID]; ok {
 			in, outB, active = s.In, s.Out, s.Active
+			udpActive, dropMax, dropIP, dropRate = s.UDPActive, s.UDPDropMaxConns, s.UDPDropPerIP, s.UDPDropRate
 			if s.Error != "" {
 				listen, listenErr = "error", s.Error
 			} else if m.Spec.Mode == "visitor" {
@@ -690,6 +703,7 @@ func (c *Console) getMappings(w http.ResponseWriter, _ *http.Request) {
 			"entryPort": port, "localHost": m.Spec.LocalHost, "localPort": m.Spec.LocalPort,
 			"enabled": m.Spec.Enabled, "listenState": listen, "listenError": nilIfEmpty(listenErr),
 			"pushState": push, "bytesIn": in, "bytesOut": outB, "activeConns": active,
+			"udpActive": udpActive, "udpDropMaxConns": dropMax, "udpDropPerIP": dropIP, "udpDropRate": dropRate,
 			"lastProbeAt": last, "lastProbePreview": m.LastPreview, "grantUntil": grant,
 			"maxConns": m.Spec.MaxConns, "rateKbps": m.Spec.RateKbps, "allowCidrs": m.Spec.AllowCidrs,
 			"udpVia":    stats[m.Spec.ID].UDPVia,
@@ -1204,7 +1218,6 @@ func (c *Console) getOverview(w http.ResponseWriter, _ *http.Request) {
 	}
 	writeJSON(w, map[string]any{
 		"nodesOnline": online, "nodesTotal": total,
-		"agentsOnline": online, "agentsTotal": total,
 		"mappingsActive": active, "mappingsTotal": maps,
 		"bytesInToday": dayIn, "bytesOutToday": dayOut,
 		"bpsIn": int64(bpsIn), "bpsOut": int64(bpsOut),

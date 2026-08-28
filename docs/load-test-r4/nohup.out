@@ -1,0 +1,245 @@
+r4 start 2026-08-28T08:26:31Z ulimit=1048576
+D_TCP=192.168.10.111:19224 U_TCP=192.168.10.112:18000 D_UDP=192.168.10.111:19300 U_UDP=192.168.10.112:18102
+===== TCP STREAM 5x n=1,2,4,8,16,32 =====
+RC=0 direct n=1 r=1
+tcp 192.168.10.111:19224 holdElapsed=7.955s tx=881.88MiB rx=879.50MiB txRate=110.85MiB/s rxRate=110.56MiB/s bidirRate=221.41MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=1 inflight=2.38MiB drainBytes=2.38MiB drainElapsed=16ms
+RC=0 umbra n=1 r=1
+tcp 192.168.10.112:18000 holdElapsed=7.95s tx=885.38MiB rx=881.38MiB txRate=111.37MiB/s rxRate=110.86MiB/s bidirRate=222.23MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=1 inflight=4.00MiB drainBytes=4.00MiB drainElapsed=34ms
+RC=0 direct n=1 r=2
+tcp 192.168.10.111:19224 holdElapsed=7.961s tx=883.69MiB rx=879.81MiB txRate=111.00MiB/s rxRate=110.51MiB/s bidirRate=221.50MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=1 inflight=3.88MiB drainBytes=3.88MiB drainElapsed=24ms
+RC=0 umbra n=1 r=2
+tcp 192.168.10.112:18000 holdElapsed=7.954s tx=884.12MiB rx=880.81MiB txRate=111.15MiB/s rxRate=110.74MiB/s bidirRate=221.89MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=1 inflight=3.31MiB drainBytes=3.31MiB drainElapsed=29ms
+RC=0 direct n=1 r=3
+tcp 192.168.10.111:19224 holdElapsed=7.954s tx=878.19MiB rx=876.06MiB txRate=110.41MiB/s rxRate=110.14MiB/s bidirRate=220.55MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=1 inflight=2.12MiB drainBytes=2.12MiB drainElapsed=15ms
+RC=0 umbra n=1 r=3
+tcp 192.168.10.112:18000 holdElapsed=7.95s tx=883.31MiB rx=880.25MiB txRate=111.11MiB/s rxRate=110.72MiB/s bidirRate=221.83MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=1 inflight=3.06MiB drainBytes=3.06MiB drainElapsed=27ms
+RC=0 direct n=1 r=4
+tcp 192.168.10.111:19224 holdElapsed=7.96s tx=833.00MiB rx=829.56MiB txRate=104.65MiB/s rxRate=104.22MiB/s bidirRate=208.87MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=1 inflight=3.44MiB drainBytes=3.44MiB drainElapsed=21ms
+RC=0 umbra n=1 r=4
+tcp 192.168.10.112:18000 holdElapsed=7.956s tx=866.75MiB rx=864.38MiB txRate=108.95MiB/s rxRate=108.65MiB/s bidirRate=217.60MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=1 inflight=2.38MiB drainBytes=2.38MiB drainElapsed=16ms
+RC=0 direct n=1 r=5
+tcp 192.168.10.111:19224 holdElapsed=7.952s tx=880.38MiB rx=878.25MiB txRate=110.71MiB/s rxRate=110.44MiB/s bidirRate=221.14MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=1 inflight=2.12MiB drainBytes=2.12MiB drainElapsed=18ms
+RC=0 umbra n=1 r=5
+tcp 192.168.10.112:18000 holdElapsed=7.952s tx=875.38MiB rx=872.62MiB txRate=110.09MiB/s rxRate=109.74MiB/s bidirRate=219.83MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=1 inflight=2.75MiB drainBytes=2.75MiB drainElapsed=24ms
+RC=0 direct n=2 r=1
+tcp 192.168.10.111:19224 holdElapsed=7.96s tx=877.31MiB rx=873.19MiB txRate=110.22MiB/s rxRate=109.70MiB/s bidirRate=219.92MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=2 inflight=4.12MiB drainBytes=4.12MiB drainElapsed=28ms
+RC=0 umbra n=2 r=1
+tcp 192.168.10.112:18000 holdElapsed=7.968s tx=886.12MiB rx=879.81MiB txRate=111.21MiB/s rxRate=110.42MiB/s bidirRate=221.63MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=2 inflight=6.31MiB drainBytes=6.31MiB drainElapsed=39ms
+RC=0 direct n=2 r=2
+tcp 192.168.10.111:19224 holdElapsed=7.969s tx=882.25MiB rx=876.12MiB txRate=110.72MiB/s rxRate=109.95MiB/s bidirRate=220.67MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=2 inflight=6.12MiB drainBytes=6.12MiB drainElapsed=37ms
+RC=0 umbra n=2 r=2
+tcp 192.168.10.112:18000 holdElapsed=7.963s tx=879.00MiB rx=874.00MiB txRate=110.38MiB/s rxRate=109.75MiB/s bidirRate=220.13MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=2 inflight=5.00MiB drainBytes=5.00MiB drainElapsed=31ms
+RC=0 direct n=2 r=3
+tcp 192.168.10.111:19224 holdElapsed=7.959s tx=875.62MiB rx=872.25MiB txRate=110.02MiB/s rxRate=109.60MiB/s bidirRate=219.62MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=2 inflight=3.38MiB drainBytes=3.38MiB drainElapsed=23ms
+RC=0 umbra n=2 r=3
+tcp 192.168.10.112:18000 holdElapsed=7.966s tx=884.44MiB rx=877.75MiB txRate=111.02MiB/s rxRate=110.18MiB/s bidirRate=221.21MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=2 inflight=6.69MiB drainBytes=6.69MiB drainElapsed=44ms
+RC=0 direct n=2 r=4
+tcp 192.168.10.111:19224 holdElapsed=7.966s tx=883.12MiB rx=877.19MiB txRate=110.86MiB/s rxRate=110.12MiB/s bidirRate=220.98MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=2 inflight=5.94MiB drainBytes=5.94MiB drainElapsed=39ms
+RC=0 umbra n=2 r=4
+tcp 192.168.10.112:18000 holdElapsed=7.951s tx=883.19MiB rx=877.44MiB txRate=111.08MiB/s rxRate=110.36MiB/s bidirRate=221.44MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=2 inflight=5.75MiB drainBytes=5.75MiB drainElapsed=52ms
+RC=0 direct n=2 r=5
+tcp 192.168.10.111:19224 holdElapsed=7.952s tx=880.19MiB rx=874.38MiB txRate=110.68MiB/s rxRate=109.95MiB/s bidirRate=220.64MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=2 inflight=5.81MiB drainBytes=5.81MiB drainElapsed=51ms
+RC=0 umbra n=2 r=5
+tcp 192.168.10.112:18000 holdElapsed=7.958s tx=888.12MiB rx=879.00MiB txRate=111.60MiB/s rxRate=110.45MiB/s bidirRate=222.06MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=2 inflight=9.12MiB drainBytes=9.12MiB drainElapsed=72ms
+RC=0 direct n=4 r=1
+tcp 192.168.10.111:19224 holdElapsed=7.981s tx=888.06MiB rx=876.69MiB txRate=111.28MiB/s rxRate=109.85MiB/s bidirRate=221.13MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=4 inflight=11.38MiB drainBytes=11.38MiB drainElapsed=75ms
+RC=0 umbra n=4 r=1
+tcp 192.168.10.112:18000 holdElapsed=7.965s tx=884.62MiB rx=877.38MiB txRate=111.06MiB/s rxRate=110.15MiB/s bidirRate=221.21MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=4 inflight=7.25MiB drainBytes=7.25MiB drainElapsed=51ms
+RC=0 direct n=4 r=2
+tcp 192.168.10.111:19224 holdElapsed=7.969s tx=882.12MiB rx=873.31MiB txRate=110.69MiB/s rxRate=109.58MiB/s bidirRate=220.28MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=4 inflight=8.81MiB drainBytes=8.81MiB drainElapsed=61ms
+RC=0 umbra n=4 r=2
+tcp 192.168.10.112:18000 holdElapsed=7.977s tx=886.06MiB rx=877.31MiB txRate=111.08MiB/s rxRate=109.99MiB/s bidirRate=221.07MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=4 inflight=8.75MiB drainBytes=8.75MiB drainElapsed=53ms
+RC=0 direct n=4 r=3
+tcp 192.168.10.111:19224 holdElapsed=7.981s tx=889.25MiB rx=877.75MiB txRate=111.42MiB/s rxRate=109.98MiB/s bidirRate=221.39MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=4 inflight=11.50MiB drainBytes=11.50MiB drainElapsed=72ms
+RC=0 umbra n=4 r=3
+tcp 192.168.10.112:18000 holdElapsed=7.972s tx=884.38MiB rx=875.44MiB txRate=110.94MiB/s rxRate=109.82MiB/s bidirRate=220.75MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=4 inflight=8.94MiB drainBytes=8.94MiB drainElapsed=59ms
+RC=0 direct n=4 r=4
+tcp 192.168.10.111:19224 holdElapsed=7.993s tx=886.25MiB rx=875.19MiB txRate=110.87MiB/s rxRate=109.49MiB/s bidirRate=220.37MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=4 inflight=11.06MiB drainBytes=11.06MiB drainElapsed=58ms
+RC=0 umbra n=4 r=4
+tcp 192.168.10.112:18000 holdElapsed=7.99s tx=887.06MiB rx=876.00MiB txRate=111.02MiB/s rxRate=109.64MiB/s bidirRate=220.66MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=4 inflight=11.06MiB drainBytes=11.06MiB drainElapsed=61ms
+RC=0 direct n=4 r=5
+tcp 192.168.10.111:19224 holdElapsed=7.986s tx=887.19MiB rx=875.06MiB txRate=111.09MiB/s rxRate=109.57MiB/s bidirRate=220.66MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=4 inflight=12.12MiB drainBytes=12.12MiB drainElapsed=74ms
+RC=0 umbra n=4 r=5
+tcp 192.168.10.112:18000 holdElapsed=7.979s tx=890.31MiB rx=879.38MiB txRate=111.58MiB/s rxRate=110.21MiB/s bidirRate=221.80MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=4 inflight=10.94MiB drainBytes=10.94MiB drainElapsed=71ms
+RC=0 direct n=8 r=1
+tcp 192.168.10.111:19224 holdElapsed=8s tx=886.94MiB rx=874.31MiB txRate=110.86MiB/s rxRate=109.28MiB/s bidirRate=220.15MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=8 inflight=12.63MiB drainBytes=12.63MiB drainElapsed=70ms
+RC=0 umbra n=8 r=1
+tcp 192.168.10.112:18000 holdElapsed=8s tx=889.34MiB rx=874.88MiB txRate=111.16MiB/s rxRate=109.36MiB/s bidirRate=220.52MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=8 inflight=14.46MiB drainBytes=14.46MiB drainElapsed=81ms
+RC=0 direct n=8 r=2
+tcp 192.168.10.111:19224 holdElapsed=8.001s tx=888.95MiB rx=874.12MiB txRate=111.11MiB/s rxRate=109.26MiB/s bidirRate=220.37MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=8 inflight=14.83MiB drainBytes=14.83MiB drainElapsed=93ms
+RC=0 umbra n=8 r=2
+tcp 192.168.10.112:18000 holdElapsed=8s tx=885.75MiB rx=875.44MiB txRate=110.72MiB/s rxRate=109.44MiB/s bidirRate=220.16MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=8 inflight=10.31MiB drainBytes=10.31MiB drainElapsed=47ms
+RC=0 direct n=8 r=3
+tcp 192.168.10.111:19224 holdElapsed=8s tx=890.93MiB rx=876.25MiB txRate=111.36MiB/s rxRate=109.53MiB/s bidirRate=220.89MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=8 inflight=14.68MiB drainBytes=14.68MiB drainElapsed=87ms
+RC=0 umbra n=8 r=3
+tcp 192.168.10.112:18000 holdElapsed=7.99s tx=884.88MiB rx=874.75MiB txRate=110.75MiB/s rxRate=109.48MiB/s bidirRate=220.23MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=8 inflight=10.12MiB drainBytes=10.12MiB drainElapsed=53ms
+RC=0 direct n=8 r=4
+tcp 192.168.10.111:19224 holdElapsed=8.001s tx=887.36MiB rx=873.50MiB txRate=110.91MiB/s rxRate=109.18MiB/s bidirRate=220.09MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=8 inflight=13.86MiB drainBytes=13.86MiB drainElapsed=80ms
+RC=0 umbra n=8 r=4
+tcp 192.168.10.112:18000 holdElapsed=7.991s tx=885.88MiB rx=874.50MiB txRate=110.87MiB/s rxRate=109.44MiB/s bidirRate=220.31MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=8 inflight=11.38MiB drainBytes=11.38MiB drainElapsed=66ms
+RC=0 direct n=8 r=5
+tcp 192.168.10.111:19224 holdElapsed=8s tx=887.95MiB rx=874.38MiB txRate=110.99MiB/s rxRate=109.29MiB/s bidirRate=220.28MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=8 inflight=13.58MiB drainBytes=13.58MiB drainElapsed=76ms
+RC=0 umbra n=8 r=5
+tcp 192.168.10.112:18000 holdElapsed=7.995s tx=887.25MiB rx=876.19MiB txRate=110.98MiB/s rxRate=109.60MiB/s bidirRate=220.58MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=8 inflight=11.06MiB drainBytes=11.06MiB drainElapsed=59ms
+RC=0 direct n=16 r=1
+tcp 192.168.10.111:19224 holdElapsed=8s tx=888.83MiB rx=873.94MiB txRate=111.10MiB/s rxRate=109.24MiB/s bidirRate=220.34MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=16 inflight=14.89MiB drainBytes=14.89MiB drainElapsed=93ms
+RC=0 umbra n=16 r=1
+tcp 192.168.10.112:18000 holdElapsed=8s tx=892.91MiB rx=873.88MiB txRate=111.61MiB/s rxRate=109.23MiB/s bidirRate=220.84MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=16 inflight=19.04MiB drainBytes=19.04MiB drainElapsed=126ms
+RC=0 direct n=16 r=2
+tcp 192.168.10.111:19224 holdElapsed=8.001s tx=890.06MiB rx=874.50MiB txRate=111.24MiB/s rxRate=109.29MiB/s bidirRate=220.53MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=16 inflight=15.56MiB drainBytes=15.56MiB drainElapsed=95ms
+RC=0 umbra n=16 r=2
+tcp 192.168.10.112:18000 holdElapsed=8s tx=889.59MiB rx=873.88MiB txRate=111.19MiB/s rxRate=109.23MiB/s bidirRate=220.42MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=16 inflight=15.72MiB drainBytes=15.72MiB drainElapsed=99ms
+RC=0 direct n=16 r=3
+tcp 192.168.10.111:19224 holdElapsed=8s tx=894.25MiB rx=875.38MiB txRate=111.78MiB/s rxRate=109.42MiB/s bidirRate=221.19MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=16 inflight=18.88MiB drainBytes=18.88MiB drainElapsed=124ms
+RC=0 umbra n=16 r=3
+tcp 192.168.10.112:18000 holdElapsed=8s tx=887.06MiB rx=873.75MiB txRate=110.89MiB/s rxRate=109.22MiB/s bidirRate=220.11MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=16 inflight=13.31MiB drainBytes=13.31MiB drainElapsed=74ms
+RC=0 direct n=16 r=4
+tcp 192.168.10.111:19224 holdElapsed=8s tx=893.08MiB rx=874.81MiB txRate=111.63MiB/s rxRate=109.35MiB/s bidirRate=220.98MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=16 inflight=18.26MiB drainBytes=18.26MiB drainElapsed=123ms
+RC=0 umbra n=16 r=4
+tcp 192.168.10.112:18000 holdElapsed=8s tx=890.79MiB rx=875.50MiB txRate=111.35MiB/s rxRate=109.43MiB/s bidirRate=220.78MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=16 inflight=15.29MiB drainBytes=15.29MiB drainElapsed=91ms
+RC=0 direct n=16 r=5
+tcp 192.168.10.111:19224 holdElapsed=8s tx=891.00MiB rx=875.06MiB txRate=111.37MiB/s rxRate=109.38MiB/s bidirRate=220.75MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=16 inflight=15.94MiB drainBytes=15.94MiB drainElapsed=99ms
+RC=0 umbra n=16 r=5
+tcp 192.168.10.112:18000 holdElapsed=8s tx=892.60MiB rx=871.69MiB txRate=111.57MiB/s rxRate=108.96MiB/s bidirRate=220.53MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=16 inflight=20.91MiB drainBytes=20.91MiB drainElapsed=143ms
+RC=0 direct n=32 r=1
+tcp 192.168.10.111:19224 holdElapsed=8.001s tx=909.95MiB rx=874.31MiB txRate=113.74MiB/s rxRate=109.28MiB/s bidirRate=223.02MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=32 inflight=35.63MiB drainBytes=35.63MiB drainElapsed=281ms
+RC=0 umbra n=32 r=1
+tcp 192.168.10.112:18000 holdElapsed=8s tx=912.22MiB rx=874.69MiB txRate=114.02MiB/s rxRate=109.33MiB/s bidirRate=223.35MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=32 inflight=37.53MiB drainBytes=37.53MiB drainElapsed=296ms
+RC=0 direct n=32 r=2
+tcp 192.168.10.111:19224 holdElapsed=8s tx=909.78MiB rx=874.75MiB txRate=113.72MiB/s rxRate=109.34MiB/s bidirRate=223.06MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=32 inflight=35.03MiB drainBytes=35.03MiB drainElapsed=278ms
+RC=0 umbra n=32 r=2
+tcp 192.168.10.112:18000 holdElapsed=8s tx=900.95MiB rx=871.38MiB txRate=112.62MiB/s rxRate=108.92MiB/s bidirRate=221.53MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=32 inflight=29.58MiB drainBytes=29.58MiB drainElapsed=224ms
+RC=0 direct n=32 r=3
+tcp 192.168.10.111:19224 holdElapsed=8s tx=913.49MiB rx=875.25MiB txRate=114.18MiB/s rxRate=109.40MiB/s bidirRate=223.58MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=32 inflight=38.24MiB drainBytes=38.24MiB drainElapsed=309ms
+RC=0 umbra n=32 r=3
+tcp 192.168.10.112:18000 holdElapsed=8s tx=913.10MiB rx=874.56MiB txRate=114.13MiB/s rxRate=109.31MiB/s bidirRate=223.45MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=32 inflight=38.54MiB drainBytes=38.54MiB drainElapsed=311ms
+RC=0 direct n=32 r=4
+tcp 192.168.10.111:19224 holdElapsed=8s tx=911.19MiB rx=874.31MiB txRate=113.89MiB/s rxRate=109.28MiB/s bidirRate=223.18MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=32 inflight=36.88MiB drainBytes=36.88MiB drainElapsed=297ms
+RC=0 umbra n=32 r=4
+tcp 192.168.10.112:18000 holdElapsed=8s tx=912.49MiB rx=872.56MiB txRate=114.06MiB/s rxRate=109.07MiB/s bidirRate=223.12MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=32 inflight=39.93MiB drainBytes=39.93MiB drainElapsed=318ms
+RC=0 direct n=32 r=5
+tcp 192.168.10.111:19224 holdElapsed=8s tx=913.98MiB rx=875.62MiB txRate=114.24MiB/s rxRate=109.45MiB/s bidirRate=223.69MiB/s
+tcp 192.168.10.111:19224 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=32 inflight=38.35MiB drainBytes=38.35MiB drainElapsed=306ms
+RC=0 umbra n=32 r=5
+tcp 192.168.10.112:18000 holdElapsed=8s tx=916.04MiB rx=873.50MiB txRate=114.50MiB/s rxRate=109.18MiB/s bidirRate=223.68MiB/s
+tcp 192.168.10.112:18000 txErr=0 rxErr=0 corrupt=0 aliveAtDeadline=32 inflight=42.54MiB drainBytes=42.54MiB drainElapsed=341ms
+===== UDP Direct climb pps=20 hold=8s =====
+RC=0 direct udp n=20 pps=20
+udp 192.168.10.111:19300 openloop sent=3180 recv=3180 holdRecv=3180 graceRecv=0 loss=0 dup=0 ooo=0 corrupt=0
+udp 192.168.10.111:19300 deliveryRate=1.0000 holdDelivery=1.0000 lossRate=0.0000 sendRate=465.8KiB/s holdRecvRate=465.8KiB/s
+direct n=20 lossRate=0.000000
+RC=0 direct udp n=40 pps=20
+udp 192.168.10.111:19300 openloop sent=6358 recv=6358 holdRecv=6358 graceRecv=0 loss=0 dup=0 ooo=0 corrupt=0
+udp 192.168.10.111:19300 deliveryRate=1.0000 holdDelivery=1.0000 lossRate=0.0000 sendRate=931.8KiB/s holdRecvRate=931.8KiB/s
+direct n=40 lossRate=0.000000
+RC=0 direct udp n=80 pps=20
+udp 192.168.10.111:19300 openloop sent=12716 recv=12716 holdRecv=12716 graceRecv=0 loss=0 dup=0 ooo=0 corrupt=0
+udp 192.168.10.111:19300 deliveryRate=1.0000 holdDelivery=1.0000 lossRate=0.0000 sendRate=1.82MiB/s holdRecvRate=1.82MiB/s
+direct n=80 lossRate=0.000000
+RC=0 direct udp n=160 pps=20
+udp 192.168.10.111:19300 openloop sent=25438 recv=25438 holdRecv=25438 graceRecv=0 loss=0 dup=0 ooo=0 corrupt=0
+udp 192.168.10.111:19300 deliveryRate=1.0000 holdDelivery=1.0000 lossRate=0.0000 sendRate=3.64MiB/s holdRecvRate=3.64MiB/s
+direct n=160 lossRate=0.000000
+RC=0 direct udp n=320 pps=20
+udp 192.168.10.111:19300 openloop sent=50876 recv=50876 holdRecv=50876 graceRecv=0 loss=0 dup=0 ooo=0 corrupt=0
+udp 192.168.10.111:19300 deliveryRate=1.0000 holdDelivery=1.0000 lossRate=0.0000 sendRate=7.28MiB/s holdRecvRate=7.28MiB/s
+direct n=320 lossRate=0.000000
+RC=0 direct udp n=640 pps=20
+udp 192.168.10.111:19300 openloop sent=101740 recv=101740 holdRecv=101740 graceRecv=0 loss=0 dup=0 ooo=0 corrupt=0
+udp 192.168.10.111:19300 deliveryRate=1.0000 holdDelivery=1.0000 lossRate=0.0000 sendRate=14.55MiB/s holdRecvRate=14.55MiB/s
+direct n=640 lossRate=0.000000
+RC=0 direct udp n=800 pps=20
+udp 192.168.10.111:19300 openloop sent=127162 recv=127162 holdRecv=127162 graceRecv=0 loss=0 dup=0 ooo=0 corrupt=0
+udp 192.168.10.111:19300 deliveryRate=1.0000 holdDelivery=1.0000 lossRate=0.0000 sendRate=18.19MiB/s holdRecvRate=18.19MiB/s
+direct n=800 lossRate=0.000000
+direct last_ok=800 first_bad=none
+===== UDP Umbra at last_ok and first_bad, 5 reps =====
+RC=0 umbra udp n=800 r=1
+udp 192.168.10.112:18102 openloop sent=127153 recv=127084 holdRecv=127084 graceRecv=0 loss=69 dup=0 ooo=0 corrupt=0
+udp 192.168.10.112:18102 deliveryRate=0.9995 holdDelivery=0.9995 lossRate=0.0005 sendRate=18.19MiB/s holdRecvRate=18.18MiB/s
+RC=0 umbra udp n=800 r=2
+udp 192.168.10.112:18102 openloop sent=127157 recv=126878 holdRecv=126878 graceRecv=0 loss=279 dup=0 ooo=0 corrupt=0
+udp 192.168.10.112:18102 deliveryRate=0.9978 holdDelivery=0.9978 lossRate=0.0022 sendRate=18.19MiB/s holdRecvRate=18.15MiB/s
+RC=0 umbra udp n=800 r=3
+udp 192.168.10.112:18102 openloop sent=127145 recv=72964 holdRecv=72964 graceRecv=0 loss=54181 dup=0 ooo=0 corrupt=0
+udp 192.168.10.112:18102 deliveryRate=0.5739 holdDelivery=0.5739 lossRate=0.4261 sendRate=18.19MiB/s holdRecvRate=10.44MiB/s
+RC=0 umbra udp n=800 r=4
+udp 192.168.10.112:18102 openloop sent=127139 recv=6517 holdRecv=6517 graceRecv=0 loss=120622 dup=0 ooo=0 corrupt=0
+udp 192.168.10.112:18102 deliveryRate=0.0513 holdDelivery=0.0513 lossRate=0.9487 sendRate=18.19MiB/s holdRecvRate=954.7KiB/s
+RC=0 umbra udp n=800 r=5
+udp 192.168.10.112:18102 openloop sent=127162 recv=9061 holdRecv=9061 graceRecv=0 loss=118101 dup=0 ooo=0 corrupt=0
+udp 192.168.10.112:18102 deliveryRate=0.0713 holdDelivery=0.0713 lossRate=0.9287 sendRate=18.19MiB/s holdRecvRate=1.30MiB/s
+RC=0 direct udp n=800 r=1
+udp 192.168.10.111:19300 openloop sent=127165 recv=127165 holdRecv=127165 graceRecv=0 loss=0 dup=0 ooo=0 corrupt=0
+udp 192.168.10.111:19300 deliveryRate=1.0000 holdDelivery=1.0000 lossRate=0.0000 sendRate=18.19MiB/s holdRecvRate=18.19MiB/s
+RC=0 direct udp n=800 r=2
+udp 192.168.10.111:19300 openloop sent=127169 recv=127145 holdRecv=127145 graceRecv=0 loss=24 dup=0 ooo=0 corrupt=0
+udp 192.168.10.111:19300 deliveryRate=0.9998 holdDelivery=0.9998 lossRate=0.0002 sendRate=18.19MiB/s holdRecvRate=18.19MiB/s
+RC=0 direct udp n=800 r=3
+udp 192.168.10.111:19300 openloop sent=127143 recv=127143 holdRecv=127143 graceRecv=0 loss=0 dup=0 ooo=0 corrupt=0
+udp 192.168.10.111:19300 deliveryRate=1.0000 holdDelivery=1.0000 lossRate=0.0000 sendRate=18.19MiB/s holdRecvRate=18.19MiB/s
+RC=0 direct udp n=800 r=4
+udp 192.168.10.111:19300 openloop sent=127149 recv=127149 holdRecv=127149 graceRecv=0 loss=0 dup=0 ooo=0 corrupt=0
+udp 192.168.10.111:19300 deliveryRate=1.0000 holdDelivery=1.0000 lossRate=0.0000 sendRate=18.19MiB/s holdRecvRate=18.19MiB/s
+RC=0 direct udp n=800 r=5
+udp 192.168.10.111:19300 openloop sent=127162 recv=127162 holdRecv=127162 graceRecv=0 loss=0 dup=0 ooo=0 corrupt=0
+udp 192.168.10.111:19300 deliveryRate=1.0000 holdDelivery=1.0000 lossRate=0.0000 sendRate=18.19MiB/s holdRecvRate=18.19MiB/s
+r4 done 2026-08-28T08:37:12Z

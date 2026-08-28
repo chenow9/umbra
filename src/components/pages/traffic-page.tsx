@@ -97,6 +97,9 @@ export function TrafficPage() {
                 </p>
                 <p className="mt-2 font-mono text-xs tabular-nums text-ink-soft">
                   入 {formatBytes(m.bytesIn)} · 出 {formatBytes(m.bytesOut)}
+                  {m.proto === "udp"
+                    ? ` · udp_active ${m.udpActive ?? m.activeConns} · drop maxconns ${m.udpDropMaxConns ?? 0}`
+                    : ` · 连接 ${m.activeConns}`}
                 </p>
               </article>
             ))
@@ -111,7 +114,7 @@ export function TrafficPage() {
                 <th className="px-4 py-3 font-medium">节点</th>
                 <th className="px-4 py-3 font-medium">入站</th>
                 <th className="px-4 py-3 font-medium">出站</th>
-                <th className="px-4 py-3 font-medium">连接</th>
+                <th className="px-4 py-3 font-medium">连接 / UDP 丢弃</th>
               </tr>
             </thead>
             <tbody>
@@ -129,7 +132,15 @@ export function TrafficPage() {
                     <td className="px-4 py-3 text-ink-soft">{m.nodeName}</td>
                     <td className="px-4 py-3 font-mono text-xs tabular-nums">{formatBytes(m.bytesIn)}</td>
                     <td className="px-4 py-3 font-mono text-xs tabular-nums">{formatBytes(m.bytesOut)}</td>
-                    <td className="px-4 py-3 font-mono tabular-nums">{m.activeConns}</td>
+                    <td className="px-4 py-3 font-mono tabular-nums">
+                      {m.proto === "udp" ? (m.udpActive ?? m.activeConns) : m.activeConns}
+                      {m.proto === "udp" ? (
+                        <div className="text-xs text-stone">
+                          drop maxconns {m.udpDropMaxConns ?? 0} / ip {m.udpDropPerIP ?? 0} / rate{" "}
+                          {m.udpDropRate ?? 0}
+                        </div>
+                      ) : null}
+                    </td>
                   </tr>
                 ))
               )}

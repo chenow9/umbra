@@ -851,3 +851,60 @@ func TestOwnerSessionExpires(t *testing.T) {
 	}
 	readBody(t, res)
 }
+
+func TestHealthAndMappingsExposeUDPAdmit(t *testing.T) {
+	_, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "GET", "/health", nil, nil)
+	var health map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&health); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 && res.StatusCode != 503 {
+		t.Fatalf("health %d %v", res.StatusCode, health)
+	}
+	for _, k := range []string{"udpActive", "udpDropMaxConns", "udpDropPerIP", "udpDropRate", "active", "udpMaxFlowsPerIP", "udpNewFlowsPerSec", "udpNewFlowsPerMap"} {
+		if _, ok := health[k]; !ok {
+			t.Fatalf("health missing %s in %v", k, health)
+		}
+	}
+
+	res = doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("node %d %s", res.StatusCode, readBody(t, res))
+	}
+	var n struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&n); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	res = doJSON(t, srv, "POST", "/v1/mappings", map[string]any{
+		"nodeId": n.ID, "name": "u", "proto": "udp", "mode": "public",
+		"entryPort": 48102, "localHost": "127.0.0.1", "localPort": 9,
+	}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("mapping %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+
+	res = doJSON(t, srv, "GET", "/v1/mappings", nil, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("list %d %s", res.StatusCode, readBody(t, res))
+	}
+	var maps []map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&maps); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if len(maps) == 0 {
+		t.Fatal("no mappings")
+	}
+	m := maps[0]
+	for _, k := range []string{"udpActive", "udpDropMaxConns", "udpDropPerIP", "udpDropRate", "activeConns"} {
+		if _, ok := m[k]; !ok {
+			t.Fatalf("mapping missing %s in %v", k, m)
+		}
+	}
+}

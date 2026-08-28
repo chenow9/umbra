@@ -211,11 +211,7 @@ func (s *Server) dropVisitUDP(visID string) {
 				continue
 			}
 			seen[sess] = true
-			e.delUDPSess(sess)
-			e.release()
-			if sess.timer != nil {
-				sess.timer.Stop()
-			}
+			e.dropUDPSessLocked(sess)
 		}
 		e.mu.Unlock()
 	}
@@ -243,11 +239,7 @@ func (s *Server) onUDPClose(id string, pkt uplane.Packet) {
 			e.mu.Unlock()
 			return
 		}
-		e.delUDPSess(sess)
-		e.release()
-		if sess.timer != nil {
-			sess.timer.Stop()
-		}
+		e.dropUDPSessLocked(sess)
 		st := sess.st
 		e.mu.Unlock()
 		if st != nil {
@@ -310,11 +302,16 @@ func (s *Server) forwardVisitUDP(nodeID, visID string, pkt uplane.Packet) {
 	e.mu.Lock()
 	sess := e.udpSess[key]
 	if sess == nil {
-		if !e.reserve() {
+		if reason := e.admitUDP(visID); reason != "" {
 			e.mu.Unlock()
+			e.noteUDPDrop(visID, reason)
 			return
 		}
-		sess = &udpSess{idle: idle, visitID: visID, flowID: pkt.FlowID, path: udpPathUPlane}
+		sess = &udpSess{idle: idle, visitID: visID, flowID: pkt.FlowID, path: udpPathUPlane, admitIP: udpAdmitKey(visID)}
+		mapID, nodeID, flowID := e.spec.ID, e.nodeID, sess.flowID
+		sess.closer = func() {
+			_ = s.sendNodeUDP(nodeID, uplane.Packet{Type: uplane.TypeClose, MappingID: mapID, FlowID: flowID})
+		}
 		e.putUDPSess(sess)
 		e.udpViaUplane.Store(true)
 	}
@@ -472,25 +469,27 @@ func (sess *udpSess) touchLocked(e *entry, key string) {
 
 func (sess *udpSess) expire(e *entry, key string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	remain := time.Until(time.Unix(0, sess.deadline.Load()))
 	if remain > 0 {
 		if sess.timer != nil {
 			sess.timer.Reset(remain)
 		}
+		e.mu.Unlock()
 		return
 	}
 	if e.udpSess[key] != sess {
+		e.mu.Unlock()
 		return
 	}
-	e.delUDPSess(sess)
+	e.dropUDPSessLocked(sess)
 	delete(e.udpSess, key)
-	e.release()
-	if sess.timer != nil {
-		sess.timer.Stop()
-	}
 	st := sess.st
+	closer := sess.closer
+	e.mu.Unlock()
 	if st != nil {
 		go st.Close()
+	}
+	if closer != nil {
+		go closer()
 	}
 }

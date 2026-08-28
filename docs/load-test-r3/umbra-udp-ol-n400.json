@@ -1,0 +1,22 @@
+{
+  "Proto": "udp",
+  "Addr": "192.168.10.112:18101",
+  "Mode": "openloop",
+  "N": 400,
+  "Size": 1200,
+  "Interval": "",
+  "Timeout": "1s",
+  "Hold": "8s",
+  "SetupElapsed": "32ms",
+  "FirstEchoOK": 400,
+  "FirstEchoTimeoutOrError": 0,
+  "FirstEchoBytes": 0,
+  "HoldElapsed": "8.002s",
+  "HoldBytes": 17042400,
+  "HoldRate": "2.03MiB/s",
+  "UDPSent": 64000,
+  "UDPRecv": 14202,
+  "UDPTimeout": 49798,
+  "UDPLossRate": 0.77809375,
+  "TotalElapsed": "9.072s"
+}

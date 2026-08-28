@@ -119,8 +119,8 @@ export async function gateNodeOnline(nodeId: string) {
   try {
     const r = await gateFetch("/v1/status", {}, 250);
     if (!r.ok) return false;
-    const j = (await r.json()) as { agents?: { id: string; online: boolean }[] };
-    return Boolean(j.agents?.some((a) => a.id === nodeId && a.online));
+    const j = (await r.json()) as { nodes?: { id: string; online: boolean }[] };
+    return Boolean(j.nodes?.some((a) => a.id === nodeId && a.online));
   } catch {
     return false;
   }

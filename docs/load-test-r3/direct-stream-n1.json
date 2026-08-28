@@ -1,0 +1,22 @@
+{
+  "Proto": "tcp",
+  "Addr": "192.168.10.111:19224",
+  "Mode": "stream",
+  "N": 1,
+  "Size": 65536,
+  "Interval": "",
+  "Timeout": "5s",
+  "Hold": "8s",
+  "SetupElapsed": "0s",
+  "FirstEchoOK": 1,
+  "FirstEchoTimeoutOrError": 0,
+  "FirstEchoBytes": 0,
+  "HoldElapsed": "8s",
+  "HoldBytes": 25906249728,
+  "HoldRate": "3.02GiB/s",
+  "HoldTx": 12961841152,
+  "HoldRx": 12944408576,
+  "HoldTxRate": "1.51GiB/s",
+  "HoldRxRate": "1.51GiB/s",
+  "TotalElapsed": "8s"
+}

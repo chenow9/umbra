@@ -101,6 +101,8 @@ type udpSess struct {
 	visitID  string
 	flowID   string
 	peerKey  string
+	admitIP  string
+	closer   func()
 	path     int32
 }
 
@@ -130,23 +132,33 @@ func ParseUDPMode(s string) UDPMode {
 }
 
 type entry struct {
-	spec         Mapping
-	nodeID       string
-	ln           net.Listener
-	pc           net.PacketConn
-	listenErr    string
-	mu           sync.Mutex
-	window       policy.Window
-	udpSess      map[string]*udpSess
-	active       atomic.Int32
-	in           atomic.Int64
-	out          atomic.Int64
-	pin          atomic.Int64
-	pout         atomic.Int64
-	stopCh       chan struct{}
-	stopOnce     sync.Once
-	udpViaUplane atomic.Bool
-	udpViaYamux  atomic.Bool
+	spec             Mapping
+	nodeID           string
+	ln               net.Listener
+	pc               net.PacketConn
+	listenErr        string
+	mu               sync.Mutex
+	window           policy.Window
+	udpSess          map[string]*udpSess
+	udpIP            map[string]*udpIPState
+	active           atomic.Int32
+	in               atomic.Int64
+	out              atomic.Int64
+	pin              atomic.Int64
+	pout             atomic.Int64
+	udpDropMaxConns  atomic.Int64
+	udpDropPerIP     atomic.Int64
+	udpDropRate      atomic.Int64
+	udpMapTokens     float64
+	udpMapLast       time.Time
+	udpLogNSMaxConns atomic.Int64
+	udpLogNSPerIP    atomic.Int64
+	udpLogNSRate     atomic.Int64
+	udpIPSweepNS     atomic.Int64
+	stopCh           chan struct{}
+	stopOnce         sync.Once
+	udpViaUplane     atomic.Bool
+	udpViaYamux      atomic.Bool
 }
 
 type ticketEnt struct {
@@ -942,18 +954,22 @@ func (s *Server) ensureEntry(nodeID string, m Mapping) {
 		s.mu.Unlock()
 		return
 	}
-	var in, out, pin, pout int64
+	var in, out, pin, pout, dropMax, dropIP, dropRate int64
 	if cur != nil {
 		in, out = cur.in.Load(), cur.out.Load()
 		pin, pout = cur.pin.Load(), cur.pout.Load()
+		dropMax, dropIP, dropRate = cur.udpDropMaxConns.Load(), cur.udpDropPerIP.Load(), cur.udpDropRate.Load()
 	}
 	s.mu.Unlock()
 	s.stopEntry(m.ID)
-	e := &entry{spec: m, nodeID: nodeID, udpSess: map[string]*udpSess{}, stopCh: make(chan struct{})}
+	e := &entry{spec: m, nodeID: nodeID, udpSess: map[string]*udpSess{}, udpIP: map[string]*udpIPState{}, stopCh: make(chan struct{})}
 	e.in.Store(in)
 	e.out.Store(out)
 	e.pin.Store(pin)
 	e.pout.Store(pout)
+	e.udpDropMaxConns.Store(dropMax)
+	e.udpDropPerIP.Store(dropIP)
+	e.udpDropRate.Store(dropRate)
 	s.mu.Lock()
 	if s.draining.Load() {
 		s.mu.Unlock()
@@ -1316,11 +1332,16 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 		sess := e.udpSess[udpPeerIndex(peerKey)]
 		idle := time.Duration(policy.IntOr(e.spec.IdleTimeoutSec, 60)) * time.Second
 		if sess == nil {
-			if !e.reserve() {
+			if reason := e.admitUDP(ip); reason != "" {
 				e.mu.Unlock()
+				e.noteUDPDrop(ip, reason)
 				continue
 			}
-			sess = &udpSess{pc: pc, raddr: raddr, idle: idle, flowID: uplane.NewFlowID(), peerKey: peerKey}
+			sess = &udpSess{pc: pc, raddr: raddr, idle: idle, flowID: uplane.NewFlowID(), peerKey: peerKey, admitIP: udpAdmitKey(ip)}
+			mapID, nodeID, flowID := e.spec.ID, e.nodeID, sess.flowID
+			sess.closer = func() {
+				_ = s.sendNodeUDP(nodeID, uplane.Packet{Type: uplane.TypeClose, MappingID: mapID, FlowID: flowID})
+			}
 			e.putUDPSess(sess)
 		}
 		if sess.path == udpPathNone {
@@ -1334,8 +1355,7 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 			}
 			if path == udpPathNone {
 				if e.udpSess[udpFlowIndex(sess.flowID)] == sess {
-					e.delUDPSess(sess)
-					e.release()
+					e.dropUDPSessLocked(sess)
 				}
 				e.mu.Unlock()
 				continue
@@ -1429,11 +1449,7 @@ func (s *Server) readUDPStream(e *entry, sess *udpSess, key string) {
 		if err != nil {
 			e.mu.Lock()
 			if e.udpSess[key] == sess {
-				e.delUDPSess(sess)
-				e.release()
-				if sess.timer != nil {
-					sess.timer.Stop()
-				}
+				e.dropUDPSessLocked(sess)
 			}
 			e.mu.Unlock()
 			_ = sess.st.Close()
@@ -1574,10 +1590,17 @@ type statusNode struct {
 }
 
 type Status struct {
-	Nodes   []statusNode `json:"nodes"`
-	Stealth string       `json:"stealth"`
-	Active  int          `json:"active"`
-	UDP     string       `json:"udp"`
+	Nodes             []statusNode `json:"nodes"`
+	Stealth           string       `json:"stealth"`
+	Active            int          `json:"active"`
+	UDPActive         int          `json:"udpActive"`
+	UDPDropMaxConns   int64        `json:"udpDropMaxConns"`
+	UDPDropPerIP      int64        `json:"udpDropPerIP"`
+	UDPDropRate       int64        `json:"udpDropRate"`
+	UDPMaxFlowsPerIP  int          `json:"udpMaxFlowsPerIP"`
+	UDPNewFlowsPerSec int          `json:"udpNewFlowsPerSec"`
+	UDPNewFlowsPerMap int          `json:"udpNewFlowsPerMap"`
+	UDP               string       `json:"udp"`
 }
 
 func (s *Server) Active() int {
@@ -1597,17 +1620,34 @@ func (s *Server) Status() Status {
 	for _, a := range s.nodes {
 		out = append(out, statusNode{ID: a.id, Online: a.online, Addr: a.addr, OS: a.os, Arch: a.arch, Ver: a.ver, UPlane: a.online && a.udpBound && a.udpAddr != nil && a.udpOut != nil && udpSeenFresh(a.udpSeen.Load())})
 	}
-	n := 0
+	n, udpN := 0, 0
+	var dropMax, dropIP, dropRate int64
 	for _, e := range s.ent {
-		n += int(e.active.Load())
+		a := int(e.active.Load())
+		n += a
+		if e.spec.Proto == "udp" {
+			udpN += a
+			dropMax += e.udpDropMaxConns.Load()
+			dropIP += e.udpDropPerIP.Load()
+			dropRate += e.udpDropRate.Load()
+		}
 	}
-	return Status{Nodes: out, Stealth: s.stealth.Mode(), Active: n, UDP: string(s.udpMode)}
+	perIP, perSec, perMap := UDPAdmitLimits()
+	return Status{
+		Nodes: out, Stealth: s.stealth.Mode(), Active: n, UDP: string(s.udpMode),
+		UDPActive: udpN, UDPDropMaxConns: dropMax, UDPDropPerIP: dropIP, UDPDropRate: dropRate,
+		UDPMaxFlowsPerIP: perIP, UDPNewFlowsPerSec: perSec, UDPNewFlowsPerMap: perMap,
+	}
 }
 
 type MapStat struct {
 	In, Out               int64
 	PacketsIn, PacketsOut int64
 	Active                int
+	UDPActive             int   `json:"udpActive"`
+	UDPDropMaxConns       int64 `json:"udpDropMaxConns"`
+	UDPDropPerIP          int64 `json:"udpDropPerIP"`
+	UDPDropRate           int64 `json:"udpDropRate"`
 	NodeID                string
 	Error                 string
 	Listening             bool
@@ -1648,11 +1688,20 @@ func (s *Server) MappingStats() map[string]MapStat {
 		case yu:
 			via = "yamux"
 		}
+		active := int(e.active.Load())
+		udpActive := 0
+		if e.spec.Proto == "udp" {
+			udpActive = active
+		}
 		out[id] = MapStat{
 			In: e.in.Load(), Out: e.out.Load(),
 			PacketsIn: e.pin.Load(), PacketsOut: e.pout.Load(),
-			Active: int(e.active.Load()), NodeID: e.nodeID,
-			Error: e.listenErr, Listening: listen && e.listenErr == "",
+			Active: active, UDPActive: udpActive,
+			UDPDropMaxConns: e.udpDropMaxConns.Load(),
+			UDPDropPerIP:    e.udpDropPerIP.Load(),
+			UDPDropRate:     e.udpDropRate.Load(),
+			NodeID:          e.nodeID,
+			Error:           e.listenErr, Listening: listen && e.listenErr == "",
 			UDPVia: via, Generation: e.spec.Generation,
 			Acked: ackedOK(s.acked[id], e.spec.Generation, s.ackErr[id]),
 		}

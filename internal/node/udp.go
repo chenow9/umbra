@@ -123,6 +123,12 @@ func (rt *session) runUDP(cookieHex, mode string) {
 		if pkt.Type == uplane.TypeBindAck {
 			continue
 		}
+		if pkt.Type == uplane.TypeClose {
+			if pkt.MappingID != "" && pkt.FlowID != "" {
+				closeUDPLocal(&mu, locals, pkt.MappingID+"|"+pkt.FlowID)
+			}
+			continue
+		}
 		if pkt.Type != uplane.TypeData {
 			continue
 		}
@@ -213,6 +219,18 @@ var errBindTimeout = errString("udp bind timeout")
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+func closeUDPLocal(mu *sync.Mutex, locals map[string]*udpLocal, key string) {
+	mu.Lock()
+	loc := locals[key]
+	if loc != nil {
+		delete(locals, key)
+	}
+	mu.Unlock()
+	if loc != nil {
+		_ = loc.c.Close()
+	}
+}
 
 func (rt *session) readLocalUDP(uc *net.UDPConn, out *uplane.Sealer, tmpl uplane.Packet, loc *udpLocal, lkey string, mu *sync.Mutex, locals map[string]*udpLocal) {
 	defer func() {

@@ -455,7 +455,7 @@ export const createNode = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const sql = await ownerSql();
-    const id = newId("agt");
+    const id = newId("nde");
     const token = newBootstrap();
     const os = data.os as Platform;
     const arch = data.arch as Arch;
@@ -482,8 +482,8 @@ export const helloNode = createServerFn({ method: "POST" })
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const sql = await ownerSql();
-    const agent = await ownedNode(data.id);
-    if (node.status === "revoked" || !agent.enabled) throw new Error("凭证已吊销");
+    const node = await ownedNode(data.id);
+    if (node.status === "revoked" || !node.enabled) throw new Error("凭证已吊销");
     await ensureEcho();
     const wires = await loadWires(data.id);
     const token = recallToken(data.id);
@@ -592,8 +592,8 @@ export const createMapping = createServerFn({ method: "POST" })
       throw new Error("公开或暗端口模式必须指定入口端口");
     }
     const sql = await ownerSql();
-    const agent = await ownedNode(data.nodeId);
-    if (node.status === "revoked" || !agent.enabled) throw new Error("节点已吊销");
+    const node = await ownedNode(data.nodeId);
+    if (node.status === "revoked" || !node.enabled) throw new Error("节点已吊销");
     if (entryPort != null) {
       const [hit] = await sql.query<{ id: string }>(
         `select id from mappings where proto = $1 and entry_port = $2`,
@@ -630,7 +630,7 @@ export const createMapping = createServerFn({ method: "POST" })
     await audit(
       "mapping.create",
       id,
-      `${data.name} ${data.proto} ${data.mode} → ${agent.id}`,
+      `${data.name} ${data.proto} ${data.mode} → ${node.id}`,
     );
     if (node.status === "online") {
       const [created] = await sql.query<{
@@ -816,7 +816,7 @@ export const probeMapping = createServerFn({ method: "POST" })
       `select status, enabled from nodes where id = $1`,
       [m.node_id],
     );
-    if (!agent || node.status !== "online" || !agent.enabled) {
+    if (!agent || agent.status !== "online" || !agent.enabled) {
       throw new Error("节点不在线，无法开流");
     }
     await ensureEcho();
@@ -895,7 +895,7 @@ export const visitMapping = createServerFn({ method: "POST" })
       `select status, enabled from nodes where id = $1`,
       [m.node_id],
     );
-    if (!agent || node.status !== "online" || !agent.enabled) {
+    if (!agent || agent.status !== "online" || !agent.enabled) {
       throw new Error("节点不在线，无法探访");
     }
     await ensureEcho();
@@ -981,20 +981,20 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
   const sql = await ownerSql();
   await ensureEcho();
 
-  let [agent] = await sql.query<{ id: string; status: string; enabled: boolean }>(
+  let [node] = await sql.query<{ id: string; status: string; enabled: boolean }>(
     `select id, status, enabled from nodes
      where name = '演示节点' and status <> 'revoked'
      order by created_at desc limit 1`,
   );
-  if (!agent) {
-    const id = newId("agt");
+  if (!node) {
+    const id = newId("nde");
     const token = newBootstrap();
     await sql`
       insert into nodes (id, name, comment, bootstrap_hash, status)
       values (${id}, '演示节点', '预览内嵌节点，映射由服务端下发', ${hashToken(token)}, 'offline')
     `;
     await audit("node.create", id, "演示节点");
-    agent = { id, status: "offline", enabled: true };
+    node = { id, status: "offline", enabled: true };
   }
   const demoToken = recallToken(node.id) ?? newBootstrap();
   rememberToken(node.id, demoToken);
@@ -1008,7 +1008,7 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
   await sql`
     update nodes
     set status = 'online', last_seen = now(), addr = '127.0.0.1', version = '0.4.0'
-    where id = ${agent.id}
+    where id = ${node.id}
   `;
   await sql`
     update mappings
@@ -1020,7 +1020,7 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
         end,
         listen_error = null,
         updated_at = now()
-    where node_id = ${agent.id}
+    where node_id = ${node.id}
   `;
   await audit("node.hello", node.id, "demo HelloOk");
   await liveSync(node.id, true);
@@ -1037,7 +1037,7 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
   }>(
     `select id, name, proto, mode, entry_port, local_host, local_port, enabled
      from mappings where node_id = $1 and name = '回声' limit 1`,
-    [agent.id],
+    [node.id],
   );
 
   if (!mapping) {
@@ -1120,7 +1120,7 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
   }>(
     `select id, name, proto, mode, entry_port, local_host, local_port, enabled
      from mappings where node_id = $1 and name = '游戏口' limit 1`,
-    [agent.id],
+    [node.id],
   );
   if (!udpMap) {
     let entryPort = 25565;

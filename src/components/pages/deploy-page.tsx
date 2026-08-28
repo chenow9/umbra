@@ -21,7 +21,7 @@ export function DeployPage() {
   const [nodeOs, setNodeOs] = useState<Platform>("linux");
   const [nodeArch, setNodeArch] = useState<Arch>("amd64");
   const gate = gateInstall(gateOs, gateArch);
-  const agent = nodeInstall(nodeOs, nodeArch, exampleToken);
+  const node = nodeInstall(nodeOs, nodeArch, exampleToken);
 
   return (
     <AppShell title="部署">
@@ -56,7 +56,7 @@ export function DeployPage() {
           <p className="mb-2 text-xs text-stone">凭证在「登记节点」时签发，只显示一次。下面是样例。</p>
           <Pickers os={nodeOs} arch={nodeArch} onOs={setNodeOs} onArch={setNodeArch} />
           <pre className="overflow-x-auto rounded-xl bg-card p-4 font-mono text-xs leading-relaxed text-ink shadow-border">
-            {agent.trim()}
+            {node.trim()}
           </pre>
         </section>
 
