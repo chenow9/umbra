@@ -44,6 +44,13 @@ func (c *Console) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/nodes/{id}/hello", c.need(c.postHello))
 	mux.HandleFunc("POST /v1/nodes/{id}/disconnect", c.need(c.postDisconnect))
 	mux.HandleFunc("POST /v1/nodes/{id}/revoke", c.need(c.postRevoke))
+	mux.HandleFunc("GET /v1/agents", c.need(c.getNodes))
+	mux.HandleFunc("POST /v1/agents", c.need(c.postNode))
+	mux.HandleFunc("GET /v1/agents/{id}/bootstrap", c.need(c.getBootstrap))
+	mux.HandleFunc("POST /v1/agents/{id}/rotate", c.need(c.postRotate))
+	mux.HandleFunc("POST /v1/agents/{id}/hello", c.need(c.postHello))
+	mux.HandleFunc("POST /v1/agents/{id}/disconnect", c.need(c.postDisconnect))
+	mux.HandleFunc("POST /v1/agents/{id}/revoke", c.need(c.postRevoke))
 	mux.HandleFunc("GET /v1/mappings", c.need(c.getMappings))
 	mux.HandleFunc("POST /v1/mappings", c.need(c.postMapping))
 	mux.HandleFunc("POST /v1/mappings/{id}/enabled", c.need(c.postEnabled))
@@ -781,6 +788,7 @@ func (c *Console) checkSpecs(batch map[string]wire.Mapping) error {
 func (c *Console) postMapping(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		NodeID     string `json:"nodeId"`
+		AgentID    string `json:"agentId"`
 		Name       string `json:"name"`
 		Proto      string `json:"proto"`
 		Mode       string `json:"mode"`
@@ -793,6 +801,9 @@ func (c *Console) postMapping(w http.ResponseWriter, r *http.Request) {
 	}
 	if !jsonBody(w, r, &b) {
 		return
+	}
+	if strings.TrimSpace(b.NodeID) == "" {
+		b.NodeID = strings.TrimSpace(b.AgentID)
 	}
 	if err := validateMapping(b.Proto, b.Mode, b.EntryPort, b.LocalHost, b.LocalPort); err != nil {
 		writeErr(w, 400, err.Error())
@@ -1193,6 +1204,7 @@ func (c *Console) getOverview(w http.ResponseWriter, _ *http.Request) {
 	}
 	writeJSON(w, map[string]any{
 		"nodesOnline": online, "nodesTotal": total,
+		"agentsOnline": online, "agentsTotal": total,
 		"mappingsActive": active, "mappingsTotal": maps,
 		"bytesInToday": dayIn, "bytesOutToday": dayOut,
 		"bpsIn": int64(bpsIn), "bpsOut": int64(bpsOut),

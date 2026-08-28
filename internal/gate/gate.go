@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,6 +39,7 @@ const (
 
 var (
 	handshakeDeadlineNs atomic.Int64
+	maxSplices          atomic.Int32
 	listenRetryWait     = 100 * time.Millisecond
 	listenRetryMax      = 8 * time.Second
 	listenTCPFn         atomic.Value
@@ -50,6 +53,12 @@ func init() {
 	handshakeDeadlineNs.Store(int64(12 * time.Second))
 	listenTCPFn.Store(listenTCPFunc(netutil.Listen))
 	listenPacketFn.Store(listenPacketFunc(netutil.ListenPacket))
+	maxSplices.Store(8192)
+	if v := os.Getenv("UMBRA_MAX_SPLICES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxSplices.Store(int32(n))
+		}
+	}
 }
 
 func doListenTCP(network, addr string) (net.Listener, error) {
@@ -1220,9 +1229,13 @@ func (e *entry) release() {
 }
 
 func (s *Server) reserveSplice() bool {
+	max := maxSplices.Load()
+	if max <= 0 {
+		max = 8192
+	}
 	for {
 		cur := s.splices.Load()
-		if cur >= 8192 {
+		if cur >= max {
 			return false
 		}
 		if s.splices.CompareAndSwap(cur, cur+1) {
