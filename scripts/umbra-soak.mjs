@@ -125,7 +125,7 @@ function tcpRoundtrip(port, payload, ms = 2500) {
   });
 }
 
-function slowloris(hostPort, ms = 1500) {
+function slowloris(hostPort, ms = 8000) {
   const idx = hostPort.lastIndexOf(":");
   const host = hostPort.slice(0, idx);
   const port = Number(hostPort.slice(idx + 1));
@@ -219,9 +219,9 @@ async function main() {
       const m = (maps ?? []).find((x) => x.id === "map_soak");
       if (m && m.activeConns > 8) throw new Error(`quota ${m.activeConns}`);
       await idleHold(PUB, 1200);
-      const sl = await slowloris(API, 800);
-      if (sl !== "closed" && sl !== "error" && sl !== "timeout") {
-        throw new Error(`slowloris ${sl}`);
+      const sl = await slowloris(API, 8000);
+      if (sl !== "closed" && sl !== "error") {
+        throw new Error(`slowloris expected server close, got ${sl}`);
       }
       node.kill("SIGTERM");
       await sleep(150);

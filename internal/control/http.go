@@ -268,8 +268,20 @@ func (c *Console) postLogin(w http.ResponseWriter, r *http.Request) {
 func (c *Console) postLogout(w http.ResponseWriter, r *http.Request) {
 	sid := readOwnerCookie(r)
 	c.mu.Lock()
+	h := ""
+	if sid != "" {
+		h = gate.TicketHash(sid)
+	}
+	prev := c.sessions[h]
 	c.dropSessionLocked(sid)
-	_ = c.save()
+	if err := c.save(); err != nil {
+		if h != "" && prev != nil {
+			c.sessions[h] = prev
+		}
+		c.mu.Unlock()
+		persistFail(w)
+		return
+	}
 	c.mu.Unlock()
 	clearOwnerCookie(w)
 	writeJSON(w, map[string]any{"ok": true})
@@ -277,8 +289,14 @@ func (c *Console) postLogout(w http.ResponseWriter, r *http.Request) {
 
 func (c *Console) postLogoutAll(w http.ResponseWriter, _ *http.Request) {
 	c.mu.Lock()
+	prev := c.sessions
 	c.dropAllSessionsLocked()
-	_ = c.save()
+	if err := c.save(); err != nil {
+		c.sessions = prev
+		c.mu.Unlock()
+		persistFail(w)
+		return
+	}
 	c.mu.Unlock()
 	clearOwnerCookie(w)
 	writeJSON(w, map[string]any{"ok": true})
@@ -309,10 +327,14 @@ func (c *Console) postPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.mu.Lock()
+	prevHash, prevEpoch := c.ownerHash, c.ownerEpoch
+	prevSess := c.sessions
 	c.ownerHash = h
+	c.ownerEpoch++
 	c.dropAllSessionsLocked()
 	sid := c.issueSessionLocked()
 	if err := c.save(); err != nil {
+		c.ownerHash, c.ownerEpoch, c.sessions = prevHash, prevEpoch, prevSess
 		c.mu.Unlock()
 		persistFail(w)
 		return
@@ -470,17 +492,28 @@ func (c *Console) postRotate(w http.ResponseWriter, r *http.Request) {
 	plain, hash := newNodeToken()
 	old := a.TokenHash
 	oldUntil := a.TokenUntil
+	oldPrev, oldPrevUntil := a.PrevHash, a.PrevUntil
 	grace := gate.TokenGrace
 	until := time.Now().Add(gate.TokenTTL)
 	a.TokenHash = hash
 	a.TokenUntil = until
-	a.PrevHash = old
-	a.PrevUntil = time.Now().Add(grace)
 	a.Token = ""
 	a.revealed = plain
+	graceSec := 0
+	if g, ok := gate.TokenGraceUntil(oldUntil, grace); ok && old != "" && old != hash {
+		a.PrevHash, a.PrevUntil = old, g
+		graceSec = int(time.Until(g).Seconds())
+		if graceSec < 0 {
+			graceSec = 0
+		}
+	} else {
+		a.PrevHash, a.PrevUntil = "", time.Time{}
+		c.revokeHash(old)
+		c.revokeHash(oldPrev)
+	}
 	c.logAudit("node.rotate", id, "")
 	if err := c.save(); err != nil {
-		a.TokenHash, a.TokenUntil, a.PrevHash, a.PrevUntil, a.revealed = old, oldUntil, "", time.Time{}, ""
+		a.TokenHash, a.TokenUntil, a.PrevHash, a.PrevUntil, a.revealed = old, oldUntil, oldPrev, oldPrevUntil, ""
 		c.mu.Unlock()
 		persistFail(w)
 		return
@@ -489,7 +522,7 @@ func (c *Console) postRotate(w http.ResponseWriter, r *http.Request) {
 	c.Gate.RotateTokenUntil(id, old, hash, until, grace)
 	c.installToken(hash, id, until)
 	writeJSON(w, map[string]any{
-		"token": plain, "graceSec": int(grace.Seconds()),
+		"token": plain, "graceSec": graceSec,
 		"expiresAt": until.UTC().Format(time.RFC3339),
 	})
 }
@@ -564,17 +597,21 @@ func (c *Console) postRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	prevStatus, prevEnabled := a.Status, a.Enabled
 	prevHash, prevPrev, prevUntil, prevRevealed := a.TokenHash, a.PrevHash, a.PrevUntil, a.revealed
+	prevTokUntil := a.TokenUntil
+	c.revokeHash(a.TokenHash)
+	c.revokeHash(a.PrevHash)
 	a.Status = "revoked"
 	a.Enabled = false
 	a.Token = ""
 	a.TokenHash = ""
+	a.TokenUntil = time.Time{}
 	a.PrevHash = ""
 	a.PrevUntil = time.Time{}
 	a.revealed = ""
 	c.logAudit("node.revoke", id, "")
 	if err := c.save(); err != nil {
 		a.Status, a.Enabled = prevStatus, prevEnabled
-		a.TokenHash, a.PrevHash, a.PrevUntil, a.revealed = prevHash, prevPrev, prevUntil, prevRevealed
+		a.TokenHash, a.TokenUntil, a.PrevHash, a.PrevUntil, a.revealed = prevHash, prevTokUntil, prevPrev, prevUntil, prevRevealed
 		c.mu.Unlock()
 		persistFail(w)
 		return
@@ -1174,9 +1211,43 @@ func (c *Console) putToken(w http.ResponseWriter, r *http.Request) {
 	if !jsonBody(w, r, &b) {
 		return
 	}
+	if strings.TrimSpace(b.NodeID) == "" {
+		writeErr(w, 400, "需要 node_id")
+		return
+	}
 	plain := r.PathValue("token")
+	if plain == "" {
+		writeErr(w, 400, "需要凭证")
+		return
+	}
+	hash := gate.TicketHash(plain)
 	until := time.Now().Add(gate.TokenTTL)
-	c.Gate.SetTokenHashUntil(gate.TicketHash(plain), b.NodeID, until)
+	c.mu.Lock()
+	rec := c.nodes[b.NodeID]
+	if rec == nil {
+		rec = &nodeRec{ID: b.NodeID, Name: b.NodeID, Status: "offline", Enabled: true, Created: time.Now()}
+		c.nodes[b.NodeID] = rec
+	}
+	if rec.Status == "revoked" {
+		c.mu.Unlock()
+		writeErr(w, 404, "节点不存在")
+		return
+	}
+	old, oldUntil, oldPrev, oldPrevUntil := rec.TokenHash, rec.TokenUntil, rec.PrevHash, rec.PrevUntil
+	if old != "" && old != hash {
+		c.revokeHash(old)
+	}
+	c.revokeHash(oldPrev)
+	rec.TokenHash, rec.TokenUntil = hash, until
+	rec.PrevHash, rec.PrevUntil, rec.Token = "", time.Time{}, ""
+	c.installToken(hash, rec.ID, until)
+	if err := c.save(); err != nil {
+		rec.TokenHash, rec.TokenUntil, rec.PrevHash, rec.PrevUntil = old, oldUntil, oldPrev, oldPrevUntil
+		c.mu.Unlock()
+		persistFail(w)
+		return
+	}
+	c.mu.Unlock()
 	w.WriteHeader(204)
 }
 
@@ -1259,11 +1330,16 @@ func (c *Console) postDemo(w http.ResponseWriter, _ *http.Request) {
 	if demo.revealed == "" {
 		plain, hash := newNodeToken()
 		old := demo.TokenHash
+		oldUntil := demo.TokenUntil
 		until := time.Now().Add(gate.TokenTTL)
 		demo.TokenHash = hash
 		demo.TokenUntil = until
-		demo.PrevHash = old
-		demo.PrevUntil = time.Now().Add(gate.TokenGrace)
+		if g, ok := gate.TokenGraceUntil(oldUntil, gate.TokenGrace); ok && old != "" && old != hash {
+			demo.PrevHash, demo.PrevUntil = old, g
+		} else {
+			demo.PrevHash, demo.PrevUntil = "", time.Time{}
+			c.revokeHash(old)
+		}
 		demo.revealed = plain
 		_ = c.save()
 		c.mu.Unlock()

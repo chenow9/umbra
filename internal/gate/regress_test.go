@@ -16,6 +16,7 @@ import (
 	"umbra/internal/node"
 	"umbra/internal/preface"
 	"umbra/internal/retry"
+	"umbra/internal/stealth"
 	"umbra/internal/wire"
 )
 
@@ -63,6 +64,8 @@ func TestStreamFloodAfterAuthIsBounded(t *testing.T) {
 				return
 			}
 			opened.Add(1)
+			_ = st.SetWriteDeadline(time.Now().Add(200 * time.Millisecond))
+			_, _ = st.Write(make([]byte, 256*1024))
 			_ = st.Close()
 		}()
 	}
@@ -90,6 +93,120 @@ func TestStreamFloodAfterAuthIsBounded(t *testing.T) {
 	}
 	go func() { _ = node.Run(addr, "tok", nil) }()
 	waitOnline(t, s, "nde1")
+}
+
+func TestRevokeDuringHandshakeRejectsEnroll(t *testing.T) {
+	old := handshakeDeadlineNs.Swap(int64(8 * time.Second))
+	defer handshakeDeadlineNs.Store(old)
+	s, addr := startGate(t)
+	s.SetToken("tok", "nde1")
+	raw, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if err := preface.Write(raw, preface.KindNode, "tok"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.sessionHeld("127.0.0.1") > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if s.sessionHeld("127.0.0.1") == 0 {
+		t.Fatal("UMB1 did not promote to session")
+	}
+	s.Revoke("nde1")
+	sess, err := yamux.Client(raw, muxcfg.Config())
+	if err != nil {
+		return
+	}
+	defer sess.Close()
+	st, err := sess.OpenStream()
+	if err != nil {
+		return
+	}
+	wc := wire.NewConn(st)
+	if err := wc.SendJSON("Enroll", map[string]string{"hostname": "x", "os": "linux", "arch": "amd64"}); err != nil {
+		return
+	}
+	_ = st.SetReadDeadline(time.Now().Add(2 * time.Second))
+	env, err := wc.Read()
+	if err == nil && env.Type == "EnrollOk" {
+		t.Fatal("enroll after revoke must not succeed")
+	}
+	for _, n := range s.Status().Nodes {
+		if n.ID == "nde1" && n.Online {
+			t.Fatal("revoked handshake must not publish a node session")
+		}
+	}
+	if s.LookupToken("tok") != "" {
+		t.Fatal("revoked token must stay deleted")
+	}
+}
+
+func TestExpiryDuringHandshakeRejectsEnroll(t *testing.T) {
+	old := handshakeDeadlineNs.Swap(int64(8 * time.Second))
+	defer handshakeDeadlineNs.Store(old)
+	s, addr := startGate(t)
+	h := TicketHash("tok")
+	s.SetTokenHashUntil(h, "nde1", time.Now().Add(80*time.Millisecond))
+	raw, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if err := preface.Write(raw, preface.KindNode, "tok"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.sessionHeld("127.0.0.1") > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(120 * time.Millisecond)
+	sess, err := yamux.Client(raw, muxcfg.Config())
+	if err != nil {
+		return
+	}
+	defer sess.Close()
+	st, err := sess.OpenStream()
+	if err != nil {
+		return
+	}
+	wc := wire.NewConn(st)
+	_ = wc.SendJSON("Enroll", map[string]string{"hostname": "x"})
+	_ = st.SetReadDeadline(time.Now().Add(2 * time.Second))
+	env, err := wc.Read()
+	if err == nil && env.Type == "EnrollOk" {
+		t.Fatal("enroll after expiry must not succeed")
+	}
+	for _, n := range s.Status().Nodes {
+		if n.ID == "nde1" && n.Online {
+			t.Fatal("expired handshake must not publish a node session")
+		}
+	}
+}
+
+func TestRotateExpiredTokenHasNoGrace(t *testing.T) {
+	s := New("127.0.0.1", stealth.New(false))
+	oldH, newH := TicketHash("old"), TicketHash("new")
+	s.SetTokenHashUntil(oldH, "nde1", time.Now().Add(30*time.Millisecond))
+	time.Sleep(50 * time.Millisecond)
+	if s.LookupToken("old") != "" {
+		t.Fatal("old token should already be expired")
+	}
+	s.RotateTokenUntil("nde1", oldH, newH, time.Now().Add(time.Hour), TokenGrace)
+	if s.LookupToken("old") != "" {
+		t.Fatal("rotate must not revive an expired token")
+	}
+	if s.LookupToken("new") != "nde1" {
+		t.Fatal("new token must be installed")
+	}
 }
 
 func TestBlackholePeerReleasesQuota(t *testing.T) {

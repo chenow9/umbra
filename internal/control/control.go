@@ -43,6 +43,8 @@ type Console struct {
 	mu          sync.Mutex
 	ownerHash   string
 	ownerSecret string
+	ownerEpoch  int64
+	revoked     map[string]struct{}
 	nodes       map[string]*nodeRec
 	maps        map[string]*mapRec
 	tickets     map[string]*ticketRec
@@ -133,6 +135,7 @@ type persistSess struct {
 }
 
 type persistFile struct {
+	OwnerEpoch  int64         `json:"owner_epoch,omitempty"`
 	OwnerHash   string        `json:"owner_hash"`
 	OwnerSecret string        `json:"owner_secret"`
 	Nodes       []*nodeRec    `json:"nodes"`
@@ -149,6 +152,13 @@ type persistBox struct {
 	Payload  json.RawMessage `json:"payload"`
 }
 
+type persistTomb struct {
+	OwnerEpoch  int64    `json:"owner_epoch"`
+	OwnerHash   string   `json:"owner_hash"`
+	OwnerSecret string   `json:"owner_secret"`
+	Revoked     []string `json:"revoked"`
+}
+
 func New(g *gate.Server, persist string) (*Console, error) {
 	c := &Console{
 		Gate:     g,
@@ -158,6 +168,7 @@ func New(g *gate.Server, persist string) (*Console, error) {
 		tickets:  map[string]*ticketRec{},
 		sessions: map[string]*ownerSess{},
 		hits:     map[string]hit{},
+		revoked:  map[string]struct{}{},
 	}
 	if err := c.load(); err != nil {
 		return nil, err
@@ -253,7 +264,103 @@ func decodePersist(raw []byte) (persistFile, error) {
 	return p, nil
 }
 
+func (c *Console) tombPath() string { return c.Persist + ".tomb" }
+
+func (c *Console) hashRevoked(h string) bool {
+	if h == "" || c.revoked == nil {
+		return false
+	}
+	_, ok := c.revoked[h]
+	return ok
+}
+
+func (c *Console) revokeHash(h string) {
+	if h == "" {
+		return
+	}
+	if c.revoked == nil {
+		c.revoked = map[string]struct{}{}
+	}
+	c.revoked[h] = struct{}{}
+}
+
+func (c *Console) loadTomb() error {
+	raw, err := os.ReadFile(c.tombPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	t, err := decodeTomb(raw)
+	if err != nil {
+		return err
+	}
+	c.ownerEpoch = t.OwnerEpoch
+	if t.OwnerHash != "" {
+		c.ownerHash = t.OwnerHash
+		c.ownerSecret = t.OwnerSecret
+	}
+	for _, h := range t.Revoked {
+		c.revokeHash(h)
+	}
+	return nil
+}
+
+func decodeTomb(raw []byte) (persistTomb, error) {
+	var t persistTomb
+	p, err := decodePersistPayload(raw)
+	if err != nil {
+		return t, fmt.Errorf("control.json.tomb 损坏，拒绝启动: %w", err)
+	}
+	if err := json.Unmarshal(p, &t); err != nil {
+		return t, fmt.Errorf("control.json.tomb 损坏，拒绝启动: %w", err)
+	}
+	return t, nil
+}
+
+func decodePersistPayload(raw []byte) (json.RawMessage, error) {
+	var box persistBox
+	if err := json.Unmarshal(raw, &box); err != nil {
+		return nil, err
+	}
+	if box.Schema != persistSchema || box.Checksum == "" {
+		return nil, fmt.Errorf("schema/checksum")
+	}
+	payload := compactJSON(box.Payload)
+	if persistChecksum(payload) != box.Checksum {
+		return nil, fmt.Errorf("checksum")
+	}
+	return box.Payload, nil
+}
+
+func (c *Console) saveTomb() error {
+	revoked := make([]string, 0, len(c.revoked))
+	for h := range c.revoked {
+		if h != "" {
+			revoked = append(revoked, h)
+		}
+	}
+	t := persistTomb{
+		OwnerEpoch: c.ownerEpoch, OwnerHash: c.ownerHash, OwnerSecret: c.ownerSecret,
+		Revoked: revoked,
+	}
+	payload, err := json.Marshal(t)
+	if err != nil {
+		return err
+	}
+	box := persistBox{Schema: persistSchema, Checksum: persistChecksum(payload), Payload: payload}
+	raw, err := json.MarshalIndent(box, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeAtomic(c.tombPath(), raw, 0o600)
+}
+
 func (c *Console) load() error {
+	if err := c.loadTomb(); err != nil {
+		return err
+	}
 	raw, err := os.ReadFile(c.Persist)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -261,6 +368,7 @@ func (c *Console) load() error {
 		}
 		return err
 	}
+	fromPrev := false
 	p, err := decodePersist(raw)
 	if err != nil {
 		prev, perr := os.ReadFile(c.Persist + ".prev")
@@ -271,9 +379,17 @@ func (c *Console) load() error {
 		if perr != nil {
 			return fmt.Errorf("%v; 上一代备份也不可用: %w", err, perr)
 		}
-		log.Printf("control.json 不可用，已从上一代备份恢复")
+		fromPrev = true
+		log.Printf("control.json 不可用，已从上一代备份恢复配置；凭证与会话不回滚")
 	}
-	c.ownerHash, c.ownerSecret = p.OwnerHash, p.OwnerSecret
+	if c.ownerEpoch > p.OwnerEpoch && c.ownerHash != "" {
+		// tomb is newer: keep tomb owner, ignore rolled-back password
+	} else {
+		c.ownerHash, c.ownerSecret = p.OwnerHash, p.OwnerSecret
+		if p.OwnerEpoch > c.ownerEpoch {
+			c.ownerEpoch = p.OwnerEpoch
+		}
+	}
 	legacy := p.Nodes
 	if len(legacy) == 0 {
 		legacy = p.LegacyNodes
@@ -289,7 +405,15 @@ func (c *Console) load() error {
 		}
 		a.revealed = ""
 		c.nodes[a.ID] = a
-		if a.Status == "revoked" {
+		dead := a.Status == "revoked" || c.hashRevoked(a.TokenHash) || c.hashRevoked(a.PrevHash)
+		if dead {
+			a.Status = "revoked"
+			a.Enabled = false
+			a.TokenHash, a.TokenUntil, a.PrevHash, a.PrevUntil, a.revealed = "", time.Time{}, "", time.Time{}, ""
+			continue
+		}
+		if fromPrev {
+			a.TokenHash, a.TokenUntil, a.PrevHash, a.PrevUntil, a.revealed = "", time.Time{}, "", time.Time{}, ""
 			continue
 		}
 		if a.TokenHash != "" {
@@ -302,11 +426,12 @@ func (c *Console) load() error {
 			if until.After(nowLoad) {
 				c.installToken(a.TokenHash, a.ID, until)
 			} else {
+				c.revokeHash(a.TokenHash)
 				a.TokenHash = ""
 				a.TokenUntil = time.Time{}
 			}
 		}
-		if a.PrevHash != "" && a.PrevUntil.After(nowLoad) {
+		if a.PrevHash != "" && a.PrevUntil.After(nowLoad) && !c.hashRevoked(a.PrevHash) {
 			c.Gate.SetTokenHashUntil(a.PrevHash, a.ID, a.PrevUntil)
 			h, until := a.PrevHash, a.PrevUntil
 			time.AfterFunc(time.Until(until), func() { c.Gate.ExpireTokenHash(h) })
@@ -341,29 +466,35 @@ func (c *Console) load() error {
 	}
 	c.audit = p.Audit
 	now := time.Now()
-	for _, t := range p.Tickets {
-		if t == nil || t.Hash == "" {
-			continue
+	if !fromPrev {
+		for _, t := range p.Tickets {
+			if t == nil || t.Hash == "" {
+				continue
+			}
+			if !t.Expires.IsZero() && now.After(t.Expires) {
+				continue
+			}
+			c.tickets[t.ID] = t
+			c.Gate.SetTicket(t.Hash, t.MappingID, t.Expires)
 		}
-		if !t.Expires.IsZero() && now.After(t.Expires) {
-			continue
+		for _, s := range p.Sessions {
+			if s.Hash == "" {
+				continue
+			}
+			exp := time.Unix(s.Exp, 0)
+			if now.After(exp) {
+				continue
+			}
+			c.sessions[s.Hash] = &ownerSess{Exp: exp, Last: now}
 		}
-		c.tickets[t.ID] = t
-		c.Gate.SetTicket(t.Hash, t.MappingID, t.Expires)
 	}
-	for _, s := range p.Sessions {
-		if s.Hash == "" {
-			continue
-		}
-		exp := time.Unix(s.Exp, 0)
-		if now.After(exp) {
-			continue
-		}
-		c.sessions[s.Hash] = &ownerSess{Exp: exp, Last: now}
-	}
-	if migratedTTL {
+	if migratedTTL || fromPrev {
 		if err := c.save(); err != nil {
-			return err
+			if fromPrev {
+				log.Printf("control.json prev restore persisted without credentials: %v", err)
+			} else {
+				return err
+			}
 		}
 	}
 	return nil
@@ -384,7 +515,11 @@ func (c *Console) installToken(hash, nodeID string, until time.Time) time.Time {
 }
 
 func (c *Console) save() error {
-	p := persistFile{OwnerHash: c.ownerHash, OwnerSecret: c.ownerSecret}
+	if err := c.saveTomb(); err != nil {
+		log.Printf("persist tomb: %v", err)
+		return fmt.Errorf("%w: %v", errPersist, err)
+	}
+	p := persistFile{OwnerEpoch: c.ownerEpoch, OwnerHash: c.ownerHash, OwnerSecret: c.ownerSecret}
 	for _, a := range c.nodes {
 		cp := *a
 		cp.Token = ""
@@ -440,6 +575,9 @@ func backupPrev(path string) error {
 			return nil
 		}
 		return err
+	}
+	if _, err := decodePersist(raw); err != nil {
+		return nil
 	}
 	return writeAtomic(path+".prev", raw, 0o600)
 }
@@ -602,9 +740,11 @@ func (c *Console) setup(pw string) error {
 	}
 	c.ownerHash = h
 	c.ownerSecret = secret
+	c.ownerEpoch++
 	if err := c.save(); err != nil {
 		c.ownerHash = ""
 		c.ownerSecret = ""
+		c.ownerEpoch--
 		return err
 	}
 	return nil

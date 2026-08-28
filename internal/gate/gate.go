@@ -443,16 +443,22 @@ func (s *Server) onJSON(raw net.Conn, sess *yamux.Session, wc *wire.Conn, ac **n
 		if err := json.Unmarshal(env.Body, &b); err != nil {
 			return err
 		}
-		id := nodeID
-		if id == "" {
+		if nodeID == "" || credHash == "" {
 			_ = wc.SendJSON("Dropped", map[string]string{"reason": "bad_token"})
 			return fmt.Errorf("missing preface identity")
 		}
 		sessn := &nodeConn{
-			id: id, credHash: credHash, addr: policy.NormalizeIP(raw.RemoteAddr().String()),
+			id: nodeID, credHash: credHash, addr: policy.NormalizeIP(raw.RemoteAddr().String()),
 			os: b.OS, arch: b.Arch, ver: b.Version, raw: raw, sess: sess, conn: wc, online: false,
 		}
 		s.mu.Lock()
+		id, ok := s.admitHashLocked(credHash, nodeID)
+		if !ok {
+			s.mu.Unlock()
+			_ = wc.SendJSON("Dropped", map[string]string{"reason": "bad_token"})
+			return fmt.Errorf("credential rejected at enroll")
+		}
+		sessn.id = id
 		if old := s.nodes[id]; old != nil && old != sessn {
 			old.online = false
 			s.clearNodeUDP(old)
@@ -582,6 +588,37 @@ func tokenExpired(until time.Time) bool {
 	return !until.IsZero() && !time.Now().Before(until)
 }
 
+// admitHashLocked re-checks the authoritative token table. Caller must hold s.mu.
+func (s *Server) admitHashLocked(hash, wantID string) (nodeID string, ok bool) {
+	e, found := s.tok[hash]
+	if !found {
+		return "", false
+	}
+	if tokenExpired(e.Until) {
+		delete(s.tok, hash)
+		return "", false
+	}
+	if wantID != "" && e.NodeID != wantID {
+		return "", false
+	}
+	return e.NodeID, true
+}
+
+// TokenGraceUntil is min(oldUntil, now+grace). A already-expired token gets no grace.
+func TokenGraceUntil(oldUntil time.Time, grace time.Duration) (time.Time, bool) {
+	if grace <= 0 {
+		grace = TokenGrace
+	}
+	if tokenExpired(oldUntil) {
+		return time.Time{}, false
+	}
+	end := time.Now().Add(grace)
+	if !oldUntil.IsZero() && oldUntil.Before(end) {
+		end = oldUntil
+	}
+	return end, true
+}
+
 func (s *Server) SetToken(token, nodeID string) {
 	s.SetTokenHash(TicketHash(token), nodeID)
 }
@@ -610,10 +647,31 @@ func (s *Server) RotateTokenUntil(nodeID, oldHash, newHash string, until time.Ti
 	if until.IsZero() {
 		until = time.Now().Add(TokenTTL)
 	}
+	s.mu.Lock()
+	var oldUntil time.Time
+	if oldHash != "" {
+		if e, ok := s.tok[oldHash]; ok {
+			oldUntil = e.Until
+		} else {
+			oldUntil = time.Now().Add(-time.Second)
+		}
+	}
+	s.mu.Unlock()
 	s.SetTokenHashUntil(newHash, nodeID, until)
 	if oldHash != "" && oldHash != newHash {
-		s.SetTokenHashUntil(oldHash, nodeID, time.Now().Add(grace))
-		time.AfterFunc(grace, func() { s.ExpireTokenHash(oldHash) })
+		if g, ok := TokenGraceUntil(oldUntil, grace); ok {
+			s.SetTokenHashUntil(oldHash, nodeID, g)
+			delay := time.Until(g)
+			if delay < time.Millisecond {
+				delay = time.Millisecond
+			}
+			h := oldHash
+			time.AfterFunc(delay, func() { s.ExpireTokenHash(h) })
+		} else {
+			s.mu.Lock()
+			delete(s.tok, oldHash)
+			s.mu.Unlock()
+		}
 	}
 	s.Disconnect(nodeID)
 }

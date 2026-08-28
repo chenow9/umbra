@@ -676,6 +676,119 @@ func TestRotateKeepsGraceThenNewExpiry(t *testing.T) {
 	}
 }
 
+func TestRotateExpiredTokenHasNoGrace(t *testing.T) {
+	oldTTL, oldGrace := gate.TokenTTL, gate.TokenGrace
+	gate.TokenTTL = 50 * time.Millisecond
+	gate.TokenGrace = 2 * time.Second
+	t.Cleanup(func() { gate.TokenTTL = oldTTL; gate.TokenGrace = oldGrace })
+
+	c, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
+	var created struct {
+		ID    string `json:"id"`
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c.Gate.LookupToken(created.Token) == "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if c.Gate.LookupToken(created.Token) != "" {
+		t.Fatal("token should expire before rotate")
+	}
+	res = doJSON(t, srv, "POST", "/v1/nodes/"+created.ID+"/rotate", nil, nil)
+	var rotated struct {
+		Token    string `json:"token"`
+		GraceSec int    `json:"graceSec"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&rotated); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if rotated.GraceSec != 0 {
+		t.Fatalf("expired rotate graceSec=%d want 0", rotated.GraceSec)
+	}
+	if c.Gate.LookupToken(created.Token) != "" {
+		t.Fatal("rotate must not revive expired token")
+	}
+	if c.Gate.LookupToken(rotated.Token) != created.ID {
+		t.Fatal("new token must work")
+	}
+}
+
+func TestPrevRestoreDoesNotReviveRevokedToken(t *testing.T) {
+	c, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
+	var created struct {
+		ID    string `json:"id"`
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	res = doJSON(t, srv, "POST", "/v1/nodes/"+created.ID+"/revoke", nil, nil)
+	if res.StatusCode != 204 {
+		t.Fatalf("revoke %d %s", res.StatusCode, readBody(t, res))
+	}
+	if c.Gate.LookupToken(created.Token) != "" {
+		t.Fatal("revoked token still live")
+	}
+	if err := os.WriteFile(c.Persist, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g := gate.New("127.0.0.1", stealth.New(false))
+	c2, err := New(g, c.Persist)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.LookupToken(created.Token) != "" {
+		t.Fatal("prev restore must not revive revoked token")
+	}
+	if rec := c2.nodes[created.ID]; rec != nil && rec.Status != "revoked" && rec.TokenHash != "" {
+		t.Fatal("prev restore must not reinstall credential")
+	}
+}
+
+func TestPrevRestoreDoesNotReviveOwnerSession(t *testing.T) {
+	c, srv, _ := newTestConsole(t)
+	c.SkipAuth = false
+	cli := cookieClient(t)
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/setup", strings.NewReader(`{"password":"abcdefgh"}`))
+	req.Header.Set("content-type", "application/json")
+	res, err := cli.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		t.Fatalf("setup %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+	req, _ = http.NewRequest("POST", srv.URL+"/v1/logout-all", nil)
+	res, err = cli.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readBody(t, res)
+	if err := os.WriteFile(c.Persist, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g := gate.New("127.0.0.1", stealth.New(false))
+	c2, err := New(g, c.Persist)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c2.sessions) != 0 {
+		t.Fatal("prev restore must not revive owner sessions")
+	}
+}
+
 func TestOwnerSessionExpires(t *testing.T) {
 	c, srv, _ := newTestConsole(t)
 	c.SkipAuth = false

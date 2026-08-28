@@ -39,7 +39,7 @@ func main() {
 	stealthMode := flag.String("stealth", "auto", "nft | off | auto")
 	udpMode := flag.String("udp", envOr("UMBRA_UDP", "auto"), "UDP 数据面: auto | required | yamux")
 	stateFile := flag.String("state", "", "热升级恢复的状态文件")
-	pprofAddr := flag.String("pprof", envOr("UMBRA_PPROF", "127.0.0.1:6060"), "本机 pprof 监听，空则关闭")
+	pprofAddr := flag.String("pprof", envOr("UMBRA_PPROF", "off"), "pprof 监听，默认关闭；只允许回环或 Unix")
 	flag.Parse()
 	obs.Init()
 
@@ -139,6 +139,9 @@ func main() {
 	log.Printf("umbrad control %s (%s) %s %s entry-bind %s stealth %s udp %s ca %s", *listen, mode, httpMode, apiAddr, *bind, st.Mode(), s.Status().UDP, bundle.CAFile)
 
 	if *pprofAddr != "" && *pprofAddr != "off" {
+		if control.HTTPBindNeedsTLS(*pprofAddr) {
+			log.Fatal("pprof 只允许回环或 Unix socket")
+		}
 		go servePprof(*pprofAddr)
 	}
 	go func() {
