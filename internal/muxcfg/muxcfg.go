@@ -15,6 +15,7 @@ func Config() *yamux.Config {
 	c.ConnectionWriteTimeout = 10 * time.Second
 	c.MaxStreamWindowSize = 256 * 1024
 	c.StreamOpenTimeout = 8 * time.Second
-	c.AcceptBacklog = 32
+	// 256 saturates at dial -par=256: node accept queue RSTs extra SYNs.
+	c.AcceptBacklog = 4096
 	return c
 }

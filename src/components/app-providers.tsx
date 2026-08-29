@@ -9,6 +9,7 @@ import {
 } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
+import { UmbraLive } from "@/components/umbra-live";
 import {
   applyTheme,
   DEFAULT_THEME,
@@ -46,13 +47,15 @@ export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={client}>
       <ThemeCtx.Provider value={{ theme, setTheme }}>
-        {children}
-        <Toaster
-          position="bottom-right"
-          toastOptions={{
-            className: "font-sans !bg-card !text-ink !border-line shadow-border",
-          }}
-        />
+        <UmbraLive>
+          {children}
+          <Toaster
+            position="bottom-right"
+            toastOptions={{
+              className: "font-sans !bg-card !text-ink !border-line shadow-border",
+            }}
+          />
+        </UmbraLive>
       </ThemeCtx.Provider>
     </QueryClientProvider>
   );

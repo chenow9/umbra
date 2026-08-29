@@ -970,6 +970,8 @@ export const getTraffic = createServerFn({ method: "GET" })
     const view: TrafficView = {
       bytesIn,
       bytesOut,
+      bpsIn: 0,
+      bpsOut: 0,
       peakBpsIn: peakIn,
       peakBpsOut: peakOut,
       series: points,

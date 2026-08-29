@@ -51,7 +51,7 @@ html[data-theme="guci"] {
   --card: #faf8f4;
   --ink: #1e1c19;
   --ink-soft: #45413c;
-  --stone: #8a857c;
+  --stone: #716b63;
   --line: #ddd6cc;
   --pine: #2a2724;
   --pine-fg: #f6f3ee;
@@ -59,8 +59,7 @@ html[data-theme="guci"] {
   --amber: #9a7a48;
   --rose: #8c3d3d;
   --shadow-border:
-    0px 0px 0px 1px rgba(30, 28, 25, 0.07),
-    0px 1px 2px -1px rgba(30, 28, 25, 0.06),
+    0px 0px 0px 1px rgba(30, 28, 25, 0.07), 0px 1px 2px -1px rgba(30, 28, 25, 0.06),
     0px 2px 4px 0px rgba(30, 28, 25, 0.04);
 }
 
@@ -71,7 +70,7 @@ html[data-theme="songmo"] {
   --card: #f7f4ec;
   --ink: #1a1814;
   --ink-soft: #3f3a33;
-  --stone: #8a8478;
+  --stone: #70695f;
   --line: #d9d2c4;
   --pine: #2c4a3e;
   --pine-fg: #f3efe6;
@@ -79,8 +78,7 @@ html[data-theme="songmo"] {
   --amber: #9a6b2f;
   --rose: #8c3d3d;
   --shadow-border:
-    0px 0px 0px 1px rgba(26, 24, 20, 0.06),
-    0px 1px 2px -1px rgba(26, 24, 20, 0.06),
+    0px 0px 0px 1px rgba(26, 24, 20, 0.06), 0px 1px 2px -1px rgba(26, 24, 20, 0.06),
     0px 2px 4px 0px rgba(26, 24, 20, 0.04);
 }
 
@@ -91,7 +89,7 @@ html[data-theme="qingci"] {
   --card: #f5f8f5;
   --ink: #1c2420;
   --ink-soft: #3c4a43;
-  --stone: #7d8a82;
+  --stone: #647067;
   --line: #cdd6cf;
   --pine: #3f6b5c;
   --pine-fg: #eef3ee;
@@ -99,8 +97,7 @@ html[data-theme="qingci"] {
   --amber: #9a7a48;
   --rose: #8c4a4a;
   --shadow-border:
-    0px 0px 0px 1px rgba(28, 36, 32, 0.06),
-    0px 1px 2px -1px rgba(28, 36, 32, 0.06),
+    0px 0px 0px 1px rgba(28, 36, 32, 0.06), 0px 1px 2px -1px rgba(28, 36, 32, 0.06),
     0px 2px 4px 0px rgba(28, 36, 32, 0.04);
 }
 
@@ -111,7 +108,7 @@ html[data-theme="haijiao"] {
   --card: #f5f7f8;
   --ink: #1b2328;
   --ink-soft: #3d4a52;
-  --stone: #7a858c;
+  --stone: #626e75;
   --line: #cfd6db;
   --pine: #3d5a66;
   --pine-fg: #eef1f3;
@@ -119,8 +116,7 @@ html[data-theme="haijiao"] {
   --amber: #9a7a48;
   --rose: #8c4a4a;
   --shadow-border:
-    0px 0px 0px 1px rgba(27, 35, 40, 0.06),
-    0px 1px 2px -1px rgba(27, 35, 40, 0.06),
+    0px 0px 0px 1px rgba(27, 35, 40, 0.06), 0px 1px 2px -1px rgba(27, 35, 40, 0.06),
     0px 2px 4px 0px rgba(27, 35, 40, 0.04);
 }
 
@@ -131,7 +127,7 @@ html[data-theme="zhusha"] {
   --card: #f8f3ee;
   --ink: #1c1614;
   --ink-soft: #4a3c38;
-  --stone: #8a7c76;
+  --stone: #70635e;
   --line: #ddd2ca;
   --pine: #7a3a32;
   --pine-fg: #f4eee8;
@@ -139,8 +135,7 @@ html[data-theme="zhusha"] {
   --amber: #9a6b2f;
   --rose: #8c3d3d;
   --shadow-border:
-    0px 0px 0px 1px rgba(28, 22, 20, 0.06),
-    0px 1px 2px -1px rgba(28, 22, 20, 0.06),
+    0px 0px 0px 1px rgba(28, 22, 20, 0.06), 0px 1px 2px -1px rgba(28, 22, 20, 0.06),
     0px 2px 4px 0px rgba(28, 22, 20, 0.04);
 }
 
@@ -151,7 +146,7 @@ html[data-theme="dianlan"] {
   --card: #f5f6f9;
   --ink: #161820;
   --ink-soft: #3a3e4a;
-  --stone: #7a7e8a;
+  --stone: #646975;
   --line: #cfd2da;
   --pine: #3d4a63;
   --pine-fg: #eef0f4;
@@ -159,8 +154,7 @@ html[data-theme="dianlan"] {
   --amber: #9a7a48;
   --rose: #8c4a4a;
   --shadow-border:
-    0px 0px 0px 1px rgba(22, 24, 32, 0.06),
-    0px 1px 2px -1px rgba(22, 24, 32, 0.06),
+    0px 0px 0px 1px rgba(22, 24, 32, 0.06), 0px 1px 2px -1px rgba(22, 24, 32, 0.06),
     0px 2px 4px 0px rgba(22, 24, 32, 0.04);
 }
 
@@ -171,7 +165,7 @@ html[data-theme="chahe"] {
   --card: #f7f1e6;
   --ink: #1c1610;
   --ink-soft: #4a3e32;
-  --stone: #8a7c68;
+  --stone: #746653;
   --line: #d9cdb8;
   --pine: #5a4030;
   --pine-fg: #f3eadc;
@@ -179,8 +173,7 @@ html[data-theme="chahe"] {
   --amber: #9a6b2f;
   --rose: #8c3d3d;
   --shadow-border:
-    0px 0px 0px 1px rgba(28, 22, 16, 0.07),
-    0px 1px 2px -1px rgba(28, 22, 16, 0.06),
+    0px 0px 0px 1px rgba(28, 22, 16, 0.07), 0px 1px 2px -1px rgba(28, 22, 16, 0.06),
     0px 2px 4px 0px rgba(28, 22, 16, 0.04);
 }
 
@@ -242,6 +235,22 @@ html[data-theme="yesong"] {
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
+  }
+}
+
+.live-dot {
+  animation: live-dot 1.8s ease-in-out infinite;
+}
+
+@keyframes live-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
   }
 }
 

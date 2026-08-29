@@ -20,6 +20,8 @@ export type Node = {
   mappingCount: number;
   bytesIn: number;
   bytesOut: number;
+  bpsIn?: number;
+  bpsOut?: number;
 };
 
 export type Mapping = {
@@ -44,14 +46,26 @@ export type Mapping = {
   udpDropMaxConns?: number;
   udpDropPerIP?: number;
   udpDropRate?: number;
+  tcpDropMaxConns?: number;
+  tcpDropAcl?: number;
+  tcpDropSpa?: number;
+  tcpDropOffline?: number;
+  tcpDropTunnel?: number;
+  tcpDropSplice?: number;
+  lastDrop?: string;
+  lastDropAt?: string;
   lastProbeAt: string | null;
   lastProbePreview: string | null;
   grantUntil: string | null;
   maxConns: number;
   rateKbps: number;
   allowCidrs: string;
+  idleTimeoutSec?: number;
+  reach?: string;
   createdAt: string;
   updatedAt: string;
+  bpsIn?: number;
+  bpsOut?: number;
 };
 
 export type AuditItem = {
@@ -60,7 +74,16 @@ export type AuditItem = {
   actor: string;
   action: string;
   target: string;
+  targetName?: string;
   detail: string;
+};
+
+export type OverviewAlert = {
+  level: "error" | "warn" | string;
+  kind: string;
+  title: string;
+  id?: string;
+  href?: string;
 };
 
 export type Overview = {
@@ -73,6 +96,17 @@ export type Overview = {
   bpsIn: number;
   bpsOut: number;
   recentAudit: AuditItem[];
+  alerts?: OverviewAlert[];
+};
+
+export type VisitorTicket = {
+  id: string;
+  mappingId: string;
+  mappingName: string;
+  label: string;
+  expiresAt: string;
+  createdAt: string;
+  expired: boolean;
 };
 
 export type TrafficPoint = {
@@ -84,6 +118,8 @@ export type TrafficPoint = {
 export type TrafficView = {
   bytesIn: number;
   bytesOut: number;
+  bpsIn: number;
+  bpsOut: number;
   peakBpsIn: number;
   peakBpsOut: number;
   series: TrafficPoint[];
@@ -128,4 +164,19 @@ export type NodeIssued = {
   token: string;
   installCmd: string;
   unit: string;
+};
+
+export type TrafficSample = {
+  ts: string;
+  bytesIn: number;
+  bytesOut: number;
+  by?: Record<string, { bytesIn: number; bytesOut: number }>;
+};
+
+export type LiveEvent = {
+  ts: string;
+  overview: Overview;
+  nodes: Node[];
+  mappings: Mapping[];
+  sample: TrafficSample | null;
 };

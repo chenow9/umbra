@@ -17,13 +17,7 @@ function Swatch({ paper, pine }: { paper: string; pine: string }) {
   );
 }
 
-function ThemeGrid({
-  value,
-  onPick,
-}: {
-  value: ThemeId;
-  onPick: (id: ThemeId) => void;
-}) {
+function ThemeGrid({ value, onPick }: { value: ThemeId; onPick: (id: ThemeId) => void }) {
   return (
     <div className="flex flex-col gap-3">
       {themeGroups().map((group) => (
@@ -36,9 +30,10 @@ function ThemeGrid({
                 <button
                   key={t.id}
                   type="button"
+                  role="menuitemradio"
                   title={`${t.name} — ${t.hint}`}
                   aria-label={t.name}
-                  aria-pressed={selected}
+                  aria-checked={selected}
                   onPointerDown={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -46,7 +41,9 @@ function ThemeGrid({
                   }}
                   className={cn(
                     "flex h-11 items-center gap-2 rounded-md px-2 text-left",
-                    selected ? "bg-paper text-ink shadow-border" : "text-ink-soft hover:bg-paper/70 hover:text-ink",
+                    selected
+                      ? "bg-paper text-ink shadow-border"
+                      : "text-ink-soft hover:bg-paper/70 hover:text-ink",
                   )}
                 >
                   <Swatch paper={t.tokens.paper} pine={t.tokens.pine} />
@@ -102,7 +99,7 @@ export function ThemeMenu({
         variant="outline"
         size="sm"
         aria-expanded={open}
-        aria-haspopup="listbox"
+        aria-haspopup="menu"
         onClick={() => setOpen((v) => !v)}
       >
         <Swatch paper={current.tokens.paper} pine={current.tokens.pine} />
@@ -111,7 +108,8 @@ export function ThemeMenu({
       </Button>
       {open ? (
         <div
-          role="listbox"
+          role="menu"
+          aria-label="选择配色"
           className="absolute right-0 z-50 mt-2 w-64 rounded-lg bg-card p-2 shadow-border"
         >
           <ThemeGrid value={value} onPick={pick} />

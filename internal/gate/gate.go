@@ -149,6 +149,14 @@ type entry struct {
 	udpDropMaxConns  atomic.Int64
 	udpDropPerIP     atomic.Int64
 	udpDropRate      atomic.Int64
+	tcpDropMaxConns  atomic.Int64
+	tcpDropACL       atomic.Int64
+	tcpDropSPA       atomic.Int64
+	tcpDropOffline   atomic.Int64
+	tcpDropTunnel    atomic.Int64
+	tcpDropSplice    atomic.Int64
+	lastDrop         atomic.Value
+	lastDropAt       atomic.Int64
 	udpMapTokens     float64
 	udpMapLast       time.Time
 	udpLogNSMaxConns atomic.Int64
@@ -852,14 +860,18 @@ func (s *Server) Knock(mappingID string, ttl time.Duration) time.Time {
 }
 
 func (s *Server) granted(id string) bool {
+	return !s.GrantUntil(id).IsZero()
+}
+
+func (s *Server) GrantUntil(id string) time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	until, ok := s.grant[id]
 	if !ok || time.Now().After(until) {
 		delete(s.grant, id)
-		return false
+		return time.Time{}
 	}
-	return true
+	return until
 }
 
 func (s *Server) PutMappings(nodeID string, maps []Mapping) {
@@ -955,10 +967,15 @@ func (s *Server) ensureEntry(nodeID string, m Mapping) {
 		return
 	}
 	var in, out, pin, pout, dropMax, dropIP, dropRate int64
+	var tcpMax, tcpACL, tcpSPA, tcpOff, tcpTun, tcpSplice, lastAt int64
+	var last any
 	if cur != nil {
 		in, out = cur.in.Load(), cur.out.Load()
 		pin, pout = cur.pin.Load(), cur.pout.Load()
 		dropMax, dropIP, dropRate = cur.udpDropMaxConns.Load(), cur.udpDropPerIP.Load(), cur.udpDropRate.Load()
+		tcpMax, tcpACL, tcpSPA = cur.tcpDropMaxConns.Load(), cur.tcpDropACL.Load(), cur.tcpDropSPA.Load()
+		tcpOff, tcpTun, tcpSplice = cur.tcpDropOffline.Load(), cur.tcpDropTunnel.Load(), cur.tcpDropSplice.Load()
+		last, lastAt = cur.lastDrop.Load(), cur.lastDropAt.Load()
 	}
 	s.mu.Unlock()
 	s.stopEntry(m.ID)
@@ -970,6 +987,16 @@ func (s *Server) ensureEntry(nodeID string, m Mapping) {
 	e.udpDropMaxConns.Store(dropMax)
 	e.udpDropPerIP.Store(dropIP)
 	e.udpDropRate.Store(dropRate)
+	e.tcpDropMaxConns.Store(tcpMax)
+	e.tcpDropACL.Store(tcpACL)
+	e.tcpDropSPA.Store(tcpSPA)
+	e.tcpDropOffline.Store(tcpOff)
+	e.tcpDropTunnel.Store(tcpTun)
+	e.tcpDropSplice.Store(tcpSplice)
+	if last != nil {
+		e.lastDrop.Store(last)
+	}
+	e.lastDropAt.Store(lastAt)
 	s.mu.Lock()
 	if s.draining.Load() {
 		s.mu.Unlock()
@@ -1176,22 +1203,26 @@ func (s *Server) serveTCP(e *entry, ln net.Listener) {
 func (s *Server) handleTCP(e *entry, c net.Conn, via string) {
 	ip := policy.NormalizeIP(c.RemoteAddr().String())
 	if e.spec.Mode == "spa" && !s.granted(e.spec.ID) {
+		e.noteTCPDrop("spa")
 		_ = c.Close()
 		return
 	}
 	if !policy.CidrAllowed(ip, e.spec.AllowCidrs) {
+		e.noteTCPDrop("acl")
 		slog.Info("acl drop", "mapping", e.spec.ID, "ip", ip)
 		s.noteAudit("acl.drop", e.spec.ID, ip)
 		_ = c.Close()
 		return
 	}
 	if !e.reserve() {
+		e.noteTCPDrop("maxconns")
 		slog.Info("maxconns drop", "mapping", e.spec.ID, "ip", ip)
 		_ = c.Close()
 		return
 	}
 	defer e.release()
 	if !s.reserveSplice() {
+		e.noteTCPDrop("splice")
 		_ = c.Close()
 		return
 	}
@@ -1204,29 +1235,60 @@ func (s *Server) handleTCP(e *entry, c net.Conn, via string) {
 	}
 	s.mu.Unlock()
 	if sess == nil {
+		e.noteTCPDrop("offline")
 		_ = c.Close()
 		return
 	}
 	st, err := sess.OpenStream()
 	if err != nil {
+		e.noteTCPDrop("tunnel")
+		slog.Info("yamux open fail", "mapping", e.spec.ID, "err", err)
 		_ = c.Close()
 		return
 	}
 	if err := wire.WriteOpen(st, wire.StreamOpen{
 		MappingID: e.spec.ID, Proto: "tcp", PeerIP: ip, PeerPort: portOf(c.RemoteAddr()), Via: via,
 	}); err != nil {
+		e.noteTCPDrop("tunnel")
+		slog.Info("stream open write fail", "mapping", e.spec.ID, "err", err)
 		_ = st.Close()
 		_ = c.Close()
 		return
 	}
-	idle := time.Duration(policy.IntOr(e.spec.IdleTimeoutSec, 60)) * time.Second
+	idle := time.Duration(e.spec.IdleTimeoutSec) * time.Second
+	if idle < 0 {
+		idle = 0
+	}
 	pub := &idleConn{Conn: c, idle: idle}
 	dst := xfer.WithLimit(st, e.take)
 	xfer.CopyBidirectional(dst, pub, &e.in, &e.out)
 }
 
+func (e *entry) noteTCPDrop(reason string) {
+	if e == nil {
+		return
+	}
+	switch reason {
+	case "maxconns":
+		e.tcpDropMaxConns.Add(1)
+	case "acl":
+		e.tcpDropACL.Add(1)
+	case "spa":
+		e.tcpDropSPA.Add(1)
+	case "offline":
+		e.tcpDropOffline.Add(1)
+	case "splice":
+		e.tcpDropSplice.Add(1)
+	default:
+		e.tcpDropTunnel.Add(1)
+		reason = "tunnel"
+	}
+	e.lastDrop.Store(reason)
+	e.lastDropAt.Store(time.Now().UnixNano())
+}
+
 func (e *entry) reserve() bool {
-	max := int32(policy.IntOr(e.spec.MaxConns, 64))
+	max := int32(policy.MaxConns(e.spec.MaxConns))
 	for {
 		cur := e.active.Load()
 		if cur >= max {
@@ -1648,6 +1710,14 @@ type MapStat struct {
 	UDPDropMaxConns       int64 `json:"udpDropMaxConns"`
 	UDPDropPerIP          int64 `json:"udpDropPerIP"`
 	UDPDropRate           int64 `json:"udpDropRate"`
+	TCPDropMaxConns       int64 `json:"tcpDropMaxConns"`
+	TCPDropACL            int64 `json:"tcpDropAcl"`
+	TCPDropSPA            int64 `json:"tcpDropSpa"`
+	TCPDropOffline        int64 `json:"tcpDropOffline"`
+	TCPDropTunnel         int64 `json:"tcpDropTunnel"`
+	TCPDropSplice         int64 `json:"tcpDropSplice"`
+	LastDrop              string
+	LastDropAt            time.Time
 	NodeID                string
 	Error                 string
 	Listening             bool
@@ -1693,6 +1763,11 @@ func (s *Server) MappingStats() map[string]MapStat {
 		if e.spec.Proto == "udp" {
 			udpActive = active
 		}
+		last, _ := e.lastDrop.Load().(string)
+		var lastAt time.Time
+		if ns := e.lastDropAt.Load(); ns > 0 {
+			lastAt = time.Unix(0, ns)
+		}
 		out[id] = MapStat{
 			In: e.in.Load(), Out: e.out.Load(),
 			PacketsIn: e.pin.Load(), PacketsOut: e.pout.Load(),
@@ -1700,6 +1775,14 @@ func (s *Server) MappingStats() map[string]MapStat {
 			UDPDropMaxConns: e.udpDropMaxConns.Load(),
 			UDPDropPerIP:    e.udpDropPerIP.Load(),
 			UDPDropRate:     e.udpDropRate.Load(),
+			TCPDropMaxConns: e.tcpDropMaxConns.Load(),
+			TCPDropACL:      e.tcpDropACL.Load(),
+			TCPDropSPA:      e.tcpDropSPA.Load(),
+			TCPDropOffline:  e.tcpDropOffline.Load(),
+			TCPDropTunnel:   e.tcpDropTunnel.Load(),
+			TCPDropSplice:   e.tcpDropSplice.Load(),
+			LastDrop:        last,
+			LastDropAt:      lastAt,
 			NodeID:          e.nodeID,
 			Error:           e.listenErr, Listening: listen && e.listenErr == "",
 			UDPVia: via, Generation: e.spec.Generation,

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"umbra/internal/gate"
+	"umbra/internal/policy"
 	"umbra/internal/wire"
 )
 
@@ -39,6 +40,10 @@ func (c *Console) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/overview", c.need(c.getOverview))
 	mux.HandleFunc("GET /v1/nodes", c.need(c.getNodes))
 	mux.HandleFunc("POST /v1/nodes", c.need(c.postNode))
+	mux.HandleFunc("PATCH /v1/nodes/{id}", c.need(c.patchNode))
+	mux.HandleFunc("POST /v1/nodes/{id}", c.need(c.patchNode))
+	mux.HandleFunc("DELETE /v1/nodes/{id}", c.need(c.postDeleteNode))
+	mux.HandleFunc("POST /v1/nodes/{id}/delete", c.need(c.postDeleteNode))
 	mux.HandleFunc("GET /v1/nodes/{id}/bootstrap", c.need(c.getBootstrap))
 	mux.HandleFunc("POST /v1/nodes/{id}/rotate", c.need(c.postRotate))
 	mux.HandleFunc("POST /v1/nodes/{id}/hello", c.need(c.postHello))
@@ -46,12 +51,20 @@ func (c *Console) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/nodes/{id}/revoke", c.need(c.postRevoke))
 	mux.HandleFunc("GET /v1/mappings", c.need(c.getMappings))
 	mux.HandleFunc("POST /v1/mappings", c.need(c.postMapping))
+	mux.HandleFunc("PATCH /v1/mappings/{id}", c.need(c.patchMapping))
+	mux.HandleFunc("POST /v1/mappings/{id}", c.need(c.patchMapping))
+	mux.HandleFunc("DELETE /v1/mappings/{id}", c.need(c.postDeleteMap))
 	mux.HandleFunc("POST /v1/mappings/{id}/enabled", c.need(c.postEnabled))
 	mux.HandleFunc("POST /v1/mappings/{id}/delete", c.need(c.postDeleteMap))
+	mux.HandleFunc("GET /v1/events", c.need(c.getEvents))
 	mux.HandleFunc("POST /v1/mappings/{id}/knock", c.need(c.postKnock))
 	mux.HandleFunc("POST /v1/mappings/{id}/probe", c.need(c.postProbe))
 	mux.HandleFunc("POST /v1/mappings/{id}/visit", c.need(c.postVisit))
 	mux.HandleFunc("POST /v1/mappings/{id}/visitor", c.need(c.postVisitor))
+	mux.HandleFunc("GET /v1/ca", c.need(c.getCA))
+	mux.HandleFunc("GET /v1/tickets", c.need(c.getTickets))
+	mux.HandleFunc("DELETE /v1/tickets/{id}", c.need(c.deleteTicket))
+	mux.HandleFunc("POST /v1/tickets/{id}/delete", c.need(c.deleteTicket))
 	mux.HandleFunc("GET /v1/audit", c.need(c.getAudit))
 	mux.HandleFunc("GET /v1/frames", c.need(c.getFrames))
 	mux.HandleFunc("GET /v1/traffic", c.need(c.getTraffic))
@@ -194,6 +207,75 @@ func jsonBody(w http.ResponseWriter, r *http.Request, v any) bool {
 
 func persistFail(w http.ResponseWriter) {
 	writeErr(w, http.StatusInternalServerError, "状态未能落盘")
+}
+
+func (c *Console) enrollCommand(token string) string {
+	server := c.Listen
+	if server == "" {
+		server = "入口:4400"
+	}
+	return "umbra-node --server " + server + " --tls-ca /etc/umbra/ca.crt --token " + token
+}
+
+func (c *Console) getCA(w http.ResponseWriter, _ *http.Request) {
+	if c.CAFile == "" {
+		writeErr(w, 404, "没有 CA 文件")
+		return
+	}
+	b, err := os.ReadFile(c.CAFile)
+	if err != nil {
+		writeErr(w, 404, "没有 CA 文件")
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-pem-file")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"ca.crt\"")
+	_, _ = w.Write(b)
+}
+
+func (c *Console) getTickets(w http.ResponseWriter, r *http.Request) {
+	want := r.URL.Query().Get("mappingId")
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]map[string]any, 0, len(c.tickets))
+	for _, t := range c.tickets {
+		if want != "" && t.MappingID != want {
+			continue
+		}
+		name := ""
+		if m := c.maps[t.MappingID]; m != nil {
+			name = m.Spec.Name
+		}
+		out = append(out, map[string]any{
+			"id": t.ID, "mappingId": t.MappingID, "mappingName": name, "label": t.Label,
+			"expiresAt": rfc3339(t.Expires), "createdAt": rfc3339(t.Created),
+			"expired": now.After(t.Expires),
+		})
+	}
+	writeJSON(w, out)
+}
+
+func (c *Console) deleteTicket(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	c.mu.Lock()
+	t := c.tickets[id]
+	if t == nil {
+		c.mu.Unlock()
+		writeErr(w, 404, "票据不存在")
+		return
+	}
+	delete(c.tickets, id)
+	c.Gate.DeleteTicket(t.Hash)
+	c.logAudit("visitor.revoke", t.MappingID, t.ID)
+	if err := c.save(); err != nil {
+		c.tickets[id] = t
+		c.Gate.SetTicket(t.Hash, t.MappingID, t.Expires)
+		c.mu.Unlock()
+		persistFail(w)
+		return
+	}
+	c.mu.Unlock()
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 func (c *Console) getHealth(w http.ResponseWriter, _ *http.Request) {
@@ -403,58 +485,17 @@ type gateNode struct {
 	Addr, OS, Arch, Ver string
 }
 
-func (c *Console) getNodes(w http.ResponseWriter, _ *http.Request) {
+func (c *Console) getNodes(w http.ResponseWriter, r *http.Request) {
 	live := c.live()
 	stats := c.Gate.MappingStats()
+	page, size, paged := parsePage(r)
+	q := r.URL.Query()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := []map[string]any{}
-	for _, a := range c.nodes {
-		st := a.Status
-		addr, ver, os, arch := a.Addr, a.Version, a.OS, a.Arch
-		if g, ok := live[a.ID]; ok && g.Online && a.Status != "revoked" {
-			st = "online"
-			addr, ver = g.Addr, g.Ver
-			if g.OS != "" {
-				os = g.OS
-			}
-			if g.Arch != "" {
-				arch = g.Arch
-			}
-		} else if a.Status != "revoked" {
-			st = "offline"
-		}
-		n, in, outB := 0, int64(0), int64(0)
-		for _, m := range c.maps {
-			if m.NodeID == a.ID {
-				n++
-				if s, ok := stats[m.Spec.ID]; ok {
-					in += s.In
-					outB += s.Out
-				} else {
-					in += m.BytesIn
-					outB += m.BytesOut
-				}
-			}
-		}
-		last := ""
-		if a.LastSeen != nil {
-			last = a.LastSeen.UTC().Format(time.RFC3339)
-		}
-		exp := ""
-		if !a.TokenUntil.IsZero() {
-			exp = a.TokenUntil.UTC().Format(time.RFC3339)
-		}
-		out = append(out, map[string]any{
-			"id": a.ID, "name": a.Name, "comment": a.Comment, "status": st,
-			"addr": addr, "version": ver, "os": os, "arch": arch,
-			"lastSeen": last, "enabled": a.Enabled && a.Status != "revoked",
-			"createdAt":      a.Created.UTC().Format(time.RFC3339),
-			"tokenExpiresAt": exp,
-			"mappingCount":   n, "bytesIn": in, "bytesOut": outB,
-		})
-	}
-	writeJSON(w, out)
+	c.touchOnlineLocked(live, time.Now())
+	c.absorbAllLocked(stats)
+	views := filterNodeViews(c.nodeViews(live, stats), q.Get("q"), q.Get("status"), q.Get("os"))
+	writeList(w, views, page, size, paged)
 }
 
 func (c *Console) postNode(w http.ResponseWriter, r *http.Request) {
@@ -490,7 +531,8 @@ func (c *Console) postNode(w http.ResponseWriter, r *http.Request) {
 	c.mu.Unlock()
 	writeJSON(w, map[string]any{
 		"id": id, "token": plain, "os": rec.OS, "arch": rec.Arch,
-		"expiresAt": until.UTC().Format(time.RFC3339),
+		"expiresAt":  until.UTC().Format(time.RFC3339),
+		"installCmd": c.enrollCommand(plain), "listen": c.Listen, "caURL": "/v1/ca",
 	})
 }
 
@@ -541,7 +583,8 @@ func (c *Console) postRotate(w http.ResponseWriter, r *http.Request) {
 	c.installToken(hash, id, until)
 	writeJSON(w, map[string]any{
 		"token": plain, "graceSec": graceSec,
-		"expiresAt": until.UTC().Format(time.RFC3339),
+		"expiresAt":  until.UTC().Format(time.RFC3339),
+		"installCmd": c.enrollCommand(plain), "listen": c.Listen, "caURL": "/v1/ca",
 	})
 }
 
@@ -639,79 +682,16 @@ func (c *Console) postRevoke(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
-func (c *Console) getMappings(w http.ResponseWriter, _ *http.Request) {
+func (c *Console) getMappings(w http.ResponseWriter, r *http.Request) {
 	live := c.live()
 	stats := c.Gate.MappingStats()
+	page, size, paged := parsePage(r)
+	q := r.URL.Query()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := []map[string]any{}
-	for _, m := range c.maps {
-		a := c.nodes[m.NodeID]
-		name, ast := "", "offline"
-		if a != nil {
-			name, ast = a.Name, a.Status
-			if g, ok := live[a.ID]; ok && g.Online && a.Status != "revoked" {
-				ast = "online"
-			}
-		}
-		in, outB, active := m.BytesIn, m.BytesOut, 0
-		udpActive, dropMax, dropIP, dropRate := 0, int64(0), int64(0), int64(0)
-		listen, push, listenErr := m.ListenState, m.PushState, m.ListenError
-		if !m.Spec.Enabled {
-			listen, push, listenErr = "disabled", "acked", ""
-		} else if s, ok := stats[m.Spec.ID]; ok {
-			in, outB, active = s.In, s.Out, s.Active
-			udpActive, dropMax, dropIP, dropRate = s.UDPActive, s.UDPDropMaxConns, s.UDPDropPerIP, s.UDPDropRate
-			if s.Error != "" {
-				listen, listenErr = "error", s.Error
-			} else if m.Spec.Mode == "visitor" {
-				listen, listenErr = "ready", ""
-			} else if s.Listening {
-				listen, listenErr = "listening", ""
-			} else {
-				listen, listenErr = "pending", ""
-			}
-			if ast != "online" {
-				push = "pending_offline"
-			} else if s.Error != "" {
-				push = "error"
-			} else if s.Acked {
-				push = "acked"
-			} else {
-				push = "pending"
-			}
-		} else if ast == "online" && m.Spec.Mode == "visitor" {
-			listen, push = "ready", "pending"
-		} else if ast != "online" {
-			push = "pending_offline"
-			if listen == "" {
-				listen = "pending"
-			}
-		}
-		port := any(nil)
-		if m.Spec.EntryPort != nil {
-			port = *m.Spec.EntryPort
-		}
-		grant := ""
-		last := ""
-		if m.LastProbe != nil {
-			last = m.LastProbe.UTC().Format(time.RFC3339)
-		}
-		out = append(out, map[string]any{
-			"id": m.Spec.ID, "nodeId": m.NodeID, "nodeName": name, "nodeStatus": ast,
-			"name": m.Spec.Name, "proto": m.Spec.Proto, "mode": m.Spec.Mode,
-			"entryPort": port, "localHost": m.Spec.LocalHost, "localPort": m.Spec.LocalPort,
-			"enabled": m.Spec.Enabled, "listenState": listen, "listenError": nilIfEmpty(listenErr),
-			"pushState": push, "bytesIn": in, "bytesOut": outB, "activeConns": active,
-			"udpActive": udpActive, "udpDropMaxConns": dropMax, "udpDropPerIP": dropIP, "udpDropRate": dropRate,
-			"lastProbeAt": last, "lastProbePreview": m.LastPreview, "grantUntil": grant,
-			"maxConns": m.Spec.MaxConns, "rateKbps": m.Spec.RateKbps, "allowCidrs": m.Spec.AllowCidrs,
-			"udpVia":    stats[m.Spec.ID].UDPVia,
-			"createdAt": m.Created.UTC().Format(time.RFC3339),
-			"updatedAt": m.Updated.UTC().Format(time.RFC3339),
-		})
-	}
-	writeJSON(w, out)
+	c.absorbAllLocked(stats)
+	views := filterMappingViews(c.mappingViews(live, stats), q.Get("q"), q.Get("nodeId"), q.Get("proto"), q.Get("mode"), q.Get("reach"))
+	writeList(w, views, page, size, paged)
 }
 
 func nilIfEmpty(s string) any {
@@ -801,17 +781,18 @@ func (c *Console) checkSpecs(batch map[string]wire.Mapping) error {
 
 func (c *Console) postMapping(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		NodeID     string `json:"nodeId"`
-		AgentID    string `json:"agentId"`
-		Name       string `json:"name"`
-		Proto      string `json:"proto"`
-		Mode       string `json:"mode"`
-		EntryPort  *int   `json:"entryPort"`
-		LocalHost  string `json:"localHost"`
-		LocalPort  int    `json:"localPort"`
-		MaxConns   int    `json:"maxConns"`
-		RateKbps   int    `json:"rateKbps"`
-		AllowCidrs string `json:"allowCidrs"`
+		NodeID         string `json:"nodeId"`
+		AgentID        string `json:"agentId"`
+		Name           string `json:"name"`
+		Proto          string `json:"proto"`
+		Mode           string `json:"mode"`
+		EntryPort      *int   `json:"entryPort"`
+		LocalHost      string `json:"localHost"`
+		LocalPort      int    `json:"localPort"`
+		MaxConns       int    `json:"maxConns"`
+		RateKbps       int    `json:"rateKbps"`
+		AllowCidrs     string `json:"allowCidrs"`
+		IdleTimeoutSec *int   `json:"idleTimeoutSec"`
 	}
 	if !jsonBody(w, r, &b) {
 		return
@@ -824,14 +805,18 @@ func (c *Console) postMapping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := newID("map")
-	max := b.MaxConns
-	if max == 0 {
-		max = 64
+	max := policy.MaxConns(b.MaxConns)
+	idle := 0
+	if b.IdleTimeoutSec != nil {
+		idle = *b.IdleTimeoutSec
+		if idle < 0 {
+			idle = 0
+		}
 	}
 	spec := wire.Mapping{
 		ID: id, Name: strings.TrimSpace(b.Name), Proto: b.Proto, Mode: b.Mode,
 		EntryPort: b.EntryPort, LocalHost: strings.TrimSpace(b.LocalHost), LocalPort: b.LocalPort,
-		Enabled: true, MaxConns: max, RateKbps: b.RateKbps, AllowCidrs: b.AllowCidrs, IdleTimeoutSec: 60,
+		Enabled: true, MaxConns: max, RateKbps: b.RateKbps, AllowCidrs: b.AllowCidrs, IdleTimeoutSec: idle,
 		Generation: 1,
 	}
 	now := time.Now()
@@ -1056,7 +1041,22 @@ func (c *Console) postVisitor(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (c *Console) getAudit(w http.ResponseWriter, _ *http.Request) {
+func (c *Console) targetNameLocked(target string) string {
+	if n := c.nodes[target]; n != nil {
+		return n.Name
+	}
+	if m := c.maps[target]; m != nil {
+		if n := c.nodes[m.NodeID]; n != nil {
+			return m.Spec.Name + " · " + n.Name
+		}
+		return m.Spec.Name
+	}
+	return target
+}
+
+func (c *Console) getAudit(w http.ResponseWriter, r *http.Request) {
+	page, size, paged := parsePage(r)
+	q := r.URL.Query()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := make([]map[string]any, 0, len(c.audit))
@@ -1065,17 +1065,19 @@ func (c *Console) getAudit(w http.ResponseWriter, _ *http.Request) {
 		out = append(out, map[string]any{
 			"id": a.ID, "ts": a.Ts.UTC().Format(time.RFC3339),
 			"actor": a.Actor, "action": a.Action, "target": a.Target, "detail": a.Detail,
+			"targetName": c.targetNameLocked(a.Target),
 		})
 	}
-	writeJSON(w, out)
+	out = filterAuditViews(out, q.Get("q"), q.Get("action"))
+	writeList(w, out, page, size, paged)
 }
 
-func (c *Console) getFrames(w http.ResponseWriter, _ *http.Request) {
+func (c *Console) getFrames(w http.ResponseWriter, r *http.Request) {
+	page, size, paged := parsePage(r)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := []frameRec{}
-	out = append(out, c.frames...)
-	writeJSON(w, out)
+	out := append([]frameRec{}, c.frames...)
+	writeList(w, out, page, size, paged)
 }
 
 func (c *Console) getTraffic(w http.ResponseWriter, r *http.Request) {
@@ -1092,8 +1094,11 @@ func (c *Console) getTraffic(w http.ResponseWriter, r *http.Request) {
 		since = since.Add(-24 * time.Hour)
 	}
 	stats := c.Gate.MappingStats()
+	now := time.Now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.absorbAllLocked(stats)
+	c.refreshRatesLocked(stats, now)
 	allow := map[string]bool{}
 	for id, m := range c.maps {
 		if mappingID != "" && id != mappingID {
@@ -1105,10 +1110,15 @@ func (c *Console) getTraffic(w http.ResponseWriter, r *http.Request) {
 		allow[id] = true
 	}
 	var liveIn, liveOut int64
-	for id, s := range stats {
+	var liveBpsIn, liveBpsOut float64
+	for id, m := range c.maps {
 		if mappingID == "" && nodeID == "" || allow[id] {
-			liveIn += s.In
-			liveOut += s.Out
+			liveIn += m.BytesIn
+			liveOut += m.BytesOut
+			if b, ok := c.bpsBy[id]; ok {
+				liveBpsIn += b[0]
+				liveBpsOut += b[1]
+			}
 		}
 	}
 	series := []map[string]any{}
@@ -1153,6 +1163,7 @@ func (c *Console) getTraffic(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{
 		"bytesIn": liveIn, "bytesOut": liveOut,
+		"bpsIn": int64(liveBpsIn), "bpsOut": int64(liveBpsOut),
 		"peakBpsIn": int64(peakIn), "peakBpsOut": int64(peakOut),
 		"series": series,
 	})
@@ -1163,66 +1174,9 @@ func (c *Console) getOverview(w http.ResponseWriter, _ *http.Request) {
 	stats := c.Gate.MappingStats()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	online, total := 0, len(c.nodes)
-	for _, a := range c.nodes {
-		if g, ok := live[a.ID]; ok && g.Online && a.Status != "revoked" {
-			online++
-		}
-	}
-	active, maps := 0, len(c.maps)
-	for _, m := range c.maps {
-		if m.Spec.Enabled {
-			active++
-		}
-	}
-	var liveIn, liveOut int64
-	for _, s := range stats {
-		liveIn += s.In
-		liveOut += s.Out
-	}
-	now := time.Now()
-	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	var baseIn, baseOut int64
-	for _, s := range c.samples {
-		if s.Ts.Before(midnight) {
-			baseIn, baseOut = s.In, s.Out
-		}
-	}
-	dayIn, dayOut := liveIn-baseIn, liveOut-baseOut
-	if dayIn < 0 {
-		dayIn = liveIn
-	}
-	if dayOut < 0 {
-		dayOut = liveOut
-	}
-	var bpsIn, bpsOut float64
-	if n := len(c.samples); n >= 2 {
-		a, b := c.samples[n-2], c.samples[n-1]
-		dt := b.Ts.Sub(a.Ts).Seconds()
-		if dt > 0 {
-			if d := b.In - a.In; d > 0 {
-				bpsIn = float64(d) / dt
-			}
-			if d := b.Out - a.Out; d > 0 {
-				bpsOut = float64(d) / dt
-			}
-		}
-	}
-	recent := []map[string]any{}
-	for i := len(c.audit) - 1; i >= 0 && len(recent) < 8; i-- {
-		a := c.audit[i]
-		recent = append(recent, map[string]any{
-			"id": a.ID, "ts": a.Ts.UTC().Format(time.RFC3339),
-			"actor": a.Actor, "action": a.Action, "target": a.Target, "detail": a.Detail,
-		})
-	}
-	writeJSON(w, map[string]any{
-		"nodesOnline": online, "nodesTotal": total,
-		"mappingsActive": active, "mappingsTotal": maps,
-		"bytesInToday": dayIn, "bytesOutToday": dayOut,
-		"bpsIn": int64(bpsIn), "bpsOut": int64(bpsOut),
-		"recentAudit": recent,
-	})
+	c.touchOnlineLocked(live, time.Now())
+	c.absorbAllLocked(stats)
+	writeJSON(w, c.overviewView(live, stats))
 }
 
 func (c *Console) getStatus(w http.ResponseWriter, _ *http.Request) {

@@ -2,6 +2,7 @@ package control
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -902,9 +903,302 @@ func TestHealthAndMappingsExposeUDPAdmit(t *testing.T) {
 		t.Fatal("no mappings")
 	}
 	m := maps[0]
-	for _, k := range []string{"udpActive", "udpDropMaxConns", "udpDropPerIP", "udpDropRate", "activeConns"} {
+	for _, k := range []string{"udpActive", "udpDropMaxConns", "udpDropPerIP", "udpDropRate", "activeConns", "reach", "idleTimeoutSec", "tcpDropMaxConns"} {
 		if _, ok := m[k]; !ok {
 			t.Fatalf("mapping missing %s in %v", k, m)
 		}
+	}
+}
+
+func TestCreateMappingDefaults(t *testing.T) {
+	_, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("node %d %s", res.StatusCode, readBody(t, res))
+	}
+	var n struct {
+		ID         string `json:"id"`
+		InstallCmd string `json:"installCmd"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&n); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if !strings.Contains(n.InstallCmd, "umbra-node --server") {
+		t.Fatalf("installCmd %q", n.InstallCmd)
+	}
+	res = doJSON(t, srv, "POST", "/v1/mappings", map[string]any{
+		"nodeId": n.ID, "name": "ssh", "proto": "tcp", "mode": "public",
+		"entryPort": 2222, "localHost": "127.0.0.1", "localPort": 22,
+	}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("mapping %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+	res = doJSON(t, srv, "GET", "/v1/mappings", nil, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("list %d %s", res.StatusCode, readBody(t, res))
+	}
+	var maps []map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&maps); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if len(maps) == 0 {
+		t.Fatal("no mappings")
+	}
+	m := maps[0]
+	if int(m["maxConns"].(float64)) != 1024 {
+		t.Fatalf("maxConns default %v", m["maxConns"])
+	}
+	if int(m["idleTimeoutSec"].(float64)) != 0 {
+		t.Fatalf("idleTimeoutSec default %v", m["idleTimeoutSec"])
+	}
+}
+
+func TestOverviewAlertsAndTickets(t *testing.T) {
+	_, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "GET", "/v1/overview", nil, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("overview %d %s", res.StatusCode, readBody(t, res))
+	}
+	var ov map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&ov); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if _, ok := ov["alerts"]; !ok {
+		t.Fatalf("overview missing alerts %v", ov)
+	}
+	res = doJSON(t, srv, "GET", "/v1/tickets", nil, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("tickets %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+}
+
+func TestNodeAndMappingUpdateDelete(t *testing.T) {
+	c, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1", "comment": "old", "os": "linux", "arch": "amd64"}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("create node %d %s", res.StatusCode, readBody(t, res))
+	}
+	var n struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&n); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+
+	res = doJSON(t, srv, "PATCH", "/v1/nodes/"+n.ID, map[string]string{"name": "nas", "comment": "书房"}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("patch node %d %s", res.StatusCode, readBody(t, res))
+	}
+	var patched map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&patched); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if patched["name"] != "nas" || patched["comment"] != "书房" {
+		t.Fatalf("patch node body %v", patched)
+	}
+
+	res = doJSON(t, srv, "POST", "/v1/mappings", map[string]any{
+		"nodeId": n.ID, "name": "ssh", "proto": "tcp", "mode": "spa",
+		"entryPort": 40222, "localHost": "127.0.0.1", "localPort": 22,
+	}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("create mapping %d %s", res.StatusCode, readBody(t, res))
+	}
+	var m struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&m); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+
+	res = doJSON(t, srv, "PATCH", "/v1/mappings/"+m.ID, map[string]any{
+		"name": "ssh-home", "localPort": 2222, "maxConns": 8, "allowCidrs": "10.0.0.0/8",
+	}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("patch mapping %d %s", res.StatusCode, readBody(t, res))
+	}
+	var mv map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&mv); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if mv["name"] != "ssh-home" || mv["localPort"] != float64(2222) {
+		t.Fatalf("patch mapping body %v", mv)
+	}
+	if mv["allowCidrs"] != "10.0.0.0/8" {
+		t.Fatalf("allowCidrs %v", mv["allowCidrs"])
+	}
+
+	res = doJSON(t, srv, "PATCH", "/v1/mappings/"+m.ID, map[string]any{"mode": "visitor"}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("visitor patch %d %s", res.StatusCode, readBody(t, res))
+	}
+	if err := json.NewDecoder(res.Body).Decode(&mv); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if mv["mode"] != "visitor" || mv["entryPort"] != nil {
+		t.Fatalf("visitor should drop entry port %v", mv)
+	}
+
+	res = doJSON(t, srv, "POST", "/v1/nodes/"+n.ID+"/delete", nil, nil)
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("delete with mapping should 409, got %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+
+	res = doJSON(t, srv, "POST", "/v1/nodes/"+n.ID+"/delete", map[string]any{"force": true}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("force delete %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+
+	c.mu.Lock()
+	if _, ok := c.nodes[n.ID]; ok {
+		c.mu.Unlock()
+		t.Fatal("node still present")
+	}
+	if _, ok := c.maps[m.ID]; ok {
+		c.mu.Unlock()
+		t.Fatal("mapping still present")
+	}
+	c.mu.Unlock()
+
+	res = doJSON(t, srv, "GET", "/v1/nodes", nil, nil)
+	var nodes []map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&nodes); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if len(nodes) != 0 {
+		t.Fatalf("nodes after delete %v", nodes)
+	}
+}
+
+func TestPatchMappingPortConflict(t *testing.T) {
+	_, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
+	var n struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&n); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	port := 41990
+	res = doJSON(t, srv, "POST", "/v1/mappings", map[string]any{
+		"nodeId": n.ID, "name": "a", "proto": "tcp", "mode": "public",
+		"entryPort": port, "localHost": "127.0.0.1", "localPort": 22,
+	}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("a %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+	res = doJSON(t, srv, "POST", "/v1/mappings", map[string]any{
+		"nodeId": n.ID, "name": "b", "proto": "tcp", "mode": "public",
+		"entryPort": port + 1, "localHost": "127.0.0.1", "localPort": 23,
+	}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("b %d %s", res.StatusCode, readBody(t, res))
+	}
+	var b struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&b); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	res = doJSON(t, srv, "PATCH", "/v1/mappings/"+b.ID, map[string]any{"entryPort": port}, nil)
+	if res.StatusCode != 400 {
+		t.Fatalf("conflict want 400 got %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+}
+
+func TestEventsStream(t *testing.T) {
+	_, srv, _ := newTestConsole(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", srv.URL+"/v1/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("events %d %s", res.StatusCode, readBody(t, res))
+	}
+	if ct := res.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("content-type %s", ct)
+	}
+	buf := make([]byte, 8192)
+	n, err := res.Body.Read(buf)
+	if n == 0 && err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	body := string(buf[:n])
+	if !strings.Contains(body, "event: live") || !strings.Contains(body, `"overview"`) {
+		t.Fatalf("first event %q", body)
+	}
+	if !strings.Contains(body, `"mappings"`) || !strings.Contains(body, `"nodes"`) {
+		t.Fatalf("payload missing collections %q", body)
+	}
+}
+
+func TestAbsorbStatsKeepsPersistedAcrossReset(t *testing.T) {
+	m := &mapRec{BytesIn: 1000, BytesOut: 200}
+	in, out := m.absorbStats(0, 0)
+	if in != 1000 || out != 200 {
+		t.Fatalf("first %d/%d", in, out)
+	}
+	in, out = m.absorbStats(50, 10)
+	if in != 1050 || out != 210 {
+		t.Fatalf("delta %d/%d", in, out)
+	}
+	in, out = m.absorbStats(0, 0)
+	if in != 1050 || out != 210 {
+		t.Fatalf("reset %d/%d", in, out)
+	}
+	in, out = m.absorbStats(5, 1)
+	if in != 1055 || out != 211 {
+		t.Fatalf("after reset %d/%d", in, out)
+	}
+}
+
+func TestDeleteNodePersistFail(t *testing.T) {
+	c, srv, dir := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
+	var n struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&n); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if err := os.Chmod(dir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+	res = doJSON(t, srv, "POST", "/v1/nodes/"+n.ID+"/delete", nil, nil)
+	body := readBody(t, res)
+	if res.StatusCode != 500 {
+		t.Fatalf("delete persist fail %d %s", res.StatusCode, body)
+	}
+	_ = os.Chmod(dir, 0700)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.nodes[n.ID] == nil {
+		t.Fatal("node vanished after failed delete")
 	}
 }

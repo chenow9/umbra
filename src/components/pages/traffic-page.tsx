@@ -1,12 +1,18 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { RateChart } from "@/components/rate-chart";
 import { SelectField } from "@/components/field";
-import { getTraffic, listNodes, listMappings } from "@/lib/umbra/api";
+import { Pager } from "@/components/ui/pager";
+import { Button } from "@/components/ui/button";
+import { getTraffic, listNodes, listMappings, queryMappings } from "@/lib/umbra/api";
 import { formatBps, formatBytes } from "@/lib/umbra/format";
+import { useLiveStatus } from "@/lib/umbra/live";
+import { emptyPage, PAGE_SIZE } from "@/lib/umbra/page";
+import type { Mapping } from "@/lib/umbra/types";
 import { cn } from "@/lib/utils";
 
 type Range = "1h" | "24h" | "7d";
@@ -15,8 +21,19 @@ export function TrafficPage() {
   const [range, setRange] = useState<Range>("24h");
   const [nodeId, setNodeId] = useState("");
   const [mappingId, setMappingId] = useState("");
+  const [page, setPage] = useState(1);
   const nodes = useQuery({ queryKey: ["umbra", "nodes"], queryFn: () => listNodes() });
-  const mappings = useQuery({ queryKey: ["umbra", "mappings"], queryFn: () => listMappings() });
+  const mappingOpts = useQuery({ queryKey: ["umbra", "mappings"], queryFn: () => listMappings() });
+  const mapQuery = {
+    nodeId: nodeId || undefined,
+    page,
+    size: PAGE_SIZE,
+  };
+  const mappings = useQuery({
+    queryKey: ["umbra", "mappings", "page", mapQuery],
+    queryFn: () => queryMappings(mapQuery),
+    placeholderData: keepPreviousData,
+  });
   const traffic = useQuery({
     queryKey: ["umbra", "traffic", range, nodeId, mappingId],
     queryFn: () =>
@@ -30,17 +47,33 @@ export function TrafficPage() {
   });
 
   const t = traffic.data;
-  const filteredMaps = (mappings.data ?? []).filter((m) => !nodeId || m.nodeId === nodeId);
+  const pageData = mappings.data ?? emptyPage<Mapping>(page);
+  const filteredMaps = pageData.items;
+  const dropdownMaps = (mappingOpts.data ?? []).filter((m) => !nodeId || m.nodeId === nodeId);
+
+  useEffect(() => {
+    setPage(1);
+  }, [nodeId]);
+  useEffect(() => {
+    if (!mappings.data) return;
+    const pages = Math.max(1, Math.ceil(mappings.data.total / mappings.data.size) || 1);
+    if (page > pages) setPage(pages);
+  }, [mappings.data, page]);
 
   return (
-    <AppShell title="流量">
+    <AppShell title="流量" description="计数权威在入口。图表与映射表按秒刷新，不用手动点。">
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="flex rounded-md bg-paper-2 p-0.5 shadow-border">
+          <div
+            role="group"
+            aria-label="流量时间范围"
+            className="flex rounded-md bg-paper-2 p-0.5 shadow-border"
+          >
             {(["1h", "24h", "7d"] as const).map((r) => (
               <button
                 key={r}
                 type="button"
+                aria-pressed={range === r}
                 onClick={() => setRange(r)}
                 className={cn(
                   "h-11 rounded-sm px-3 text-sm font-medium transition-colors duration-150",
@@ -53,23 +86,28 @@ export function TrafficPage() {
           </div>
           <SelectField
             label="节点"
+            className="w-56"
             value={nodeId || "all"}
             onValueChange={(v) => {
               setNodeId(v === "all" ? "" : v);
               setMappingId("");
             }}
             options={[
-              { value: "all", label: "全部" },
+              { value: "all", label: "全部节点" },
               ...(nodes.data ?? []).map((a) => ({ value: a.id, label: a.name })),
             ]}
           />
           <SelectField
             label="映射"
+            className="w-64"
             value={mappingId || "all"}
             onValueChange={(v) => setMappingId(v === "all" ? "" : v)}
             options={[
-              { value: "all", label: "全部" },
-              ...filteredMaps.map((m) => ({ value: m.id, label: m.name })),
+              { value: "all", label: "全部映射" },
+              ...dropdownMaps.map((m) => ({
+                value: m.id,
+                label: nodeId ? m.name : `${m.name} · ${m.nodeName}`,
+              })),
             ]}
           />
         </div>
@@ -77,17 +115,38 @@ export function TrafficPage() {
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Mini label="入站累计" value={formatBytes(t?.bytesIn ?? 0)} />
           <Mini label="出站累计" value={formatBytes(t?.bytesOut ?? 0)} />
-          <Mini label="入站峰值" value={formatBps(t?.peakBpsIn ?? 0)} />
-          <Mini label="出站峰值" value={formatBps(t?.peakBpsOut ?? 0)} />
+          <Mini
+            label="入站速率"
+            value={formatBps(t?.bpsIn ?? 0)}
+            hint={(t?.peakBpsIn ?? 0) > 0 ? `峰值 ${formatBps(t?.peakBpsIn ?? 0)}` : undefined}
+          />
+          <Mini
+            label="出站速率"
+            value={formatBps(t?.bpsOut ?? 0)}
+            hint={(t?.peakBpsOut ?? 0) > 0 ? `峰值 ${formatBps(t?.peakBpsOut ?? 0)}` : undefined}
+          />
         </section>
 
         <div className="rounded-xl bg-card p-4 shadow-border">
-          <RateChart data={t?.series ?? []} />
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-xs text-stone">累计流量</p>
+            <LiveHint />
+          </div>
+          <RateChart
+            data={t?.series ?? []}
+            emptyAction={
+              <Button asChild size="sm" variant="outline">
+                <Link to="/mappings">检查映射</Link>
+              </Button>
+            }
+          />
         </div>
 
         <div className="flex flex-col gap-3 md:hidden">
-          {filteredMaps.length === 0 ? (
-            <p className="rounded-xl bg-card px-4 py-6 text-sm text-stone shadow-border">暂无映射。</p>
+          {pageData.total === 0 ? (
+            <p className="rounded-xl bg-card px-4 py-6 text-sm text-stone shadow-border">
+              暂无映射。
+            </p>
           ) : (
             filteredMaps.map((m) => (
               <article key={m.id} className="rounded-xl bg-card p-4 shadow-border">
@@ -97,10 +156,14 @@ export function TrafficPage() {
                 </p>
                 <p className="mt-2 font-mono text-xs tabular-nums text-ink-soft">
                   入 {formatBytes(m.bytesIn)} · 出 {formatBytes(m.bytesOut)}
+                  {(m.bpsIn ?? 0) + (m.bpsOut ?? 0) > 0
+                    ? ` · ${formatBps((m.bpsIn ?? 0) + (m.bpsOut ?? 0))}`
+                    : ""}
                   {m.proto === "udp"
-                    ? ` · udp_active ${m.udpActive ?? m.activeConns} · drop maxconns ${m.udpDropMaxConns ?? 0}`
+                    ? ` · UDP 活跃会话 ${m.udpActive ?? m.activeConns}`
                     : ` · 连接 ${m.activeConns}`}
                 </p>
+                {m.proto === "udp" ? <UdpDropSummary mapping={m} /> : null}
               </article>
             ))
           )}
@@ -114,13 +177,14 @@ export function TrafficPage() {
                 <th className="px-4 py-3 font-medium">节点</th>
                 <th className="px-4 py-3 font-medium">入站</th>
                 <th className="px-4 py-3 font-medium">出站</th>
+                <th className="px-4 py-3 font-medium">速率</th>
                 <th className="px-4 py-3 font-medium">连接 / UDP 丢弃</th>
               </tr>
             </thead>
             <tbody>
-              {filteredMaps.length === 0 ? (
+              {pageData.total === 0 ? (
                 <tr>
-                  <td className="px-4 py-6 text-stone" colSpan={6}>
+                  <td className="px-4 py-6 text-stone" colSpan={7}>
                     暂无映射。
                   </td>
                 </tr>
@@ -130,16 +194,18 @@ export function TrafficPage() {
                     <td className="px-4 py-3 font-medium">{m.name}</td>
                     <td className="px-4 py-3 font-mono text-xs uppercase">{m.proto}</td>
                     <td className="px-4 py-3 text-ink-soft">{m.nodeName}</td>
-                    <td className="px-4 py-3 font-mono text-xs tabular-nums">{formatBytes(m.bytesIn)}</td>
-                    <td className="px-4 py-3 font-mono text-xs tabular-nums">{formatBytes(m.bytesOut)}</td>
+                    <td className="px-4 py-3 font-mono text-xs tabular-nums">
+                      {formatBytes(m.bytesIn)}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs tabular-nums">
+                      {formatBytes(m.bytesOut)}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs tabular-nums text-ink-soft">
+                      {formatBps((m.bpsIn ?? 0) + (m.bpsOut ?? 0))}
+                    </td>
                     <td className="px-4 py-3 font-mono tabular-nums">
                       {m.proto === "udp" ? (m.udpActive ?? m.activeConns) : m.activeConns}
-                      {m.proto === "udp" ? (
-                        <div className="text-xs text-stone">
-                          drop maxconns {m.udpDropMaxConns ?? 0} / ip {m.udpDropPerIP ?? 0} / rate{" "}
-                          {m.udpDropRate ?? 0}
-                        </div>
-                      ) : null}
+                      {m.proto === "udp" ? <UdpDropSummary mapping={m} /> : null}
                     </td>
                   </tr>
                 ))
@@ -147,16 +213,51 @@ export function TrafficPage() {
             </tbody>
           </table>
         </div>
+        {pageData.total > 0 ? (
+          <Pager
+            page={pageData.page}
+            size={pageData.size}
+            total={pageData.total}
+            onPage={setPage}
+          />
+        ) : null}
       </div>
     </AppShell>
   );
 }
 
-function Mini({ label, value }: { label: string; value: string }) {
+function UdpDropSummary({ mapping: m }: { mapping: Mapping }) {
+  const maxConns = m.udpDropMaxConns ?? 0;
+  const perIp = m.udpDropPerIP ?? 0;
+  const rate = m.udpDropRate ?? 0;
+  const total = maxConns + perIp + rate;
+  return (
+    <div className="mt-1 text-xs text-stone">
+      {total > 0 ? `丢弃：连接数 ${maxConns} · 单 IP ${perIp} · 限速 ${rate}` : "无 UDP 丢弃"}
+    </div>
+  );
+}
+
+function LiveHint() {
+  const { connected } = useLiveStatus();
+  return (
+    <span
+      className={cn(
+        "text-[11px] tracking-wide uppercase",
+        connected ? "text-ink-soft" : "text-stone",
+      )}
+    >
+      {connected ? "实时推送" : "等待通道"}
+    </span>
+  );
+}
+
+function Mini({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="rounded-xl bg-card px-4 py-3 shadow-border">
       <p className="text-xs text-stone">{label}</p>
       <p className="mt-1 font-mono text-lg tabular-nums">{value}</p>
+      {hint ? <p className="mt-0.5 text-[11px] text-stone">{hint}</p> : null}
     </div>
   );
 }

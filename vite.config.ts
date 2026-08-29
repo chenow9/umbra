@@ -154,8 +154,13 @@ export default defineConfig(({ command, isPreview }) => ({
     strictPort: true,
     proxy: {
       // Preview: Vite is the public port; umbrad HTTP stays on loopback.
-      "/v1": { target: "http://127.0.0.1:4401", changeOrigin: true },
-      "/health": { target: "http://127.0.0.1:4401", changeOrigin: true },
+      "/v1": {
+        target: "http://127.0.0.1:4401",
+        changeOrigin: false,
+        timeout: 0,
+        proxyTimeout: 0,
+      },
+      "/health": { target: "http://127.0.0.1:4401", changeOrigin: false },
     },
   },
   preview: {

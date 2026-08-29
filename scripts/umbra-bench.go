@@ -57,10 +57,10 @@ type result struct {
 	HoldElapsed                                     string
 	HoldBytes                                       int64
 	HoldRate                                        string
-	HoldTx, HoldRx                                  int64   `json:",omitempty"`
-	HoldTxRate, HoldRxRate                          string  `json:",omitempty"`
-	HoldAttempts, HoldSuccess, HoldErrors           int64   `json:",omitempty"`
-	AliveAtDeadline, FinalProbeOK, FailedDuringHold int64   `json:",omitempty"`
+	HoldTx, HoldRx                                  int64  `json:",omitempty"`
+	HoldTxRate, HoldRxRate                          string `json:",omitempty"`
+	HoldAttempts, HoldSuccess, HoldErrors           int64
+	AliveAtDeadline, FinalProbeOK, FailedDuringHold int64
 	UDPSent, UDPRecv, UDPHoldRecv, UDPGraceRecv     int64   `json:",omitempty"`
 	UDPTimeout, UDPLate, UDPDup, UDPOOO, UDPCorrupt int64   `json:",omitempty"`
 	UDPLossRate                                     float64 `json:",omitempty"`
@@ -234,6 +234,24 @@ func holdOpEnded(deadline time.Time, timeout, to time.Duration, err error) bool 
 	return to > 0 && to < timeout
 }
 
+func rrHoldOffset(i, n int, interval time.Duration) time.Duration {
+	if interval <= 0 || n <= 0 {
+		return 0
+	}
+	return time.Duration(i) * interval / time.Duration(n)
+}
+
+func rrSkipTicks(next time.Time, interval time.Duration, now time.Time) time.Time {
+	if interval <= 0 {
+		return now
+	}
+	n := next.Add(interval)
+	for !n.After(now) {
+		n = n.Add(interval)
+	}
+	return n
+}
+
 func opTimeout(timeout time.Duration, deadline time.Time) time.Duration {
 	remain := time.Until(deadline)
 	const floor = 50 * time.Millisecond
@@ -250,7 +268,7 @@ func runTCPRR(addr string, n, par int, msg []byte, timeout, hold, interval, prob
 	fmt.Fprintf(os.Stderr, "tcp mode=rr closed-loop request/response interval=%s (0 means no extra sleep, still one req in flight)\n", interval)
 	if interval > 0 {
 		capBps := float64(n) * float64(len(msg)) * 2 / interval.Seconds()
-		fmt.Fprintf(os.Stderr, "tcp rr generator cap ≈ %s/s bidir app echo (%d × %dB × 2 / %s)\n",
+		fmt.Fprintf(os.Stderr, "tcp rr generator cap ≈ %s/s bidir app echo (%d × %dB × 2 / %s); hold pings are staggered and skip missed ticks\n",
 			bytesHuman(int64(capBps)), n, len(msg), interval)
 	}
 	var opened, firstFail, firstBytes atomic.Int64
@@ -311,11 +329,13 @@ func runTCPRR(addr string, n, par int, msg []byte, timeout, hold, interval, prob
 
 	holdElapsed := time.Duration(0)
 	if hold > 0 && len(conns) > 0 {
-		fmt.Fprintf(os.Stderr, "tcp hold window %d conns × %dB interval=%s for %s\n", len(conns), len(msg), interval, hold)
+		fmt.Fprintf(os.Stderr, "tcp hold window %d conns × %dB interval=%s stagger=%v for %s\n",
+			len(conns), len(msg), interval, interval > 0, hold)
 		holdStart := time.Now()
 		deadline := holdStart.Add(hold)
+		nHold := len(conns)
 		var xwg sync.WaitGroup
-		alive := make([]atomic.Bool, len(conns))
+		alive := make([]atomic.Bool, nHold)
 		for i := range conns {
 			alive[i].Store(true)
 			xwg.Add(1)
@@ -323,14 +343,30 @@ func runTCPRR(addr string, n, par int, msg []byte, timeout, hold, interval, prob
 				defer xwg.Done()
 				rbuf := make([]byte, len(msg))
 				var hits int64
+				next := holdStart.Add(rrHoldOffset(i, nHold, interval))
 				for {
+					now := time.Now()
+					if !now.Before(deadline) {
+						break
+					}
+					if interval > 0 && next.After(now) {
+						wait := next.Sub(now)
+						if !now.Add(wait).Before(deadline) {
+							break
+						}
+						time.Sleep(wait)
+						continue
+					}
 					to := opTimeout(timeout, deadline)
 					if to == 0 {
 						break
 					}
-					tEcho := time.Now()
 					holdAttempts.Add(1)
 					if err := echoTCPOnce(c, msg, rbuf, to); err != nil {
+						_ = c.SetDeadline(time.Time{})
+						if holdOpEnded(deadline, timeout, to, err) {
+							break
+						}
 						holdErrors.Add(1)
 						failedDuringHold.Add(1)
 						holdErrs.add(classifyErr(err))
@@ -338,13 +374,12 @@ func runTCPRR(addr string, n, par int, msg []byte, timeout, hold, interval, prob
 						_ = c.Close()
 						break
 					}
+					_ = c.SetDeadline(time.Time{})
 					holdSuccess.Add(1)
 					hits++
 					holdBytes.Add(int64(len(msg)) * 2)
 					if interval > 0 {
-						if wait := interval - time.Since(tEcho); wait > 0 && time.Now().Add(wait).Before(deadline) {
-							time.Sleep(wait)
-						}
+						next = rrSkipTicks(next, interval, time.Now())
 					}
 				}
 				if alive[i].Load() {

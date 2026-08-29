@@ -54,6 +54,12 @@ type Console struct {
 	samples     []sampleRec
 	hits        map[string]hit
 	seq         int64
+
+	rateIn, rateOut int64
+	rateTs          time.Time
+	bpsIn, bpsOut   float64
+	rateBy          map[string][2]int64
+	bpsBy           map[string][2]float64
 }
 
 type ownerSess struct {
@@ -87,6 +93,34 @@ type mapRec struct {
 	Updated     time.Time    `json:"Updated"`
 	LastProbe   *time.Time   `json:"LastProbe"`
 	LastPreview string       `json:"LastPreview"`
+	sessIn      int64        `json:"-"`
+	sessOut     int64        `json:"-"`
+	sessArmed   bool         `json:"-"`
+}
+
+func (m *mapRec) absorbStats(in, out int64) (int64, int64) {
+	if m == nil {
+		return in, out
+	}
+	if !m.sessArmed {
+		m.sessArmed = true
+		m.sessIn, m.sessOut = 0, 0
+	}
+	if in < m.sessIn {
+		m.sessIn = 0
+	}
+	if out < m.sessOut {
+		m.sessOut = 0
+	}
+	if in > m.sessIn {
+		m.BytesIn += in - m.sessIn
+		m.sessIn = in
+	}
+	if out > m.sessOut {
+		m.BytesOut += out - m.sessOut
+		m.sessOut = out
+	}
+	return m.BytesIn, m.BytesOut
 }
 
 type ticketRec struct {
@@ -169,6 +203,8 @@ func New(g *gate.Server, persist string) (*Console, error) {
 		sessions: map[string]*ownerSess{},
 		hits:     map[string]hit{},
 		revoked:  map[string]struct{}{},
+		rateBy:   map[string][2]int64{},
+		bpsBy:    map[string][2]float64{},
 	}
 	if err := c.load(); err != nil {
 		return nil, err
@@ -200,24 +236,28 @@ func bumpGeneration(m *wire.Mapping) {
 func (c *Console) sampleLoop() {
 	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
+	n := 0
 	for range t.C {
+		live := c.live()
 		st := c.Gate.MappingStats()
+		now := time.Now()
+		c.mu.Lock()
+		c.touchOnlineLocked(live, now)
+		c.absorbAllLocked(st)
 		var in, out int64
 		by := map[string][2]int64{}
-		for id, m := range st {
-			in += m.In
-			out += m.Out
-			by[id] = [2]int64{m.In, m.Out}
-		}
-		c.mu.Lock()
 		for id, rec := range c.maps {
-			if s, ok := st[id]; ok {
-				rec.BytesIn, rec.BytesOut = s.In, s.Out
-			}
+			in += rec.BytesIn
+			out += rec.BytesOut
+			by[id] = [2]int64{rec.BytesIn, rec.BytesOut}
 		}
-		c.samples = append(c.samples, sampleRec{Ts: time.Now(), In: in, Out: out, By: by})
+		c.samples = append(c.samples, sampleRec{Ts: now, In: in, Out: out, By: by})
 		if len(c.samples) > 10000 {
 			c.samples = c.samples[len(c.samples)-10000:]
+		}
+		n++
+		if n%6 == 0 {
+			_ = c.save()
 		}
 		c.mu.Unlock()
 	}

@@ -80,6 +80,12 @@ func IntOr(v, d int) int {
 	return v
 }
 
+const DefaultMaxConns = 1024
+
+func MaxConns(v int) int {
+	return IntOr(v, DefaultMaxConns)
+}
+
 func Atoi(s string) int {
 	n, _ := strconv.Atoi(s)
 	return n

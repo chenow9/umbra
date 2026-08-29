@@ -221,6 +221,52 @@ func TestTCPForwardCountsBothDirections(t *testing.T) {
 	t.Fatalf("stats in=%d out=%d want >=%d", st.In, st.Out, len(msg))
 }
 
+func TestTCPDropMaxConnsCounted(t *testing.T) {
+	echo, echoPort := startEchoTCP(t)
+	defer echo.Close()
+	s, addr := startGate(t)
+	s.SetToken("tok", "nde1")
+	pub := pickPort(t)
+	port := pub
+	s.PutMappings("nde1", []wire.Mapping{{
+		ID: "map_cap", Name: "t", Proto: "tcp", Mode: "public",
+		EntryPort: &port, LocalHost: "127.0.0.1", LocalPort: echoPort,
+		Enabled: true, MaxConns: 1, IdleTimeoutSec: 0,
+	}})
+	go func() { _ = node.Run(addr, "tok", nil) }()
+	waitOnline(t, s, "nde1")
+	c1, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", itoa(pub)), 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c1.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.MappingStats()["map_cap"].Active >= 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	c2, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", itoa(pub)), 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 8)
+	_ = c2.SetReadDeadline(time.Now().Add(time.Second))
+	_, _ = c2.Read(buf)
+	_ = c2.Close()
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		st := s.MappingStats()["map_cap"]
+		if st.TCPDropMaxConns >= 1 && st.LastDrop == "maxconns" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	st := s.MappingStats()["map_cap"]
+	t.Fatalf("tcpDropMaxConns=%d last=%q", st.TCPDropMaxConns, st.LastDrop)
+}
+
 func TestUDPIdleTimerRefreshDoesNotDrop(t *testing.T) {
 	e := &entry{udpSess: map[string]*udpSess{}}
 	e.active.Store(1)

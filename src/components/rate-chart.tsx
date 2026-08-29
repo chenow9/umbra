@@ -4,6 +4,7 @@ import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "rec
 import { formatBytes } from "@/lib/umbra/format";
 import type { TrafficPoint } from "@/lib/umbra/types";
 import { useTheme } from "@/components/app-providers";
+import type { ReactNode } from "react";
 
 function cssVar(name: string, fallback: string) {
   if (typeof document === "undefined") return fallback;
@@ -11,7 +12,13 @@ function cssVar(name: string, fallback: string) {
   return v || fallback;
 }
 
-export function RateChart({ data }: { data: TrafficPoint[] }) {
+export function RateChart({
+  data,
+  emptyAction,
+}: {
+  data: TrafficPoint[];
+  emptyAction?: ReactNode;
+}) {
   useTheme();
   const pine = cssVar("--pine", "#2c4a3e");
   const stone = cssVar("--stone", "#8a8478");
@@ -19,10 +26,12 @@ export function RateChart({ data }: { data: TrafficPoint[] }) {
   const line = cssVar("--line", "#d9d2c4");
   const ink = cssVar("--ink", "#1a1814");
 
-  if (data.length === 0) {
+  const hasTraffic = data.some((p) => p.bytesIn > 0 || p.bytesOut > 0);
+  if (data.length === 0 || !hasTraffic) {
     return (
-      <div className="flex h-48 items-center justify-center text-sm text-stone">
-        还没有流量。映射在线后会在这里累计。
+      <div className="flex h-48 flex-col items-center justify-center gap-3 text-center text-sm text-stone">
+        <span>还没有流量。映射在线后会在这里累计。</span>
+        {emptyAction}
       </div>
     );
   }
@@ -43,7 +52,13 @@ export function RateChart({ data }: { data: TrafficPoint[] }) {
     <div className="h-48 w-full overflow-hidden">
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={rows} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
-          <XAxis dataKey="label" tick={{ fill: stone, fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={24} />
+          <XAxis
+            dataKey="label"
+            tick={{ fill: stone, fontSize: 11 }}
+            axisLine={false}
+            tickLine={false}
+            minTickGap={24}
+          />
           <YAxis
             tick={{ fill: stone, fontSize: 11 }}
             axisLine={false}
@@ -61,8 +76,24 @@ export function RateChart({ data }: { data: TrafficPoint[] }) {
             }}
             formatter={(value) => formatBytes(Number(value ?? 0))}
           />
-          <Area type="monotone" dataKey="出站" stroke={pine} fill={pine} fillOpacity={0.16} strokeWidth={1.5} />
-          <Area type="monotone" dataKey="入站" stroke={stone} fill={stone} fillOpacity={0.12} strokeWidth={1.5} />
+          <Area
+            type="monotone"
+            dataKey="出站"
+            stroke={pine}
+            fill={pine}
+            fillOpacity={0.16}
+            strokeWidth={1.5}
+            isAnimationActive={false}
+          />
+          <Area
+            type="monotone"
+            dataKey="入站"
+            stroke={stone}
+            fill={stone}
+            fillOpacity={0.12}
+            strokeWidth={1.5}
+            isAnimationActive={false}
+          />
         </AreaChart>
       </ResponsiveContainer>
     </div>
