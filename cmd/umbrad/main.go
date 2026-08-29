@@ -26,6 +26,7 @@ import (
 
 func main() {
 	listen := flag.String("listen", ":4400", "节点控制通道")
+	advertise := flag.String("advertise", envOr("UMBRA_ADVERTISE", ""), "节点和访客可连接的对外地址 host:port；空则沿用 listen")
 	httpAddr := flag.String("http", "127.0.0.1:8080", "控制台与 API 同一 HTTP 口，默认只绑回环")
 	api := flag.String("api", "", "兼容旧参数，覆盖 -http")
 	httpTLS := flag.Bool("http-tls", false, "管理口使用 tls-dir 里的 gate 证书")
@@ -109,7 +110,10 @@ func main() {
 	}
 	s.SetListeners(cln, aln)
 
-	nodeAddr := *listen
+	nodeAddr := *advertise
+	if nodeAddr == "" {
+		nodeAddr = *listen
+	}
 	if strings.HasPrefix(nodeAddr, ":") {
 		nodeAddr = "127.0.0.1" + nodeAddr
 	}

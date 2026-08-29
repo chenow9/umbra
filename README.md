@@ -54,12 +54,14 @@ go 1.24+
 ```bash
 sudo ./dist/umbrad_linux_amd64 \
   -listen :4400 \
+  -advertise gate.example.com:4400 \
   -http 127.0.0.1:8080 \
   -bind 0.0.0.0 \
   -tls-dir /var/lib/umbra
 ```
 
 首次启动会在 `-tls-dir` 写出 `ca.crt` / `gate.crt` / `gate.key`。把 `ca.crt` 拷到节点所在机器。
+`-advertise` 填节点和访客实际能连接的入口地址；它只用于生成部署与访客命令，不改变监听地址。
 
 **3. 登记节点（控制台「登记节点」签发凭证，只显示一次）**
 

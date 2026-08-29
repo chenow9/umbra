@@ -17,6 +17,8 @@ services:
     command:
       - -listen
       - :4400
+      - -advertise
+      - gate.example.com:4400
       - -http
       - 127.0.0.1:8080
       - -bind
