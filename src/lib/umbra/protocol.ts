@@ -38,6 +38,8 @@ export type MappingWire = {
   rate_kbps: number;
   allow_cidrs: string;
   idle_timeout_sec: number;
+  spa_ttl_sec?: number;
+  udp_idle_timeout_sec?: number;
 };
 
 export function specFingerprint(m: MappingWire): string {

@@ -1,6 +1,7 @@
 "use client";
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
@@ -26,7 +27,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { TextAreaField, TextField, SelectField } from "@/components/field";
+import { CheckField, TextAreaField, TextField, SelectField } from "@/components/field";
+import { FilterChips } from "@/components/filter-chips";
 import { Input } from "@/components/ui/input";
 import {
   caDownloadURL,
@@ -34,7 +36,6 @@ import {
   deleteNode,
   disconnectNode,
   helloNode,
-  queryFrames,
   queryNodes,
   rotateNodeToken,
   revokeNode,
@@ -43,7 +44,6 @@ import {
 import { emptyPage, PAGE_SIZE } from "@/lib/umbra/page";
 import { Pager } from "@/components/ui/pager";
 import { formatBytes, formatBps, formatRelative } from "@/lib/umbra/format";
-import { frameLabel } from "@/lib/umbra/labels";
 import type { Node } from "@/lib/umbra/types";
 import {
   ARCHS,
@@ -62,6 +62,8 @@ type Issued = {
   installCmd?: string;
   listen?: string;
   note?: string;
+  expiresAt?: string;
+  neverExpire?: boolean;
 };
 type Editor = { mode: "create" } | { mode: "edit"; node: Node };
 
@@ -71,7 +73,6 @@ export function NodesPage() {
   const [status, setStatus] = useState("all");
   const [os, setOs] = useState("all");
   const [page, setPage] = useState(1);
-  const [framePage, setFramePage] = useState(1);
   const query = {
     q: q.trim() || undefined,
     status: status === "all" ? undefined : status,
@@ -82,11 +83,6 @@ export function NodesPage() {
   const nodes = useQuery({
     queryKey: ["umbra", "nodes", "page", query],
     queryFn: () => queryNodes(query),
-    placeholderData: keepPreviousData,
-  });
-  const frames = useQuery({
-    queryKey: ["umbra", "frames", "page", { page: framePage, size: PAGE_SIZE }],
-    queryFn: () => queryFrames({ page: framePage, size: PAGE_SIZE }),
     placeholderData: keepPreviousData,
   });
   const [editor, setEditor] = useState<Editor | null>(null);
@@ -117,7 +113,6 @@ export function NodesPage() {
   return (
     <AppShell
       title="节点"
-      description="只签发凭证。映射、模式、ACL 都在服务端改。"
       action={
         empty ? null : (
           <Button type="button" onClick={() => setEditor({ mode: "create" })}>
@@ -131,38 +126,49 @@ export function NodesPage() {
       ) : (
         <>
           <div className="mb-4 flex flex-col gap-3">
-            <div className="flex flex-wrap items-end gap-3">
-              <Input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="搜索名称、备注、地址"
-                aria-label="搜索节点"
-                className="max-w-sm"
-              />
-              <SelectField
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="搜索名称、备注、地址"
+              aria-label="搜索节点"
+              className="max-w-sm"
+            />
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <FilterChips
                 label="状态"
-                className="w-36"
                 value={status}
-                onValueChange={setStatus}
+                onChange={setStatus}
+                always
                 options={[
-                  { value: "all", label: "全部状态" },
                   { value: "online", label: "在线" },
                   { value: "offline", label: "离线" },
                   { value: "revoked", label: "已吊销" },
                 ]}
               />
-              <SelectField
+              <FilterChips
                 label="系统"
-                className="w-36"
                 value={os}
-                onValueChange={setOs}
+                onChange={setOs}
+                always
                 options={[
-                  { value: "all", label: "全部系统" },
                   { value: "linux", label: "Linux" },
                   { value: "darwin", label: "macOS" },
                   { value: "windows", label: "Windows" },
                 ]}
               />
+              {status !== "all" || os !== "all" ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setStatus("all");
+                    setOs("all");
+                  }}
+                >
+                  清除
+                </Button>
+              ) : null}
             </div>
           </div>
 
@@ -219,37 +225,6 @@ export function NodesPage() {
           )}
         </>
       )}
-
-      {(frames.data?.total ?? 0) > 0 ? (
-        <details className="mt-8 rounded-xl bg-card shadow-border open:pb-1">
-          <summary className="cursor-pointer px-4 py-3 text-sm text-ink-soft">
-            控制通道 · {frames.data?.total ?? 0} 帧
-          </summary>
-          <p className="px-4 pb-2 text-xs leading-relaxed text-stone">
-            上线走 Hello / HelloOk 全量对齐；改映射只 push MappingSync。
-          </p>
-          <ol className="divide-y divide-line text-xs">
-            {(frames.data?.items ?? []).map((f) => (
-              <li key={f.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2.5">
-                <span className="w-10 shrink-0 text-stone">{f.dir === "s2c" ? "S→C" : "C→S"}</span>
-                <span className="w-20 shrink-0 text-ink">{frameLabel[f.type] ?? f.type}</span>
-                <span className="hidden w-16 shrink-0 truncate text-stone sm:inline">
-                  {f.nodeName}
-                </span>
-                <span className="min-w-0 flex-1 truncate font-mono text-ink-soft">{f.body}</span>
-              </li>
-            ))}
-          </ol>
-          <div className="px-4 pb-3">
-            <Pager
-              page={frames.data?.page ?? framePage}
-              size={frames.data?.size ?? PAGE_SIZE}
-              total={frames.data?.total ?? 0}
-              onPage={setFramePage}
-            />
-          </div>
-        </details>
-      ) : null}
 
       <Sheet open={editor !== null} onOpenChange={(v) => !v && setEditor(null)}>
         <SheetContent side="right">
@@ -322,6 +297,13 @@ function trafficLine(node: Node) {
   return rate > 0 ? `${total} · ${formatBps(rate)}` : total;
 }
 
+function tokenPolicyLine(node: Node) {
+  if (node.status === "revoked") return null;
+  if (node.tokenNoExpiry) return "凭证永不过期";
+  if (node.tokenExpiresAt) return `凭证 ${formatRelative(node.tokenExpiresAt)} 到期`;
+  return null;
+}
+
 function NodeCard({
   node,
   onEdit,
@@ -333,6 +315,7 @@ function NodeCard({
   onDelete: () => void;
   onIssued: (v: Issued) => void;
 }) {
+  const tokenLine = tokenPolicyLine(node);
   return (
     <article className="rounded-xl bg-card p-4 shadow-border">
       <div className="flex items-start justify-between gap-3">
@@ -344,10 +327,18 @@ function NodeCard({
         <StatusDot status={node.status} label={statusLabel(node.status)} />
       </div>
       <p className="mt-3 font-mono text-xs text-ink-soft">
-        {node.addr ?? "未连接"} · {node.mappingCount} 映射 · {trafficLine(node)}
+        {node.addr ?? "未连接"} ·{" "}
+        <Link to="/mappings" search={{ node: node.id }} className="hover:text-ink">
+          {node.mappingCount} 映射
+        </Link>{" "}
+        · {trafficLine(node)}
       </p>
-      <p className="mt-1 text-xs text-stone">{formatRelative(node.lastSeen)}</p>
-      <div className="mt-3 flex justify-end">
+      <p className="mt-1 text-xs text-stone">
+        {formatRelative(node.lastSeen)}
+        {tokenLine ? ` · ${tokenLine}` : null}
+      </p>
+      <div className="mt-3 flex justify-end gap-1">
+        <NodeMappingsButton node={node} />
         <NodeMenu node={node} onEdit={onEdit} onDelete={onDelete} onIssued={onIssued} />
       </div>
     </article>
@@ -365,29 +356,47 @@ function NodeRow({
   onDelete: () => void;
   onIssued: (v: Issued) => void;
 }) {
+  const tokenLine = tokenPolicyLine(node);
   return (
     <tr className="border-b border-line/70 last:border-0 hover:bg-paper-2/50">
-      <td className="px-4 py-3">
+      <td className="px-4 py-3 align-middle">
         <div className="font-medium">{node.name}</div>
         <div className="text-xs text-stone">{platformLabel(node.os, node.arch)}</div>
         {node.comment ? <div className="text-xs text-stone">{node.comment}</div> : null}
       </td>
-      <td className="px-4 py-3">
+      <td className="px-4 py-3 align-middle">
         <StatusDot status={node.status} label={statusLabel(node.status)} />
       </td>
-      <td className="px-4 py-3 font-mono text-xs text-ink-soft">{node.addr ?? "—"}</td>
-      <td className="px-4 py-3 font-mono tabular-nums">{node.mappingCount}</td>
-      <td className="px-4 py-3 font-mono text-xs tabular-nums text-ink-soft">
+      <td className="px-4 py-3 align-middle font-mono text-xs text-ink-soft">{node.addr ?? "—"}</td>
+      <td className="px-4 py-3 align-middle font-mono tabular-nums">
+        <Link to="/mappings" search={{ node: node.id }} className="hover:text-pine">
+          {node.mappingCount}
+        </Link>
+      </td>
+      <td className="px-4 py-3 align-middle font-mono text-xs tabular-nums text-ink-soft">
         {trafficLine(node)}
       </td>
-      <td className="px-4 py-3 text-xs text-stone">
+      <td className="px-4 py-3 align-middle text-xs text-stone">
         {formatRelative(node.lastSeen)}
-        {node.tokenExpiresAt ? <div>凭证 {formatRelative(node.tokenExpiresAt)} 到期</div> : null}
+        {tokenLine ? <div>{tokenLine}</div> : null}
       </td>
-      <td className="px-4 py-3 text-right">
-        <NodeMenu node={node} onEdit={onEdit} onDelete={onDelete} onIssued={onIssued} />
+      <td className="px-4 py-3 align-middle text-right">
+        <div className="flex items-center justify-end gap-1">
+          <NodeMappingsButton node={node} />
+          <NodeMenu node={node} onEdit={onEdit} onDelete={onDelete} onIssued={onIssued} />
+        </div>
       </td>
     </tr>
+  );
+}
+
+function NodeMappingsButton({ node }: { node: Node }) {
+  return (
+    <Button asChild size="sm" variant="outline">
+      <Link to="/mappings" search={{ node: node.id }} aria-label={`查看 ${node.name} 的映射`}>
+        映射
+      </Link>
+    </Button>
   );
 }
 
@@ -450,6 +459,8 @@ function NodeMenu({
                   installCmd: r.installCmd,
                   listen: r.listen,
                   note: `旧凭证宽限 ${r.graceSec} 秒`,
+                  expiresAt: r.expiresAt,
+                  neverExpire: r.neverExpire,
                 });
               })
               .catch((e: Error) => toast.error(e.message));
@@ -491,8 +502,9 @@ function CreateNodeForm({ onIssued }: { onIssued: (v: Issued) => void }) {
   const [comment, setComment] = useState("");
   const [os, setOs] = useState<Platform>("linux");
   const [arch, setArch] = useState<Arch>("amd64");
+  const [neverExpire, setNeverExpire] = useState(false);
   const create = useMutation({
-    mutationFn: () => createNode({ data: { name, comment, os, arch } }),
+    mutationFn: () => createNode({ data: { name, comment, os, arch, neverExpire } }),
     onSuccess: (res) => {
       toast.success("凭证已签发，请复制保存", { id: "create-node" });
       onIssued({
@@ -502,6 +514,8 @@ function CreateNodeForm({ onIssued }: { onIssued: (v: Issued) => void }) {
         arch,
         installCmd: res.installCmd,
         listen: res.listen,
+        expiresAt: res.expiresAt,
+        neverExpire: res.neverExpire,
       });
     },
     onError: (e: Error) => toast.error(e.message, { id: "create-node" }),
@@ -555,10 +569,20 @@ function CreateNodeForm({ onIssued }: { onIssued: (v: Issued) => void }) {
             onChange={(e) => setComment(e.target.value)}
             placeholder="可选"
           />
+          <CheckField
+            label="凭证永不过期"
+            hint="默认 90 天。长期在线的实验机或内网节点可勾选；仍可随时轮换或吊销。"
+            checked={neverExpire}
+            onChange={setNeverExpire}
+          />
         </SheetBody>
         <SheetFooter className="flex items-center justify-between gap-3">
           <p className="text-xs text-stone" aria-live="polite">
-            {name.trim() ? "凭证只显示一次，请及时保存。" : "填写名称后即可签发。"}
+            {name.trim()
+              ? neverExpire
+                ? "凭证永不过期，只显示一次，请及时保存。"
+                : "凭证默认 90 天有效，只显示一次，请及时保存。"
+              : "填写名称后即可签发。"}
           </p>
           <div className="flex shrink-0 gap-2">
             <SheetClose asChild>
@@ -581,8 +605,10 @@ function EditNodeForm({ node, onDone }: { node: Node; onDone: () => void }) {
   const [comment, setComment] = useState(node.comment);
   const [os, setOs] = useState<Platform>((node.os as Platform) || "linux");
   const [arch, setArch] = useState<Arch>((node.arch as Arch) || "amd64");
+  const [neverExpire, setNeverExpire] = useState(Boolean(node.tokenNoExpiry));
   const save = useMutation({
-    mutationFn: () => updateNode({ data: { id: node.id, name, comment, os, arch } }),
+    mutationFn: () =>
+      updateNode({ data: { id: node.id, name, comment, os, arch, neverExpire } }),
     onSuccess: () => {
       toast.success("节点已更新");
       onDone();
@@ -631,6 +657,14 @@ function EditNodeForm({ node, onDone }: { node: Node; onDone: () => void }) {
             value={comment}
             onChange={(e) => setComment(e.target.value)}
           />
+          {node.status !== "revoked" ? (
+            <CheckField
+              label="凭证永不过期"
+              hint="勾选后立刻作用于当前凭证，不断开节点。取消则从现在起再计 90 天。仍可随时轮换或吊销。"
+              checked={neverExpire}
+              onChange={setNeverExpire}
+            />
+          ) : null}
         </SheetBody>
         <SheetFooter className="flex items-center justify-end gap-2">
           <SheetClose asChild>
@@ -672,6 +706,7 @@ function IssuedDialog({ issued, onClose }: { issued: Issued | null; onClose: () 
               ? " 命令里的 127.0.0.1 请换成节点能连上的入口地址。"
               : ""}
             {issued?.note ? ` ${issued.note}` : ""}
+            {issued?.neverExpire ? " 此凭证永不过期，仍可随时轮换或吊销。" : ""}
           </DialogDescription>
         </DialogHeader>
         {issued ? (

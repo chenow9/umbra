@@ -84,6 +84,9 @@ type MappingRow = {
   max_conns: number;
   rate_kbps: number;
   allow_cidrs: string;
+  idle_timeout_sec?: number;
+  spa_ttl_sec?: number;
+  udp_idle_timeout_sec?: number;
   created_at: string | Date;
   updated_at: string | Date;
 };
@@ -196,6 +199,9 @@ function mapMapping(r: MappingRow): Mapping {
     lastProbeAt: asIso(r.last_probe_at),
     lastProbePreview: r.last_probe_preview,
     grantUntil: r.mode === "spa" ? grantUntilIso(r.id) : null,
+    spaTtlSec: asNum(r.spa_ttl_sec) || 60,
+    udpIdleTimeoutSec: asNum(r.udp_idle_timeout_sec) || 60,
+    idleTimeoutSec: asNum(r.idle_timeout_sec),
     maxConns: asNum(r.max_conns) || 64,
     rateKbps: asNum(r.rate_kbps),
     allowCidrs: r.allow_cidrs ?? "",
@@ -231,6 +237,8 @@ function toWire(m: {
   rate_kbps?: number;
   allow_cidrs?: string;
   idle_timeout_sec?: number;
+  spa_ttl_sec?: number;
+  udp_idle_timeout_sec?: number;
 }): MappingWire {
   return {
     id: m.id,
@@ -245,6 +253,8 @@ function toWire(m: {
     rate_kbps: m.rate_kbps ?? 0,
     allow_cidrs: m.allow_cidrs ?? "",
     idle_timeout_sec: m.idle_timeout_sec ?? 60,
+    spa_ttl_sec: m.spa_ttl_sec ?? 60,
+    udp_idle_timeout_sec: m.udp_idle_timeout_sec ?? 60,
   };
 }
 
@@ -268,9 +278,12 @@ async function loadWires(nodeId: string): Promise<MappingWire[]> {
     rate_kbps: number;
     allow_cidrs: string;
     idle_timeout_sec: number;
+    spa_ttl_sec: number;
+    udp_idle_timeout_sec: number;
   }>(
     `select id, name, proto, mode, entry_port, local_host, local_port, enabled,
-            max_conns, rate_kbps, allow_cidrs, idle_timeout_sec
+            max_conns, rate_kbps, allow_cidrs, idle_timeout_sec,
+            spa_ttl_sec, udp_idle_timeout_sec
      from mappings where node_id = $1`,
     [nodeId],
   );
@@ -307,9 +320,10 @@ async function ownedMapping(id: string) {
     entry_port: number | null;
     local_host: string;
     local_port: number;
+    spa_ttl_sec?: number;
   }>(
     `select m.id, m.node_id, m.mode, m.proto, m.enabled, m.name,
-            m.entry_port, m.local_host, m.local_port
+            m.entry_port, m.local_host, m.local_port, m.spa_ttl_sec
      from mappings m
      join nodes a on a.id = m.node_id
      where m.id = $1`,
@@ -375,7 +389,8 @@ const mappingSelect = `
          m.enabled, m.listen_state, m.listen_error, m.push_state,
          m.bytes_in, m.bytes_out, m.active_conns,
          m.last_probe_at, m.last_probe_preview, m.created_at, m.updated_at,
-         m.max_conns, m.rate_kbps, m.allow_cidrs
+         m.max_conns, m.rate_kbps, m.allow_cidrs,
+         m.idle_timeout_sec, m.spa_ttl_sec, m.udp_idle_timeout_sec
   from mappings m
   join nodes a on a.id = m.node_id
 `;
@@ -578,6 +593,9 @@ const mappingInput = z.object({
   maxConns: z.number().int().min(1).max(10000).optional(),
   rateKbps: z.number().int().min(0).max(1_000_000).optional(),
   allowCidrs: z.string().max(400).optional(),
+  idleTimeoutSec: z.number().int().min(0).max(86400).optional(),
+  spaTtlSec: z.number().int().min(0).max(86400).optional(),
+  udpIdleTimeoutSec: z.number().int().min(0).max(86400).optional(),
 });
 
 export const createMapping = createServerFn({ method: "POST" })
@@ -606,11 +624,15 @@ export const createMapping = createServerFn({ method: "POST" })
     const maxConns = data.maxConns ?? 64;
     const rateKbps = data.rateKbps ?? 0;
     const allowCidrs = normalizeCidrs(data.allowCidrs ?? "");
+    const idleTimeoutSec = data.idleTimeoutSec ?? 0;
+    const spaTtlSec = data.spaTtlSec || 60;
+    const udpIdleTimeoutSec = data.udpIdleTimeoutSec || 60;
     await sql.query(
       `insert into mappings (
          id, node_id, name, proto, mode, entry_port, local_host, local_port,
-         enabled, listen_state, push_state, max_conns, rate_kbps, allow_cidrs, updated_at
-       ) values ($1,$2,$3,$4,$5,$6,$7,$8,true,$9,$10,$11,$12,$13,now())`,
+         enabled, listen_state, push_state, max_conns, rate_kbps, allow_cidrs,
+         idle_timeout_sec, spa_ttl_sec, udp_idle_timeout_sec, updated_at
+       ) values ($1,$2,$3,$4,$5,$6,$7,$8,true,$9,$10,$11,$12,$13,$14,$15,$16,now())`,
       [
         id,
         data.nodeId,
@@ -625,6 +647,9 @@ export const createMapping = createServerFn({ method: "POST" })
         maxConns,
         rateKbps,
         allowCidrs,
+        idleTimeoutSec,
+        spaTtlSec,
+        udpIdleTimeoutSec,
       ],
     );
     await audit(
@@ -646,9 +671,12 @@ export const createMapping = createServerFn({ method: "POST" })
         rate_kbps: number;
         allow_cidrs: string;
         idle_timeout_sec: number;
+        spa_ttl_sec: number;
+        udp_idle_timeout_sec: number;
       }>(
         `select id, name, proto, mode, entry_port, local_host, local_port, enabled,
-                max_conns, rate_kbps, allow_cidrs, idle_timeout_sec
+                max_conns, rate_kbps, allow_cidrs, idle_timeout_sec,
+                spa_ttl_sec, udp_idle_timeout_sec
          from mappings where id = $1`,
         [id],
       );
@@ -836,7 +864,7 @@ export const probeMapping = createServerFn({ method: "POST" })
       const frames = (err as { frames?: ControlFrame[] }).frames;
       if (frames) await persistFrames(m.node_id, frames);
       const message = err instanceof Error ? err.message : "探测失败";
-      if (!message.includes("未授权") && !message.includes("访客模式")) {
+      if (!message.includes("未授权") && !message.includes("访问端")) {
         await sql.query(
           `update mappings set listen_error = $1, updated_at = now() where id = $2`,
           [message, m.id],
@@ -853,11 +881,12 @@ export const knockMapping = createServerFn({ method: "POST" })
     const sql = await ownerSql();
     const m = await ownedMapping(data.id);
     if (m.mode !== "spa" || !m.enabled) throw new Error("只有启用的暗端口需要敲门");
-    const { until, frames } = knockChannel(m.id);
+    const ttlSec = Number(m.spa_ttl_sec) || 60;
+    const { until, frames } = knockChannel(m.id, "127.0.0.1", ttlSec);
     if (await gateHealth()) await gateKnock(m.id).catch(() => undefined);
     await persistFrames(m.node_id, frames);
-    await audit("mapping.knock", m.id, "SPA grant 60s");
-    return { until: new Date(until).toISOString() };
+    await audit("mapping.knock", m.id, `SPA grant ${ttlSec}s 127.0.0.1`);
+    return { until: new Date(until).toISOString(), ip: "127.0.0.1", ttlSec };
   });
 
 export const issueVisitor = createServerFn({ method: "POST" })
@@ -866,14 +895,14 @@ export const issueVisitor = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const sql = await ownerSql();
     const m = await ownedMapping(data.id);
-    if (m.mode !== "visitor" || !m.enabled) throw new Error("只有启用的访客映射可以签发");
+    if (m.mode !== "visitor" || !m.enabled) throw new Error("只有启用的访问端映射可以签发");
     const id = newId("vis");
     const ticket = newVisitorTicket();
     const expires = new Date(Date.now() + 24 * 3600 * 1000);
     await sql.query(
       `insert into visitors (id, mapping_id, label, ticket_hash, expires_at)
        values ($1,$2,$3,$4,$5)`,
-      [id, m.id, data.label?.trim() || "访客", hashToken(ticket), expires.toISOString()],
+      [id, m.id, data.label?.trim() || "访问", hashToken(ticket), expires.toISOString()],
     );
     await audit("visitor.issue", m.id, id);
     const issued: VisitorIssued = {

@@ -1141,3 +1141,155 @@ func TestEnrollIgnoresBootstrapBody(t *testing.T) {
 		}
 	}
 }
+
+func echoTCP(t *testing.T, addr string, msg string, wait time.Duration) bool {
+	t.Helper()
+	c, err := net.DialTimeout("tcp", addr, wait)
+	if err != nil {
+		return false
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(wait))
+	if _, err := c.Write([]byte(msg)); err != nil {
+		return false
+	}
+	buf := make([]byte, len(msg))
+	if _, err := io.ReadFull(c, buf); err != nil {
+		return false
+	}
+	return string(buf) == msg
+}
+
+func TestSPAGrantBindsSourceIP(t *testing.T) {
+	echo, echoPort := startEchoTCP(t)
+	defer echo.Close()
+	s, addr := startGate(t)
+	s.SetToken("tok", "nde1")
+	pub := pickPort(t)
+	port := pub
+	s.PutMappings("nde1", []wire.Mapping{{
+		ID: "map_spa", Name: "t", Proto: "tcp", Mode: "spa",
+		EntryPort: &port, LocalHost: "127.0.0.1", LocalPort: echoPort,
+		Enabled: true, MaxConns: 8, SpaTTLSec: 30,
+	}})
+	go func() { _ = node.Run(addr, "tok", nil) }()
+	waitOnline(t, s, "nde1")
+	dst := net.JoinHostPort("127.0.0.1", itoa(pub))
+	if echoTCP(t, dst, "no", 300*time.Millisecond) {
+		t.Fatal("expected drop before knock")
+	}
+	s.Knock("map_spa", "8.8.8.8", time.Second)
+	if echoTCP(t, dst, "other", 300*time.Millisecond) {
+		t.Fatal("other IP grant must not admit 127.0.0.1")
+	}
+	s.Knock("map_spa", "127.0.0.1", time.Second)
+	if !echoTCP(t, dst, "ok", 2*time.Second) {
+		t.Fatal("knocker IP should be admitted")
+	}
+}
+
+func TestSPATCPSurvivesGrantExpiry(t *testing.T) {
+	echo, echoPort := startEchoTCP(t)
+	defer echo.Close()
+	s, addr := startGate(t)
+	s.SetToken("tok", "nde1")
+	pub := pickPort(t)
+	port := pub
+	s.PutMappings("nde1", []wire.Mapping{{
+		ID: "map_keep", Name: "t", Proto: "tcp", Mode: "spa",
+		EntryPort: &port, LocalHost: "127.0.0.1", LocalPort: echoPort,
+		Enabled: true, MaxConns: 8, IdleTimeoutSec: 0, SpaTTLSec: 1,
+	}})
+	go func() { _ = node.Run(addr, "tok", nil) }()
+	waitOnline(t, s, "nde1")
+	s.Knock("map_keep", "127.0.0.1", 200*time.Millisecond)
+	dst := net.JoinHostPort("127.0.0.1", itoa(pub))
+	c, err := net.DialTimeout("tcp", dst, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := c.Write([]byte("keep")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(c, buf); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(350 * time.Millisecond)
+	if s.granted("map_keep", "127.0.0.1") {
+		t.Fatal("grant should have expired")
+	}
+	_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := c.Write([]byte("still")); err != nil {
+		t.Fatal(err)
+	}
+	buf = make([]byte, 5)
+	if _, err := io.ReadFull(c, buf); err != nil {
+		t.Fatalf("existing TCP should survive grant expiry: %v", err)
+	}
+	if echoTCP(t, dst, "new", 300*time.Millisecond) {
+		t.Fatal("new TCP after expiry must be dropped")
+	}
+}
+
+func TestSPAUDPIdleIndependentOfGrant(t *testing.T) {
+	echo, echoPort := startEchoUDP(t)
+	defer echo.Close()
+	s, addr := startGate(t)
+	s.SetToken("tok", "nde1")
+	pub := pickPort(t)
+	port := pub
+	s.PutMappings("nde1", []wire.Mapping{{
+		ID: "map_udle", Name: "u", Proto: "udp", Mode: "spa",
+		EntryPort: &port, LocalHost: "127.0.0.1", LocalPort: echoPort,
+		Enabled: true, MaxConns: 8, UdpIdleTimeoutSec: 2, SpaTTLSec: 1,
+	}})
+	go func() { _ = node.Run(addr, "tok", nil) }()
+	waitOnline(t, s, "nde1")
+	s.Knock("map_udle", "127.0.0.1", 250*time.Millisecond)
+	pc, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close()
+	dst := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: pub}
+	msg := []byte("u1")
+	if _, err := pc.WriteToUDP(msg, dst); err != nil {
+		t.Fatal(err)
+	}
+	_ = pc.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 8)
+	n, _, err := pc.ReadFromUDP(buf)
+	if err != nil || string(buf[:n]) != "u1" {
+		t.Fatalf("first udp %v %q", err, buf[:n])
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && s.granted("map_udle", "127.0.0.1") {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if s.granted("map_udle", "127.0.0.1") {
+		t.Fatal("grant should have expired")
+	}
+	if _, err := pc.WriteToUDP([]byte("u2"), dst); err != nil {
+		t.Fatal(err)
+	}
+	_ = pc.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, _, err = pc.ReadFromUDP(buf)
+	if err != nil || string(buf[:n]) != "u2" {
+		t.Fatalf("existing udp session should survive grant expiry: %v %q", err, buf[:n])
+	}
+	fresh, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fresh.Close()
+	if _, err := fresh.WriteToUDP([]byte("u3"), dst); err != nil {
+		t.Fatal(err)
+	}
+	_ = fresh.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	if n, _, err := fresh.ReadFromUDP(buf); err == nil {
+		t.Fatalf("new udp session after expiry must drop, got %q", buf[:n])
+	}
+}

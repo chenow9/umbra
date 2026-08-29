@@ -1,0 +1,22 @@
+phase=tcp started=2026-08-29T04:01:34Z jobs=20 hold=60s
+tcp-30000 rc=0
+tcp-30001 rc=0
+tcp-30002 rc=0
+tcp-30003 rc=0
+tcp-30004 rc=0
+tcp-30005 rc=0
+tcp-30006 rc=0
+tcp-30007 rc=0
+tcp-30008 rc=0
+tcp-30009 rc=0
+tcp-30010 rc=0
+tcp-30011 rc=0
+tcp-30012 rc=0
+tcp-30013 rc=0
+tcp-30014 rc=0
+tcp-30015 rc=0
+tcp-30016 rc=0
+tcp-30017 rc=0
+tcp-30018 rc=0
+tcp-30019 rc=0
+phase=tcp finished=2026-08-29T04:02:35Z failed=0

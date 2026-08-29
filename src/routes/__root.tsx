@@ -12,7 +12,7 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: APP_NAME },
-      { name: "theme-color", content: "#f6f3ee" },
+      { name: "theme-color", content: "#eef0f4" },
       {
         name: "description",
         content: "umbra — L4 隐匿式内网穿透控制台。映射只在服务端改，节点零配置热下发。",
@@ -39,7 +39,7 @@ export const Route = createRootRoute({
     ],
   }),
   component: () => (
-    <html lang="zh-CN" className="antialiased" data-theme="guci" suppressHydrationWarning>
+    <html lang="zh-CN" className="antialiased" data-theme="yueying" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>

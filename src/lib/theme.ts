@@ -9,12 +9,36 @@ export type ThemeTokens = {
   pine: string;
   pineFg: string;
   moss: string;
+  live: string;
   amber: string;
   rose: string;
   shadow: string;
 };
 
 export const THEMES = [
+  {
+    id: "yueying",
+    name: "月影",
+    hint: "银纸 + 门影，幽门默认",
+    scheme: "light",
+    tokens: {
+      paper: "#eef0f4",
+      paper2: "#e4e7ee",
+      card: "#f7f8fb",
+      ink: "#16181f",
+      inkSoft: "#3a3f4c",
+      stone: "#6b7180",
+      line: "#d0d3dc",
+      pine: "#2e3148",
+      pineFg: "#eef0f4",
+      moss: "#434765",
+      live: "#1e7a45",
+      amber: "#8d7344",
+      rose: "#9b4545",
+      shadow:
+        "0px 0px 0px 1px rgba(22, 24, 31, 0.07), 0px 1px 2px -1px rgba(22, 24, 31, 0.06), 0px 2px 4px 0px rgba(22, 24, 31, 0.04)",
+    },
+  },
   {
     id: "songmo",
     name: "松墨",
@@ -31,6 +55,7 @@ export const THEMES = [
       pine: "#2c4a3e",
       pineFg: "#f3efe6",
       moss: "#4d6b5c",
+      live: "#1b7a42",
       amber: "#9a6b2f",
       rose: "#8c3d3d",
       shadow:
@@ -53,6 +78,7 @@ export const THEMES = [
       pine: "#3f6b5c",
       pineFg: "#eef3ee",
       moss: "#5a8874",
+      live: "#1b7a48",
       amber: "#9a7a48",
       rose: "#8c4a4a",
       shadow:
@@ -75,6 +101,7 @@ export const THEMES = [
       pine: "#3d5a66",
       pineFg: "#eef1f3",
       moss: "#5a7884",
+      live: "#1b7a5c",
       amber: "#9a7a48",
       rose: "#8c4a4a",
       shadow:
@@ -84,7 +111,7 @@ export const THEMES = [
   {
     id: "guci",
     name: "骨瓷",
-    hint: "骨白 + 炭黑，现用默认",
+    hint: "骨白 + 炭黑",
     scheme: "light",
     tokens: {
       paper: "#f6f3ee",
@@ -97,6 +124,7 @@ export const THEMES = [
       pine: "#2a2724",
       pineFg: "#f6f3ee",
       moss: "#4a4641",
+      live: "#1e7a45",
       amber: "#9a7a48",
       rose: "#8c3d3d",
       shadow:
@@ -119,6 +147,7 @@ export const THEMES = [
       pine: "#7a3a32",
       pineFg: "#f4eee8",
       moss: "#8f5048",
+      live: "#2a7a3d",
       amber: "#9a6b2f",
       rose: "#8c3d3d",
       shadow:
@@ -141,6 +170,7 @@ export const THEMES = [
       pine: "#3d4a63",
       pineFg: "#eef0f4",
       moss: "#536078",
+      live: "#1b7a48",
       amber: "#9a7a48",
       rose: "#8c4a4a",
       shadow:
@@ -163,6 +193,7 @@ export const THEMES = [
       pine: "#5a4030",
       pineFg: "#f3eadc",
       moss: "#6e5240",
+      live: "#3a7a28",
       amber: "#9a6b2f",
       rose: "#8c3d3d",
       shadow:
@@ -185,6 +216,7 @@ export const THEMES = [
       pine: "#c8ccd4",
       pineFg: "#121314",
       moss: "#a8adb6",
+      live: "#8fba9a",
       amber: "#c4a574",
       rose: "#d08080",
       shadow: "0 0 0 1px rgba(255, 255, 255, 0.08)",
@@ -206,6 +238,7 @@ export const THEMES = [
       pine: "#9bb5a4",
       pineFg: "#141210",
       moss: "#b3c8ba",
+      live: "#9bb5a4",
       amber: "#c4a574",
       rose: "#d08080",
       shadow: "0 0 0 1px rgba(255, 255, 255, 0.08)",
@@ -215,8 +248,8 @@ export const THEMES = [
 
 export type ThemeId = (typeof THEMES)[number]["id"];
 
-export const THEME_KEY = "umbra-theme-v2";
-export const DEFAULT_THEME: ThemeId = "guci";
+export const THEME_KEY = "umbra-theme-v3";
+export const DEFAULT_THEME: ThemeId = "yueying";
 
 const GROUPS = [
   { id: "light", label: "浅色", scheme: "light" },
@@ -247,6 +280,7 @@ function writeVars(tokens: ThemeTokens) {
     ["--pine", tokens.pine],
     ["--pine-fg", tokens.pineFg],
     ["--moss", tokens.moss],
+    ["--live", tokens.live],
     ["--amber", tokens.amber],
     ["--rose", tokens.rose],
     ["--shadow-border", tokens.shadow],
@@ -259,6 +293,7 @@ function writeVars(tokens: ThemeTokens) {
     ["--color-pine", tokens.pine],
     ["--color-pine-fg", tokens.pineFg],
     ["--color-moss", tokens.moss],
+    ["--color-live", tokens.live],
     ["--color-amber", tokens.amber],
     ["--color-rose", tokens.rose],
     ["--color-background", tokens.paper],

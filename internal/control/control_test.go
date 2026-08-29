@@ -504,6 +504,33 @@ func TestPasswordChangeRevokesAllSessions(t *testing.T) {
 	readBody(t, res)
 }
 
+func TestLoginRateLimitCountsFailuresOnly(t *testing.T) {
+	c, _, _ := newTestConsole(t)
+	c.SkipAuth = false
+	if err := c.setup("abcdefgh"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 12; i++ {
+		if err := c.login("abcdefgh", "1.2.3.4"); err != nil {
+			t.Fatalf("good password %d: %v", i, err)
+		}
+	}
+	for i := 0; i < 8; i++ {
+		err := c.login("wrongpass", "1.2.3.4")
+		if err == nil || !strings.Contains(err.Error(), "口令不对") {
+			t.Fatalf("wrong password %d: %v", i, err)
+		}
+	}
+	err := c.login("abcdefgh", "1.2.3.4")
+	if err == nil || !strings.Contains(err.Error(), "试得太勤") {
+		t.Fatalf("want lockout after 8 failures, got %v", err)
+	}
+	err = c.login("wrongpass", "9.9.9.9")
+	if err == nil || !strings.Contains(err.Error(), "口令不对") {
+		t.Fatalf("other IP should still try, got %v", err)
+	}
+}
+
 func TestPersistEnvelopeChecksumAndPrev(t *testing.T) {
 	c, srv, dir := newTestConsole(t)
 	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
@@ -721,6 +748,117 @@ func TestRotateExpiredTokenHasNoGrace(t *testing.T) {
 	}
 }
 
+func TestNodeTokenNeverExpire(t *testing.T) {
+	oldTTL, oldGrace := gate.TokenTTL, gate.TokenGrace
+	gate.TokenTTL = 80 * time.Millisecond
+	gate.TokenGrace = 80 * time.Millisecond
+	t.Cleanup(func() { gate.TokenTTL = oldTTL; gate.TokenGrace = oldGrace })
+
+	c, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]any{"name": "keep", "neverExpire": true}, nil)
+	var created struct {
+		ID          string `json:"id"`
+		Token       string `json:"token"`
+		ExpiresAt   string `json:"expiresAt"`
+		NeverExpire bool   `json:"neverExpire"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 || created.Token == "" || created.ExpiresAt != "" || !created.NeverExpire {
+		t.Fatalf("create never-expire: status=%d expires=%q never=%v", res.StatusCode, created.ExpiresAt, created.NeverExpire)
+	}
+	c.mu.Lock()
+	rec := c.nodes[created.ID]
+	if rec == nil || !rec.TokenNoExpiry || !rec.TokenUntil.IsZero() {
+		c.mu.Unlock()
+		t.Fatal("create must persist never-expire")
+	}
+	c.mu.Unlock()
+	time.Sleep(150 * time.Millisecond)
+	if c.Gate.LookupToken(created.Token) != created.ID {
+		t.Fatal("never-expire token must survive default TTL")
+	}
+
+	g2 := gate.New("127.0.0.1", stealth.New(false))
+	c2, err := New(g2, c.Persist)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2.mu.Lock()
+	rec2 := c2.nodes[created.ID]
+	if rec2 == nil || !rec2.TokenNoExpiry || !rec2.TokenUntil.IsZero() {
+		c2.mu.Unlock()
+		t.Fatal("reload must keep never-expire and not migrate a TTL")
+	}
+	c2.mu.Unlock()
+	if g2.LookupToken(created.Token) != created.ID {
+		t.Fatal("reloaded never-expire token must authenticate")
+	}
+
+	res = doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "ttl"}, nil)
+	var timed struct {
+		ID    string `json:"id"`
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&timed); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	res = doJSON(t, srv, "PATCH", "/v1/nodes/"+timed.ID, map[string]any{"neverExpire": true}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("patch never-expire %d %s", res.StatusCode, readBody(t, res))
+	}
+	var patched map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&patched); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if patched["tokenNoExpiry"] != true {
+		t.Fatalf("patch view %v", patched)
+	}
+	if exp, _ := patched["tokenExpiresAt"].(string); exp != "" {
+		t.Fatalf("patched expiry %q", exp)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if c.Gate.LookupToken(timed.Token) != timed.ID {
+		t.Fatal("current hash must stay valid after turning off expiry")
+	}
+
+	res = doJSON(t, srv, "POST", "/v1/nodes/"+created.ID+"/rotate", nil, nil)
+	var rotated struct {
+		Token       string `json:"token"`
+		GraceSec    int    `json:"graceSec"`
+		ExpiresAt   string `json:"expiresAt"`
+		NeverExpire bool   `json:"neverExpire"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&rotated); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if rotated.Token == "" || rotated.ExpiresAt != "" || !rotated.NeverExpire {
+		t.Fatalf("rotate inherit: expires=%q never=%v", rotated.ExpiresAt, rotated.NeverExpire)
+	}
+	if c.Gate.LookupToken(created.Token) != created.ID || c.Gate.LookupToken(rotated.Token) != created.ID {
+		t.Fatal("rotate must keep grace for a never-expire old token")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c.Gate.LookupToken(created.Token) == "" {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	if c.Gate.LookupToken(created.Token) != "" {
+		t.Fatal("old never-expire token must die after grace")
+	}
+	time.Sleep(150 * time.Millisecond)
+	if c.Gate.LookupToken(rotated.Token) != created.ID {
+		t.Fatal("rotated never-expire token must survive default TTL")
+	}
+}
+
 func TestPutTokenReplaceDropsOldHash(t *testing.T) {
 	c, srv, _ := newTestConsole(t)
 	res := doJSON(t, srv, "PUT", "/v1/tokens/token_old", map[string]string{"node_id": "nde_put"}, nil)
@@ -903,7 +1041,7 @@ func TestHealthAndMappingsExposeUDPAdmit(t *testing.T) {
 		t.Fatal("no mappings")
 	}
 	m := maps[0]
-	for _, k := range []string{"udpActive", "udpDropMaxConns", "udpDropPerIP", "udpDropRate", "activeConns", "reach", "idleTimeoutSec", "tcpDropMaxConns"} {
+	for _, k := range []string{"udpActive", "udpDropMaxConns", "udpDropPerIP", "udpDropRate", "activeConns", "reach", "idleTimeoutSec", "spaTtlSec", "udpIdleTimeoutSec", "grants", "tcpDropMaxConns"} {
 		if _, ok := m[k]; !ok {
 			t.Fatalf("mapping missing %s in %v", k, m)
 		}
@@ -953,6 +1091,66 @@ func TestCreateMappingDefaults(t *testing.T) {
 	}
 	if int(m["idleTimeoutSec"].(float64)) != 0 {
 		t.Fatalf("idleTimeoutSec default %v", m["idleTimeoutSec"])
+	}
+	if int(m["spaTtlSec"].(float64)) != 60 {
+		t.Fatalf("spaTtlSec default %v", m["spaTtlSec"])
+	}
+	if int(m["udpIdleTimeoutSec"].(float64)) != 60 {
+		t.Fatalf("udpIdleTimeoutSec default %v", m["udpIdleTimeoutSec"])
+	}
+}
+
+func TestSPAKnockBindsRequestIPAndMappingTTL(t *testing.T) {
+	_, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("node %d %s", res.StatusCode, readBody(t, res))
+	}
+	var n struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&n); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	res = doJSON(t, srv, "POST", "/v1/mappings", map[string]any{
+		"nodeId": n.ID, "name": "ssh", "proto": "tcp", "mode": "spa",
+		"entryPort": 40222, "localHost": "127.0.0.1", "localPort": 22,
+		"spaTtlSec": 15,
+	}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("mapping %d %s", res.StatusCode, readBody(t, res))
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	res = doJSON(t, srv, "POST", "/v1/mappings/"+created.ID+"/knock", map[string]any{"ip": "203.0.113.8"}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("knock %d %s", res.StatusCode, readBody(t, res))
+	}
+	var kn map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&kn); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if kn["ip"] != "203.0.113.8" {
+		t.Fatalf("knock ip %v", kn["ip"])
+	}
+	if int(kn["ttlSec"].(float64)) != 15 {
+		t.Fatalf("knock ttl %v", kn["ttlSec"])
+	}
+	res = doJSON(t, srv, "GET", "/v1/mappings", nil, nil)
+	var maps []map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&maps); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if len(maps) == 0 || maps[0]["grantIP"] != "203.0.113.8" {
+		t.Fatalf("grantIP %v", maps)
 	}
 }
 

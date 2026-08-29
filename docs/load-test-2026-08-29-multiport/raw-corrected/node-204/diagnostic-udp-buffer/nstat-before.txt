@@ -1,0 +1,6 @@
+#kernel
+UdpInDatagrams                  4528300            0.0
+UdpNoPorts                      1052               0.0
+UdpInErrors                     23871              0.0
+UdpRcvbufErrors                 23871              0.0
+UdpSndbufErrors                 17                 0.0

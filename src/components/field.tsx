@@ -36,7 +36,7 @@ export function SelectField({
   label: string;
   value: string;
   onValueChange: (value: string) => void;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; hint?: string }[];
   placeholder?: string;
   className?: string;
 }) {
@@ -52,6 +52,35 @@ export function SelectField({
         placeholder={placeholder}
       />
     </div>
+  );
+}
+
+export function CheckField({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  const id = useId();
+  return (
+    <label htmlFor={id} className="flex cursor-pointer items-start gap-2.5 text-sm text-ink">
+      <input
+        id={id}
+        type="checkbox"
+        className="mt-0.5 size-4 accent-[var(--pine)]"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span>
+        <span className="font-medium">{label}</span>
+        {hint ? <span className="mt-0.5 block text-xs text-stone">{hint}</span> : null}
+      </span>
+    </label>
   );
 }
 

@@ -30,7 +30,7 @@ export function OverviewPage() {
   const alerts = o?.alerts ?? [];
 
   return (
-    <AppShell title="总览" description="入口现在的样子。数字随心跳更新。">
+    <AppShell title="总览">
       {overview.isLoading ? (
         <div className="h-32" />
       ) : empty ? (
@@ -232,7 +232,7 @@ function EmptyGate() {
       <div>
         <h2 className="font-serif text-3xl italic tracking-tight text-ink">先让一台节点上线</h2>
         <p className="mt-2 text-sm leading-relaxed text-ink-soft">
-          演示会登记节点、暗端口先丢再通，再打一条公开 UDP 游戏口。映射只在服务端改。
+          演示会登记节点、开一条 spa 和一条 public。
         </p>
       </div>
       <div className="flex flex-wrap gap-2">

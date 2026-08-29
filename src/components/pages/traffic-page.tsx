@@ -4,8 +4,8 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
+import { FilterChips } from "@/components/filter-chips";
 import { RateChart } from "@/components/rate-chart";
-import { SelectField } from "@/components/field";
 import { Pager } from "@/components/ui/pager";
 import { Button } from "@/components/ui/button";
 import { getTraffic, listNodes, listMappings, queryMappings } from "@/lib/umbra/api";
@@ -49,11 +49,19 @@ export function TrafficPage() {
   const t = traffic.data;
   const pageData = mappings.data ?? emptyPage<Mapping>(page);
   const filteredMaps = pageData.items;
-  const dropdownMaps = (mappingOpts.data ?? []).filter((m) => !nodeId || m.nodeId === nodeId);
+  const nodeChips = (nodes.data ?? []).map((a) => ({
+    value: a.id,
+    label: a.name,
+    count: (mappingOpts.data ?? []).filter((m) => m.nodeId === a.id).length,
+  }));
 
   useEffect(() => {
     setPage(1);
   }, [nodeId]);
+
+  function pickMapping(id: string) {
+    setMappingId((cur) => (cur === id ? "" : id));
+  }
   useEffect(() => {
     if (!mappings.data) return;
     const pages = Math.max(1, Math.ceil(mappings.data.total / mappings.data.size) || 1);
@@ -61,13 +69,13 @@ export function TrafficPage() {
   }, [mappings.data, page]);
 
   return (
-    <AppShell title="流量" description="计数权威在入口。图表与映射表按秒刷新，不用手动点。">
+    <AppShell title="流量">
       <div className="flex flex-col gap-6">
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-3">
           <div
             role="group"
             aria-label="流量时间范围"
-            className="flex rounded-md bg-paper-2 p-0.5 shadow-border"
+            className="flex w-fit rounded-md bg-paper-2 p-0.5 shadow-border"
           >
             {(["1h", "24h", "7d"] as const).map((r) => (
               <button
@@ -84,32 +92,24 @@ export function TrafficPage() {
               </button>
             ))}
           </div>
-          <SelectField
-            label="节点"
-            className="w-56"
-            value={nodeId || "all"}
-            onValueChange={(v) => {
-              setNodeId(v === "all" ? "" : v);
-              setMappingId("");
-            }}
-            options={[
-              { value: "all", label: "全部节点" },
-              ...(nodes.data ?? []).map((a) => ({ value: a.id, label: a.name })),
-            ]}
-          />
-          <SelectField
-            label="映射"
-            className="w-64"
-            value={mappingId || "all"}
-            onValueChange={(v) => setMappingId(v === "all" ? "" : v)}
-            options={[
-              { value: "all", label: "全部映射" },
-              ...dropdownMaps.map((m) => ({
-                value: m.id,
-                label: nodeId ? m.name : `${m.name} · ${m.nodeName}`,
-              })),
-            ]}
-          />
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <FilterChips
+              label="节点"
+              value={nodeId || "all"}
+              onChange={(v) => {
+                setNodeId(v === "all" ? "" : v);
+                setMappingId("");
+              }}
+              options={nodeChips}
+            />
+            {mappingId ? (
+              <Button type="button" size="sm" variant="ghost" onClick={() => setMappingId("")}>
+                取消选中映射
+              </Button>
+            ) : (
+              <p className="text-xs text-stone">点下面一行，只看那条映射的流量。</p>
+            )}
+          </div>
         </div>
 
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -149,7 +149,23 @@ export function TrafficPage() {
             </p>
           ) : (
             filteredMaps.map((m) => (
-              <article key={m.id} className="rounded-xl bg-card p-4 shadow-border">
+              <article
+                key={m.id}
+                role="button"
+                tabIndex={0}
+                aria-pressed={mappingId === m.id}
+                className={cn(
+                  "cursor-pointer rounded-xl bg-card p-4 text-left shadow-border",
+                  mappingId === m.id && "ring-1 ring-pine/30",
+                )}
+                onClick={() => pickMapping(m.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    pickMapping(m.id);
+                  }
+                }}
+              >
                 <p className="font-medium">{m.name}</p>
                 <p className="mt-1 text-xs text-stone">
                   {m.nodeName} · {m.proto.toUpperCase()}
@@ -163,7 +179,7 @@ export function TrafficPage() {
                     ? ` · UDP 活跃会话 ${m.udpActive ?? m.activeConns}`
                     : ` · 连接 ${m.activeConns}`}
                 </p>
-                {m.proto === "udp" ? <UdpDropSummary mapping={m} /> : null}
+                <UdpDropNote mapping={m} block />
               </article>
             ))
           )}
@@ -190,7 +206,22 @@ export function TrafficPage() {
                 </tr>
               ) : (
                 filteredMaps.map((m) => (
-                  <tr key={m.id} className="border-b border-line/70 last:border-0">
+                  <tr
+                    key={m.id}
+                    tabIndex={0}
+                    aria-selected={mappingId === m.id}
+                    className={cn(
+                      "cursor-pointer border-b border-line/70 last:border-0 hover:bg-paper-2/50",
+                      mappingId === m.id && "bg-paper-2",
+                    )}
+                    onClick={() => pickMapping(m.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        pickMapping(m.id);
+                      }
+                    }}
+                  >
                     <td className="px-4 py-3 font-medium">{m.name}</td>
                     <td className="px-4 py-3 font-mono text-xs uppercase">{m.proto}</td>
                     <td className="px-4 py-3 text-ink-soft">{m.nodeName}</td>
@@ -205,7 +236,7 @@ export function TrafficPage() {
                     </td>
                     <td className="px-4 py-3 font-mono tabular-nums">
                       {m.proto === "udp" ? (m.udpActive ?? m.activeConns) : m.activeConns}
-                      {m.proto === "udp" ? <UdpDropSummary mapping={m} /> : null}
+                      <UdpDropNote mapping={m} />
                     </td>
                   </tr>
                 ))
@@ -226,16 +257,16 @@ export function TrafficPage() {
   );
 }
 
-function UdpDropSummary({ mapping: m }: { mapping: Mapping }) {
+function UdpDropNote({ mapping: m, block = false }: { mapping: Mapping; block?: boolean }) {
+  if (m.proto !== "udp") return null;
   const maxConns = m.udpDropMaxConns ?? 0;
   const perIp = m.udpDropPerIP ?? 0;
   const rate = m.udpDropRate ?? 0;
   const total = maxConns + perIp + rate;
-  return (
-    <div className="mt-1 text-xs text-stone">
-      {total > 0 ? `丢弃：连接数 ${maxConns} · 单 IP ${perIp} · 限速 ${rate}` : "无 UDP 丢弃"}
-    </div>
-  );
+  if (total <= 0) return null;
+  const text = `丢弃 ${total}（连接数 ${maxConns} · 单 IP ${perIp} · 限速 ${rate}）`;
+  if (block) return <p className="mt-1 text-xs text-stone">{text}</p>;
+  return <span className="text-xs text-stone"> · {text}</span>;
 }
 
 function LiveHint() {

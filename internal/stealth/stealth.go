@@ -6,10 +6,12 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"net"
 	"sync"
 	"time"
 
 	"github.com/google/nftables"
+	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
 	"golang.org/x/sys/unix"
 )
@@ -27,11 +29,11 @@ type Engine struct {
 	ok      bool
 	mode    string
 	dropped map[string]Port
-	open    map[string]time.Time
+	open    map[string]map[string]time.Time // portKey -> ip -> until; ip "*" = any source
 }
 
 func New(enable bool) *Engine {
-	e := &Engine{dropped: map[string]Port{}, open: map[string]time.Time{}, mode: "userspace"}
+	e := &Engine{dropped: map[string]Port{}, open: map[string]map[string]time.Time{}, mode: "userspace"}
 	if !enable {
 		return e
 	}
@@ -81,24 +83,36 @@ func (e *Engine) SetSPA(p Port, drop bool) {
 		e.dropped[key(p)] = p
 	} else {
 		delete(e.dropped, key(p))
+		delete(e.open, key(p))
 	}
 	e.mu.Unlock()
 	e.rebuild()
 }
 
-func (e *Engine) Knock(p Port, ttl time.Duration) {
+func (e *Engine) Knock(p Port, ip string, ttl time.Duration) {
 	if e == nil {
 		return
 	}
+	if ip == "" {
+		ip = "*"
+	}
+	k := key(p)
 	e.mu.Lock()
-	e.open[key(p)] = time.Now().Add(ttl)
+	if e.open[k] == nil {
+		e.open[k] = map[string]time.Time{}
+	}
+	e.open[k][ip] = time.Now().Add(ttl)
 	e.mu.Unlock()
 	e.rebuild()
 	time.AfterFunc(ttl+50*time.Millisecond, func() {
 		e.mu.Lock()
-		until, ok := e.open[key(p)]
-		if ok && time.Now().After(until.Add(-time.Millisecond)) {
-			delete(e.open, key(p))
+		if m := e.open[k]; m != nil {
+			if until, ok := m[ip]; ok && time.Now().After(until.Add(-time.Millisecond)) {
+				delete(m, ip)
+			}
+			if len(m) == 0 {
+				delete(e.open, k)
+			}
 		}
 		e.mu.Unlock()
 		e.rebuild()
@@ -111,7 +125,7 @@ func (e *Engine) Clear() {
 	}
 	e.mu.Lock()
 	e.dropped = map[string]Port{}
-	e.open = map[string]time.Time{}
+	e.open = map[string]map[string]time.Time{}
 	e.mu.Unlock()
 	e.conn.FlushChain(e.chain)
 	_ = e.conn.Flush()
@@ -126,21 +140,46 @@ func (e *Engine) rebuild() {
 	e.conn.FlushChain(e.chain)
 	now := time.Now()
 	for k, p := range e.dropped {
-		if until, ok := e.open[k]; ok && now.Before(until) {
-			continue
-		}
 		e.conn.AddRule(&nftables.Rule{
 			Table: e.table,
 			Chain: e.chain,
-			Exprs: dropExprs(p),
+			Exprs: establishedAccept(p),
 		})
+		anyIP := false
+		if grants := e.open[k]; grants != nil {
+			for ip, until := range grants {
+				if !now.Before(until) {
+					continue
+				}
+				if ip == "" || ip == "*" {
+					anyIP = true
+					continue
+				}
+				ip4 := net.ParseIP(ip).To4()
+				if ip4 == nil {
+					continue
+				}
+				e.conn.AddRule(&nftables.Rule{
+					Table: e.table,
+					Chain: e.chain,
+					Exprs: srcAccept(p, ip4),
+				})
+			}
+		}
+		if !anyIP {
+			e.conn.AddRule(&nftables.Rule{
+				Table: e.table,
+				Chain: e.chain,
+				Exprs: dropExprs(p),
+			})
+		}
 	}
 	if err := e.conn.Flush(); err != nil {
 		log.Printf("stealth: 刷新规则失败 %v", err)
 	}
 }
 
-func dropExprs(p Port) []expr.Any {
+func protoPortExprs(p Port) []expr.Any {
 	proto := byte(unix.IPPROTO_TCP)
 	if p.Proto == "udp" {
 		proto = unix.IPPROTO_UDP
@@ -152,6 +191,36 @@ func dropExprs(p Port) []expr.Any {
 		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{proto}},
 		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: port},
-		&expr.Verdict{Kind: expr.VerdictDrop},
 	}
+}
+
+func dropExprs(p Port) []expr.Any {
+	return append(protoPortExprs(p), &expr.Verdict{Kind: expr.VerdictDrop})
+}
+
+func establishedAccept(p Port) []expr.Any {
+	out := protoPortExprs(p)
+	out = append(out,
+		&expr.Ct{Register: 1, Key: expr.CtKeySTATE},
+		&expr.Bitwise{
+			SourceRegister: 1,
+			DestRegister:   1,
+			Len:            4,
+			Mask:           binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED),
+			Xor:            binaryutil.NativeEndian.PutUint32(0),
+		},
+		&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: []byte{0, 0, 0, 0}},
+		&expr.Verdict{Kind: expr.VerdictAccept},
+	)
+	return out
+}
+
+func srcAccept(p Port, ip4 net.IP) []expr.Any {
+	out := protoPortExprs(p)
+	out = append(out,
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 12, Len: 4},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte(ip4)},
+		&expr.Verdict{Kind: expr.VerdictAccept},
+	)
+	return out
 }

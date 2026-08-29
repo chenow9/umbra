@@ -46,7 +46,7 @@ export function AuditPage() {
   }, [audit.data, page]);
 
   return (
-    <AppShell title="审计" description="登记、下发、敲门、开流都记在这里。不存原始流量。">
+    <AppShell title="审计">
       {empty ? (
         <p className="rounded-xl bg-card px-4 py-10 text-center text-sm text-stone shadow-border">
           还没有审计记录。

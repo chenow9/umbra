@@ -19,19 +19,21 @@ type Envelope struct {
 }
 
 type Mapping struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	Proto          string `json:"proto"`
-	Mode           string `json:"mode"`
-	EntryPort      *int   `json:"entry_port"`
-	LocalHost      string `json:"local_host"`
-	LocalPort      int    `json:"local_port"`
-	Enabled        bool   `json:"enabled"`
-	MaxConns       int    `json:"max_conns"`
-	RateKbps       int    `json:"rate_kbps"`
-	AllowCidrs     string `json:"allow_cidrs"`
-	IdleTimeoutSec int    `json:"idle_timeout_sec"`
-	Generation     int64  `json:"generation,omitempty"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Proto             string `json:"proto"`
+	Mode              string `json:"mode"`
+	EntryPort         *int   `json:"entry_port"`
+	LocalHost         string `json:"local_host"`
+	LocalPort         int    `json:"local_port"`
+	Enabled           bool   `json:"enabled"`
+	MaxConns          int    `json:"max_conns"`
+	RateKbps          int    `json:"rate_kbps"`
+	AllowCidrs        string `json:"allow_cidrs"`
+	IdleTimeoutSec    int    `json:"idle_timeout_sec"`
+	SpaTTLSec         int    `json:"spa_ttl_sec,omitempty"`
+	UdpIdleTimeoutSec int    `json:"udp_idle_timeout_sec,omitempty"`
+	Generation        int64  `json:"generation,omitempty"`
 }
 
 type StreamOpen struct {

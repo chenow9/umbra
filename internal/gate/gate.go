@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -183,8 +184,8 @@ type tokenEnt struct {
 // so the operator can update the node before the old hash is dropped.
 var TokenGrace = 90 * time.Second
 
-// TokenTTL is the lifetime of a current node credential. Zero Until
-// is only for tests; the control plane always sets an expiry.
+// TokenTTL is the default lifetime of a current node credential.
+// Zero Until means the hash does not expire (until rotated or revoked).
 var TokenTTL = 90 * 24 * time.Hour
 
 type Server struct {
@@ -196,7 +197,7 @@ type Server struct {
 	nodes     map[string]*nodeConn
 	ent       map[string]*entry
 	want      map[string][]Mapping
-	grant     map[string]time.Time
+	grant     map[string]map[string]time.Time // mappingID -> ip -> until; ip "*" = any source
 	tix       map[string]ticketEnt
 	visits    map[string]*visitUDP
 	ctrl      net.Listener
@@ -228,7 +229,7 @@ func New(bind string, st *stealth.Engine) *Server {
 		nodes:     map[string]*nodeConn{},
 		ent:       map[string]*entry{},
 		want:      map[string][]Mapping{},
-		grant:     map[string]time.Time{},
+		grant:     map[string]map[string]time.Time{},
 		tix:       map[string]ticketEnt{},
 		visits:    map[string]*visitUDP{},
 		udpMode:   UDPAuto,
@@ -672,9 +673,6 @@ func (s *Server) ReplaceToken(nodeID, newHash string, until time.Time) {
 	if nodeID == "" || newHash == "" {
 		return
 	}
-	if until.IsZero() {
-		until = time.Now().Add(TokenTTL)
-	}
 	s.mu.Lock()
 	for h, e := range s.tok {
 		if e.NodeID == nodeID && h != newHash {
@@ -701,9 +699,6 @@ func (s *Server) RotateToken(nodeID, oldHash, newHash string, grace time.Duratio
 func (s *Server) RotateTokenUntil(nodeID, oldHash, newHash string, until time.Time, grace time.Duration) {
 	if grace <= 0 {
 		grace = TokenGrace
-	}
-	if until.IsZero() {
-		until = time.Now().Add(TokenTTL)
 	}
 	s.mu.Lock()
 	var oldUntil time.Time
@@ -847,31 +842,84 @@ func (s *Server) Disconnect(nodeID string) {
 	}
 }
 
-func (s *Server) Knock(mappingID string, ttl time.Duration) time.Time {
+const grantAnyIP = "*"
+
+type GrantInfo struct {
+	IP    string
+	Until time.Time
+}
+
+func (s *Server) Knock(mappingID, ip string, ttl time.Duration) time.Time {
+	ip = policy.NormalizeIP(ip)
+	if ip == "" {
+		ip = grantAnyIP
+	}
+	if ttl <= 0 {
+		ttl = policy.SPATimeout(0)
+	}
 	until := time.Now().Add(ttl)
 	s.mu.Lock()
-	s.grant[mappingID] = until
+	if s.grant[mappingID] == nil {
+		s.grant[mappingID] = map[string]time.Time{}
+	}
+	s.grant[mappingID][ip] = until
 	e := s.ent[mappingID]
 	s.mu.Unlock()
 	if e != nil && e.spec.EntryPort != nil {
-		s.stealth.Knock(stealth.Port{Proto: e.spec.Proto, Port: uint16(*e.spec.EntryPort)}, ttl)
+		s.stealth.Knock(stealth.Port{Proto: e.spec.Proto, Port: uint16(*e.spec.EntryPort)}, ip, ttl)
 	}
 	return until
 }
 
-func (s *Server) granted(id string) bool {
-	return !s.GrantUntil(id).IsZero()
+func (s *Server) granted(id, ip string) bool {
+	ip = policy.NormalizeIP(ip)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	byIP := s.grant[id]
+	if byIP == nil {
+		return false
+	}
+	now := time.Now()
+	if until, ok := byIP[ip]; ok && now.Before(until) {
+		return true
+	}
+	if until, ok := byIP[grantAnyIP]; ok && now.Before(until) {
+		return true
+	}
+	return false
 }
 
 func (s *Server) GrantUntil(id string) time.Time {
+	grants := s.MappingGrants(id)
+	var latest time.Time
+	for _, g := range grants {
+		if g.Until.After(latest) {
+			latest = g.Until
+		}
+	}
+	return latest
+}
+
+func (s *Server) MappingGrants(id string) []GrantInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	until, ok := s.grant[id]
-	if !ok || time.Now().After(until) {
-		delete(s.grant, id)
-		return time.Time{}
+	byIP := s.grant[id]
+	if byIP == nil {
+		return nil
 	}
-	return until
+	now := time.Now()
+	out := make([]GrantInfo, 0, len(byIP))
+	for ip, until := range byIP {
+		if now.After(until) {
+			delete(byIP, ip)
+			continue
+		}
+		out = append(out, GrantInfo{IP: ip, Until: until})
+	}
+	if len(byIP) == 0 {
+		delete(s.grant, id)
+	}
+	return out
 }
 
 func (s *Server) PutMappings(nodeID string, maps []Mapping) {
@@ -1202,7 +1250,7 @@ func (s *Server) serveTCP(e *entry, ln net.Listener) {
 
 func (s *Server) handleTCP(e *entry, c net.Conn, via string) {
 	ip := policy.NormalizeIP(c.RemoteAddr().String())
-	if e.spec.Mode == "spa" && !s.granted(e.spec.ID) {
+	if e.spec.Mode == "spa" && !s.granted(e.spec.ID, ip) {
 		e.noteTCPDrop("spa")
 		_ = c.Close()
 		return
@@ -1376,9 +1424,6 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 			return
 		}
 		ip := policy.NormalizeIP(raddr.String())
-		if e.spec.Mode == "spa" && !s.granted(e.spec.ID) {
-			continue
-		}
 		if !policy.CidrAllowed(ip, e.spec.AllowCidrs) {
 			slog.Info("acl drop", "mapping", e.spec.ID, "ip", ip, "proto", "udp")
 			continue
@@ -1392,7 +1437,16 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 		ready := s.nodeUDPReady(e.nodeID)
 		e.mu.Lock()
 		sess := e.udpSess[udpPeerIndex(peerKey)]
-		idle := time.Duration(policy.IntOr(e.spec.IdleTimeoutSec, 60)) * time.Second
+		idle := policy.UDPIdle(e.spec.UdpIdleTimeoutSec, e.spec.IdleTimeoutSec)
+		if sess == nil {
+			e.mu.Unlock()
+			if e.spec.Mode == "spa" && !s.granted(e.spec.ID, ip) {
+				e.noteUDPDrop(ip, "spa")
+				continue
+			}
+			e.mu.Lock()
+			sess = e.udpSess[udpPeerIndex(peerKey)]
+		}
 		if sess == nil {
 			if reason := e.admitUDP(ip); reason != "" {
 				e.mu.Unlock()
@@ -1793,21 +1847,34 @@ func (s *Server) MappingStats() map[string]MapStat {
 }
 
 type Snapshot struct {
-	Tokens     map[string]string    `json:"tokens"`
-	TokenUntil map[string]int64     `json:"token_until,omitempty"`
-	Maps       map[string][]Mapping `json:"maps"`
-	Grants     map[string]int64     `json:"grants"`
-	Tickets    map[string]int64     `json:"tickets"`
-	TicketM    map[string]string    `json:"ticket_maps"`
+	Tokens     map[string]string           `json:"tokens"`
+	TokenUntil map[string]int64            `json:"token_until,omitempty"`
+	Maps       map[string][]Mapping        `json:"maps"`
+	Grants     map[string]int64            `json:"grants"`
+	GrantIPs   map[string]map[string]int64 `json:"grantIps,omitempty"`
+	Tickets    map[string]int64            `json:"tickets"`
+	TicketM    map[string]string           `json:"ticket_maps"`
 }
 
 func (s *Server) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	g := map[string]int64{}
-	for id, t := range s.grant {
-		if t.After(time.Now()) {
-			g[id] = t.UnixMilli()
+	gips := map[string]map[string]int64{}
+	nowGrant := time.Now()
+	for id, byIP := range s.grant {
+		for ip, t := range byIP {
+			if !t.After(nowGrant) {
+				continue
+			}
+			if gips[id] == nil {
+				gips[id] = map[string]int64{}
+			}
+			ms := t.UnixMilli()
+			gips[id][ip] = ms
+			if ms > g[id] {
+				g[id] = ms
+			}
 		}
 	}
 	tok := map[string]string{}
@@ -1818,7 +1885,9 @@ func (s *Server) Snapshot() Snapshot {
 			continue
 		}
 		tok[k] = e.NodeID
-		if !e.Until.IsZero() {
+		if e.Until.IsZero() {
+			until[k] = 0
+		} else {
 			until[k] = e.Until.UnixMilli()
 		}
 	}
@@ -1836,7 +1905,7 @@ func (s *Server) Snapshot() Snapshot {
 			}
 		}
 	}
-	return Snapshot{Tokens: tok, TokenUntil: until, Maps: maps, Grants: g, Tickets: tixExp, TicketM: tixMap}
+	return Snapshot{Tokens: tok, TokenUntil: until, Maps: maps, Grants: g, GrantIPs: gips, Tickets: tixExp, TicketM: tixMap}
 }
 
 func tokenHashOK(s string) bool {
@@ -1861,6 +1930,10 @@ func (s *Server) restoreTokens(tokens map[string]string, until map[string]int64)
 			continue
 		}
 		if ms, ok := until[tok]; ok {
+			if ms <= 0 {
+				s.SetTokenHashUntil(tok, id, time.Time{})
+				continue
+			}
 			t := time.UnixMilli(ms)
 			if !t.After(now) {
 				continue
@@ -1892,10 +1965,21 @@ func (s *Server) Restore(snap Snapshot) {
 	for id, maps := range snap.Maps {
 		s.PutMappings(id, maps)
 	}
-	for id, ms := range snap.Grants {
-		until := time.UnixMilli(ms)
-		if until.After(time.Now()) {
-			s.Knock(id, time.Until(until))
+	if len(snap.GrantIPs) > 0 {
+		for id, byIP := range snap.GrantIPs {
+			for ip, ms := range byIP {
+				until := time.UnixMilli(ms)
+				if until.After(time.Now()) {
+					s.Knock(id, ip, time.Until(until))
+				}
+			}
+		}
+	} else {
+		for id, ms := range snap.Grants {
+			until := time.UnixMilli(ms)
+			if until.After(time.Now()) {
+				s.Knock(id, grantAnyIP, time.Until(until))
+			}
 		}
 	}
 	for h, mid := range snap.TicketM {
@@ -1986,8 +2070,24 @@ func (s *Server) ServeAPI(ln net.Listener) error {
 		w.WriteHeader(204)
 	})
 	mux.HandleFunc("POST /v1/knock/{id}", func(w http.ResponseWriter, r *http.Request) {
-		until := s.Knock(r.PathValue("id"), 60*time.Second)
-		_ = json.NewEncoder(w).Encode(map[string]string{"until": until.UTC().Format(time.RFC3339)})
+		id := r.PathValue("id")
+		ip := policy.NormalizeIP(r.RemoteAddr)
+		var b struct {
+			IP string `json:"ip"`
+		}
+		if err := decodeJSONBody(r, &b); err == nil && strings.TrimSpace(b.IP) != "" {
+			ip = policy.NormalizeIP(b.IP)
+		}
+		ttl := policy.SPATimeout(0)
+		s.mu.Lock()
+		if e := s.ent[id]; e != nil {
+			ttl = policy.SPATimeout(e.spec.SpaTTLSec)
+		}
+		s.mu.Unlock()
+		until := s.Knock(id, ip, ttl)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"until": until.UTC().Format(time.RFC3339), "ip": ip, "ttlSec": int(ttl.Seconds()),
+		})
 	})
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(s.Status())

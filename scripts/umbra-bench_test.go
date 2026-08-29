@@ -124,6 +124,19 @@ func TestRRSkipTicksDoesNotCatchUp(t *testing.T) {
 	}
 }
 
+func TestRRNextDelayStopsAtHoldDeadline(t *testing.T) {
+	start := time.Unix(0, 0)
+	wait, again := rrNextDelay(start, start.Add(450*time.Millisecond), start.Add(500*time.Millisecond), 500*time.Millisecond)
+	if wait != 50*time.Millisecond || again {
+		t.Fatalf("wait=%s again=%v, want 50ms false", wait, again)
+	}
+
+	wait, again = rrNextDelay(start, start.Add(100*time.Millisecond), start.Add(time.Second), 500*time.Millisecond)
+	if wait != 400*time.Millisecond || !again {
+		t.Fatalf("wait=%s again=%v, want 400ms true", wait, again)
+	}
+}
+
 func TestTCPRRSteadySmall(t *testing.T) {
 	addr, closeFn := startTCPEcho(t, 0)
 	defer closeFn()

@@ -30,7 +30,7 @@ type Entry = {
 
 const g = globalThis as typeof globalThis & {
   __umbraEntries__?: Map<string, Entry>;
-  __umbraGrants__?: Map<string, number>;
+  __umbraGrants__?: Map<string, Map<string, number>>;
   __umbraEcho__?: net.Server;
   __umbraEchoUdp__?: dgram.Socket;
 };
@@ -43,6 +43,16 @@ function entries() {
 function grants() {
   g.__umbraGrants__ ??= new Map();
   return g.__umbraGrants__;
+}
+
+function grantMap(mappingId: string) {
+  const all = grants();
+  let byIP = all.get(mappingId);
+  if (!byIP) {
+    byIP = new Map();
+    all.set(mappingId, byIP);
+  }
+  return byIP;
 }
 
 export function ensureEcho(): Promise<void> {
@@ -81,24 +91,37 @@ export function ensureEcho(): Promise<void> {
   return Promise.all([tcp, udp]).then(() => undefined);
 }
 
-export function knockGrant(mappingId: string, ttlMs = 60_000) {
+export function knockGrant(mappingId: string, ip = "127.0.0.1", ttlMs = 60_000) {
   const until = Date.now() + ttlMs;
-  grants().set(mappingId, until);
+  grantMap(mappingId).set(ip || "*", until);
   return until;
 }
 
-export function isGranted(mappingId: string) {
-  const until = grants().get(mappingId) ?? 0;
-  if (until <= Date.now()) {
-    grants().delete(mappingId);
-    return false;
+export function isGranted(mappingId: string, ip?: string) {
+  const byIP = grants().get(mappingId);
+  if (!byIP) return false;
+  const now = Date.now();
+  let live = false;
+  for (const [src, until] of byIP) {
+    if (until <= now) {
+      byIP.delete(src);
+      continue;
+    }
+    if (src === "*" || ip == null || src === ip) live = true;
   }
-  return true;
+  if (byIP.size === 0) grants().delete(mappingId);
+  return live;
 }
 
 export function grantUntilIso(mappingId: string): string | null {
-  if (!isGranted(mappingId)) return null;
-  return new Date(grants().get(mappingId)!).toISOString();
+  const byIP = grants().get(mappingId);
+  if (!byIP) return null;
+  let latest = 0;
+  const now = Date.now();
+  for (const until of byIP.values()) {
+    if (until > now && until > latest) latest = until;
+  }
+  return latest ? new Date(latest).toISOString() : null;
 }
 
 function normalizeIp(addr: string | undefined) {
@@ -144,7 +167,7 @@ function applyPolicy(e: Entry, spec: MappingWire) {
   e.maxConns = spec.max_conns || 64;
   e.rateKbps = spec.rate_kbps || 0;
   e.allowCidrs = spec.allow_cidrs || "";
-  e.idleSec = spec.idle_timeout_sec || 60;
+  e.idleSec = spec.udp_idle_timeout_sec || spec.idle_timeout_sec || 60;
 }
 
 function admit(e: Entry, ip: string): "ok" | "acl" | "conns" {
@@ -158,7 +181,7 @@ function policyOf(spec: MappingWire): Pick<Entry, "maxConns" | "rateKbps" | "all
     maxConns: spec.max_conns || 64,
     rateKbps: spec.rate_kbps || 0,
     allowCidrs: spec.allow_cidrs || "",
-    idleSec: spec.idle_timeout_sec || 60,
+    idleSec: spec.udp_idle_timeout_sec || spec.idle_timeout_sec || 60,
     active: 0,
     windowStart: 0,
     windowBytes: 0,
@@ -220,7 +243,7 @@ function handleConn(mappingId: string, sock: net.Socket) {
     sock.destroy();
     return;
   }
-  if (e.mode === "spa" && !isGranted(mappingId)) {
+  if (e.mode === "spa" && !isGranted(mappingId, normalizeIp(sock.remoteAddress))) {
     sock.destroy();
     return;
   }
@@ -260,7 +283,6 @@ function handleConn(mappingId: string, sock: net.Socket) {
 }
 
 function handleUdp(e: Entry, msg: Buffer, rinfo: dgram.RemoteInfo) {
-  if (e.mode === "spa" && !isGranted(e.mappingId)) return;
   if (!e.nodeOnline || !e.udp) return;
   if (admit(e, rinfo.address) !== "ok") return;
   if (!takeRate(e, msg.length)) return;
@@ -268,6 +290,7 @@ function handleUdp(e: Entry, msg: Buffer, rinfo: dgram.RemoteInfo) {
   const key = `${rinfo.address}:${rinfo.port}`;
   let sess = e.udpSessions.get(key);
   if (!sess) {
+    if (e.mode === "spa" && !isGranted(e.mappingId, normalizeIp(rinfo.address))) return;
     e.active += 1;
     const sock = dgram.createSocket("udp4");
     sock.on("message", (reply) => {

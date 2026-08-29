@@ -14,10 +14,11 @@ import (
 func (c *Console) patchNode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var b struct {
-		Name    *string `json:"name"`
-		Comment *string `json:"comment"`
-		OS      *string `json:"os"`
-		Arch    *string `json:"arch"`
+		Name        *string `json:"name"`
+		Comment     *string `json:"comment"`
+		OS          *string `json:"os"`
+		Arch        *string `json:"arch"`
+		NeverExpire *bool   `json:"neverExpire"`
 	}
 	if !jsonBody(w, r, &b) {
 		return
@@ -30,6 +31,8 @@ func (c *Console) patchNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prevName, prevComment, prevOS, prevArch := a.Name, a.Comment, a.OS, a.Arch
+	prevNoExpiry, prevUntil := a.TokenNoExpiry, a.TokenUntil
+	rehash := false
 	if b.Name != nil {
 		name := strings.TrimSpace(*b.Name)
 		if name == "" {
@@ -48,14 +51,24 @@ func (c *Console) patchNode(w http.ResponseWriter, r *http.Request) {
 	if b.Arch != nil {
 		a.Arch = strings.TrimSpace(*b.Arch)
 	}
+	if b.NeverExpire != nil && *b.NeverExpire != a.TokenNoExpiry {
+		a.TokenNoExpiry = *b.NeverExpire
+		a.TokenUntil = lifetimeUntil(a.TokenNoExpiry)
+		rehash = a.TokenHash != ""
+	}
 	c.logAudit("node.update", id, a.Name)
 	if err := c.save(); err != nil {
 		a.Name, a.Comment, a.OS, a.Arch = prevName, prevComment, prevOS, prevArch
+		a.TokenNoExpiry, a.TokenUntil = prevNoExpiry, prevUntil
 		c.mu.Unlock()
 		persistFail(w)
 		return
 	}
+	hash, until := a.TokenHash, a.TokenUntil
 	c.mu.Unlock()
+	if rehash {
+		c.installToken(hash, id, until)
+	}
 	live := c.live()
 	stats := c.Gate.MappingStats()
 	c.mu.Lock()
@@ -165,18 +178,20 @@ func (c *Console) postDeleteNode(w http.ResponseWriter, r *http.Request) {
 func (c *Console) patchMapping(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var b struct {
-		NodeID         *string `json:"nodeId"`
-		AgentID        *string `json:"agentId"`
-		Name           *string `json:"name"`
-		Proto          *string `json:"proto"`
-		Mode           *string `json:"mode"`
-		EntryPort      *int    `json:"entryPort"`
-		LocalHost      *string `json:"localHost"`
-		LocalPort      *int    `json:"localPort"`
-		MaxConns       *int    `json:"maxConns"`
-		RateKbps       *int    `json:"rateKbps"`
-		AllowCidrs     *string `json:"allowCidrs"`
-		IdleTimeoutSec *int    `json:"idleTimeoutSec"`
+		NodeID            *string `json:"nodeId"`
+		AgentID           *string `json:"agentId"`
+		Name              *string `json:"name"`
+		Proto             *string `json:"proto"`
+		Mode              *string `json:"mode"`
+		EntryPort         *int    `json:"entryPort"`
+		LocalHost         *string `json:"localHost"`
+		LocalPort         *int    `json:"localPort"`
+		MaxConns          *int    `json:"maxConns"`
+		RateKbps          *int    `json:"rateKbps"`
+		AllowCidrs        *string `json:"allowCidrs"`
+		IdleTimeoutSec    *int    `json:"idleTimeoutSec"`
+		SpaTTLSec         *int    `json:"spaTtlSec"`
+		UdpIdleTimeoutSec *int    `json:"udpIdleTimeoutSec"`
 	}
 	if !jsonBody(w, r, &b) {
 		return
@@ -242,6 +257,12 @@ func (c *Console) patchMapping(w http.ResponseWriter, r *http.Request) {
 			idle = 0
 		}
 		next.IdleTimeoutSec = idle
+	}
+	if b.SpaTTLSec != nil {
+		next.SpaTTLSec = policy.ClampTimeoutSec(*b.SpaTTLSec, policy.DefaultSPATimeoutSec)
+	}
+	if b.UdpIdleTimeoutSec != nil {
+		next.UdpIdleTimeoutSec = policy.ClampTimeoutSec(*b.UdpIdleTimeoutSec, policy.DefaultUDPIdleSec)
 	}
 	if b.RateKbps != nil {
 		next.RateKbps = *b.RateKbps

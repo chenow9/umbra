@@ -2,6 +2,7 @@
 
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
+import { NameDotHint } from "@/components/mode-name";
 import { cn } from "@/lib/utils";
 
 export function Select({
@@ -14,7 +15,7 @@ export function Select({
 }: {
   value: string;
   onValueChange: (value: string) => void;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; hint?: string }[];
   placeholder?: string;
   disabled?: boolean;
   id?: string;
@@ -63,7 +64,9 @@ export function Select({
                   "data-[state=checked]:text-ink",
                 )}
               >
-                <SelectPrimitive.ItemText>{o.label}</SelectPrimitive.ItemText>
+                <SelectPrimitive.ItemText>
+                  {o.hint ? <NameDotHint name={o.label} hint={o.hint} /> : o.label}
+                </SelectPrimitive.ItemText>
                 <SelectPrimitive.ItemIndicator className="absolute right-2 inline-flex">
                   <Check className="size-3.5 text-moss" />
                 </SelectPrimitive.ItemIndicator>

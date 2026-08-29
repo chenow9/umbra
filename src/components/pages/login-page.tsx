@@ -54,11 +54,11 @@ export function LoginPage() {
         <h1 className="mt-6 text-base font-medium">
           {configuring ? "设定控制台口令" : "登录"}
         </h1>
-        <p className="mt-1 text-sm leading-relaxed text-stone">
-          {configuring
-            ? "第一次打开。口令只存在这台机器上，没有默认密码，也不走互联网账号。"
-            : "控制台和 API 共用这个口。节点走另一条控制通道。"}
-        </p>
+        {configuring ? (
+          <p className="mt-1 text-sm leading-relaxed text-stone">
+            第一次打开。口令只存在这台机器上。
+          </p>
+        ) : null}
         <form
           className="mt-5 flex flex-col gap-3"
           onSubmit={(e) => {

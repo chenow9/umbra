@@ -42,7 +42,7 @@ export function visitorRunCommand(caPath = "/etc/umbra/ca.crt") {
 }
 
 export function visitorCompose(arch: Arch) {
-  return `# umbra-visit 已包含在入口镜像中；这里覆盖入口程序，只运行访客端。
+  return `# umbra-visit 已包含在入口镜像中；这里覆盖入口程序，只运行访问端。
 # 签发票据后替换 UMBRA_TICKET；TCP / UDP 都映射到本机 127.0.0.1:2222。
 services:
   umbra-visit:
@@ -102,7 +102,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/umbrad -tls-dir /var/lib/umbra -listen :4400 -http 127.0.0.1:8080 -bind 0.0.0.0
+ExecStart=/usr/local/bin/umbrad -tls-dir /var/lib/umbra -listen :4400 -advertise gate.example.com:4400 -http 127.0.0.1:8080 -bind 0.0.0.0
 ExecReload=/bin/kill -USR2 $MAINPID
 Restart=on-failure
 RestartSec=2
@@ -126,6 +126,8 @@ export const umbradPlist = `<?xml version="1.0" encoding="UTF-8"?>
     <string>/usr/local/var/umbra</string>
     <string>-listen</string>
     <string>:4400</string>
+    <string>-advertise</string>
+    <string>gate.example.com:4400</string>
     <string>-http</string>
     <string>127.0.0.1:8080</string>
     <string>-bind</string>
@@ -143,7 +145,7 @@ export function umbradWin(arch: Arch) {
   const bin = binaryName("umbrad", "windows", arch);
   return `mkdir "%ProgramFiles%\\Umbra"
 copy ${bin} "%ProgramFiles%\\Umbra\\umbrad.exe"
-sc.exe create UmbraGate binPath= "%ProgramFiles%\\Umbra\\umbrad.exe -tls-dir C:\\ProgramData\\umbra -listen :4400 -http 127.0.0.1:8080 -bind 0.0.0.0" start= auto
+sc.exe create UmbraGate binPath= "%ProgramFiles%\\Umbra\\umbrad.exe -tls-dir C:\\ProgramData\\umbra -listen :4400 -advertise gate.example.com:4400 -http 127.0.0.1:8080 -bind 0.0.0.0" start= auto
 sc.exe start UmbraGate
 `;
 }
@@ -153,6 +155,7 @@ export function umbradCompose(arch: Arch) {
 # macOS / Windows 上的 Docker 没有真正的 host 网络，入口请跑本机进程。
 # 镜像由 git tag（v*）触发 CI 推到 Docker Hub，linux/amd64 + linux/arm64。
 # -http 是控制台+API；预发布不打 latest，例如 UMBRA_TAG=0.0.1-beta。
+# umbra-tls 挂到 /var/lib/umbra：证书 + control.json（口令/会话/节点/映射）。
 services:
   umbrad:
     image: ${DOCKERHUB_GATE}:\${UMBRA_TAG:-latest}
@@ -161,7 +164,8 @@ services:
     cap_add:
       - NET_ADMIN
       - NET_BIND_SERVICE
-    command: ["-listen", ":4400", "-http", "127.0.0.1:8080", "-bind", "0.0.0.0", "-tls-dir", "/var/lib/umbra"]
+    # tls-dir 必须整目录持久化：口令、会话、节点凭证、映射都在 control.json。
+    command: ["-listen", ":4400", "-advertise", "gate.example.com:4400", "-http", "127.0.0.1:8080", "-bind", "0.0.0.0", "-tls-dir", "/var/lib/umbra"]
     volumes:
       - umbra-tls:/var/lib/umbra
     restart: unless-stopped

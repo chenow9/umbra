@@ -1,0 +1,32 @@
+phase=mixed started=2026-08-29T10:25:37Z jobs=30 hold=60s
+tcp-30000 rc=0
+tcp-30001 rc=0
+tcp-30002 rc=0
+tcp-30003 rc=0
+tcp-30004 rc=0
+tcp-30005 rc=0
+tcp-30006 rc=0
+tcp-30007 rc=0
+tcp-30008 rc=0
+tcp-30009 rc=0
+tcp-30010 rc=0
+tcp-30011 rc=0
+tcp-30012 rc=0
+tcp-30013 rc=0
+tcp-30014 rc=0
+tcp-30015 rc=0
+tcp-30016 rc=0
+tcp-30017 rc=0
+tcp-30018 rc=0
+tcp-30019 rc=0
+udp-30100 rc=0
+udp-30101 rc=0
+udp-30102 rc=0
+udp-30103 rc=0
+udp-30104 rc=0
+udp-30105 rc=0
+udp-30106 rc=0
+udp-30107 rc=0
+udp-30108 rc=0
+udp-30109 rc=0
+phase=mixed finished=2026-08-29T10:26:53Z failed=0

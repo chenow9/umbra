@@ -1,16 +1,19 @@
 "use client";
 
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
+import { FilterChips, NodeSwitcher } from "@/components/filter-chips";
+import { ModeName } from "@/components/mode-name";
 import { SelectField, TextField } from "@/components/field";
 import { StatusDot } from "@/components/status-dot";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { Input } from "@/components/ui/input";
 import { ActionMenu } from "@/components/ui/menu";
+import { Pager } from "@/components/ui/pager";
 import {
   Dialog,
   DialogContent,
@@ -35,8 +38,8 @@ import {
   issueVisitor,
   knockMapping,
   listNodes,
+  listMappings,
   listTickets,
-  queryMappings,
   probeMapping,
   revokeTicket,
   setMappingEnabled,
@@ -47,66 +50,96 @@ import { formatBytes, formatBps, formatPort, formatRelative } from "@/lib/umbra/
 import {
   dropReasonLabel,
   listenLabel,
+  modeHint,
   modeLabel,
-  policyLine,
+  policyBits,
   pushLabel,
   reachLabel,
 } from "@/lib/umbra/labels";
-import { emptyPage, PAGE_SIZE } from "@/lib/umbra/page";
-import { Pager } from "@/components/ui/pager";
+import {
+  PAGE_SIZE,
+  filterMappings,
+  mappingFacets,
+  mergeNodeOptions,
+  pageOf,
+  preferredNodeId,
+  sortMappings,
+} from "@/lib/umbra/page";
 import { ECHO_PORT } from "@/lib/umbra/protocol";
 import type { Mapping, MappingMode, Proto, VisitorIssued, VisitorTicket } from "@/lib/umbra/types";
-import { cn } from "@/lib/utils";
 
-type Editor = { mode: "create" } | { mode: "edit"; mapping: Mapping };
+type Editor = { mode: "create"; nodeId?: string } | { mode: "edit"; mapping: Mapping };
 
 export function MappingsPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate({ from: "/mappings" });
+  const search = useSearch({ from: "/mappings" });
   const nodes = useQuery({ queryKey: ["umbra", "nodes"], queryFn: () => listNodes() });
+  const mappings = useQuery({ queryKey: ["umbra", "mappings"], queryFn: () => listMappings() });
   const [q, setQ] = useState("");
-  const [nodeId, setNodeId] = useState("all");
+  const [wantAll, setWantAll] = useState(false);
   const [proto, setProto] = useState("all");
-  const [mode, setMode] = useState("all");
   const [reach, setReach] = useState("all");
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(1);
-  const query = {
-    q: q.trim() || undefined,
-    nodeId: nodeId === "all" ? undefined : nodeId,
-    proto: proto === "all" ? undefined : proto,
-    mode: mode === "all" ? undefined : mode,
-    reach: reach === "all" ? undefined : reach,
-    page,
-    size: PAGE_SIZE,
-  };
-  const mappings = useQuery({
-    queryKey: ["umbra", "mappings", "page", query],
-    queryFn: () => queryMappings(query),
-    placeholderData: keepPreviousData,
-  });
   const [editor, setEditor] = useState<Editor | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Mapping | null>(null);
   const [issuedVisit, setIssuedVisit] = useState<VisitorIssued | null>(null);
   const hasNode = (nodes.data ?? []).some((a) => a.status !== "revoked");
-  const pageData = mappings.data ?? emptyPage<Mapping>(page);
+  const all = mappings.data ?? [];
+  const searched = useMemo(() => filterMappings(all, { q: q.trim() || undefined }), [all, q]);
+  const nodeFacets = useMemo(
+    () => mergeNodeOptions(mappingFacets(searched).nodes, nodes.data ?? []),
+    [searched, nodes.data],
+  );
+  const nodeId = search.node ?? (wantAll ? "all" : preferredNodeId(nodeFacets));
+  const facets = useMemo(
+    () => mappingFacets(filterMappings(searched, { nodeId: nodeId === "all" ? undefined : nodeId })),
+    [searched, nodeId],
+  );
+  const showNode = nodeId === "all";
+  const filter = useMemo(
+    () => ({
+      q: q.trim() || undefined,
+      nodeId: nodeId === "all" ? undefined : nodeId,
+      proto: proto === "all" ? undefined : proto,
+      reach: reach === "all" ? undefined : reach,
+    }),
+    [q, nodeId, proto, reach],
+  );
+  const rows = useMemo(() => sortMappings(filterMappings(all, filter)), [all, filter]);
+  const pageData = useMemo(() => pageOf(rows, page, PAGE_SIZE), [rows, page]);
   const list = pageData.items;
-  const activeFilterCount = [nodeId, proto, mode, reach].filter((value) => value !== "all").length;
-  const empty =
-    !mappings.isLoading &&
-    pageData.total === 0 &&
-    !q &&
-    nodeId === "all" &&
-    proto === "all" &&
-    mode === "all" &&
-    reach === "all";
+  const activeFilterCount = [proto, reach].filter((value) => value !== "all").length;
+  const empty = !mappings.isLoading && all.length === 0 && !q && activeFilterCount === 0 && !search.node;
+
+  useEffect(() => {
+    if (search.node) setWantAll(false);
+  }, [search.node]);
+
   useEffect(() => {
     setPage(1);
-  }, [q, nodeId, proto, mode, reach]);
+  }, [q, nodeId, proto, reach]);
+
   useEffect(() => {
-    if (!mappings.data) return;
-    const pages = Math.max(1, Math.ceil(mappings.data.total / mappings.data.size) || 1);
+    const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE) || 1);
     if (page > pages) setPage(pages);
-  }, [mappings.data, page]);
+  }, [rows.length, page]);
+
+  useEffect(() => {
+    if (search.node || wantAll || !nodeFacets.length) return;
+    const id = preferredNodeId(nodeFacets);
+    if (id !== "all") {
+      void navigate({ search: { node: id }, replace: true });
+    }
+  }, [search.node, wantAll, nodeFacets, navigate]);
+
+  function setNodeFilter(next: string) {
+    setWantAll(next === "all");
+    void navigate({
+      search: next === "all" ? {} : { node: next },
+      replace: true,
+    });
+  }
 
   const remove = useMutation({
     mutationFn: (m: Mapping) => deleteMapping({ data: { id: m.id } }),
@@ -121,10 +154,14 @@ export function MappingsPage() {
   return (
     <AppShell
       title="映射"
-      description="保存后立刻下发。不用登录节点改任何文件。"
       action={
         hasNode && !empty ? (
-          <Button type="button" onClick={() => setEditor({ mode: "create" })}>
+          <Button
+            type="button"
+            onClick={() =>
+              setEditor({ mode: "create", nodeId: nodeId === "all" ? undefined : nodeId })
+            }
+          >
             新建映射
           </Button>
         ) : null
@@ -138,7 +175,7 @@ export function MappingsPage() {
         <div className="mx-auto flex max-w-md flex-col items-start gap-4 py-8">
           <h2 className="font-serif text-3xl italic tracking-tight text-ink">还没有映射</h2>
           <p className="text-sm leading-relaxed text-ink-soft">
-            暗端口默认丢包；公开口才会一直听。访客模式不占用入口端口。
+            公开访问、敲门访问，或加密隧道访问。
           </p>
           <Button type="button" onClick={() => setEditor({ mode: "create" })}>
             新建映射
@@ -146,100 +183,34 @@ export function MappingsPage() {
         </div>
       ) : (
         <>
-          <div className="mb-4 flex flex-col gap-3 md:flex-row md:flex-wrap md:items-end">
-            <div className="flex min-w-0 gap-2 md:w-72">
+          <div className="mb-4 flex flex-col gap-3">
+            <NodeSwitcher value={nodeId} onChange={setNodeFilter} options={nodeFacets} />
+            <div className="flex flex-wrap items-center gap-3">
               <Input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="搜索名称、节点、目标"
+                placeholder="搜索名称、目标"
                 aria-label="搜索映射"
-                className="min-w-0 flex-1"
+                className="max-w-sm"
               />
-              <Button
-                type="button"
-                variant="outline"
-                className="shrink-0 md:hidden"
-                aria-expanded={filtersOpen}
-                aria-controls="mapping-filters"
-                onClick={() => setFiltersOpen((value) => !value)}
-              >
-                {filtersOpen ? "收起" : `筛选${activeFilterCount ? ` ${activeFilterCount}` : ""}`}
-              </Button>
+              <FilterChips label="协议" value={proto} onChange={setProto} options={facets.protos} />
+              <FilterChips label="状态" value={reach} onChange={setReach} options={facets.reaches} />
+              {activeFilterCount ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setProto("all");
+                    setReach("all");
+                  }}
+                >
+                  清除
+                </Button>
+              ) : null}
             </div>
-            <div
-              id="mapping-filters"
-              className={cn(
-                "grid grid-cols-2 gap-3 md:contents",
-                filtersOpen ? "grid" : "hidden md:contents",
-              )}
-            >
-              <SelectField
-                label="节点"
-                className="md:w-44"
-                value={nodeId}
-                onValueChange={setNodeId}
-                options={[
-                  { value: "all", label: "全部节点" },
-                  ...(nodes.data ?? []).map((a) => ({ value: a.id, label: a.name })),
-                ]}
-              />
-              <SelectField
-                label="协议"
-                className="md:w-32"
-                value={proto}
-                onValueChange={setProto}
-                options={[
-                  { value: "all", label: "全部协议" },
-                  { value: "tcp", label: "TCP" },
-                  { value: "udp", label: "UDP" },
-                ]}
-              />
-              <SelectField
-                label="模式"
-                className="md:w-36"
-                value={mode}
-                onValueChange={setMode}
-                options={[
-                  { value: "all", label: "全部模式" },
-                  { value: "public", label: "公开" },
-                  { value: "spa", label: "暗端口" },
-                  { value: "visitor", label: "访客" },
-                ]}
-              />
-              <SelectField
-                label="现在"
-                className="md:w-44"
-                value={reach}
-                onValueChange={setReach}
-                options={[
-                  { value: "all", label: "全部状态" },
-                  { value: "open", label: "外网可连" },
-                  { value: "closed", label: "未敲门" },
-                  { value: "full", label: "连接已满" },
-                  { value: "offline", label: "节点离线" },
-                  { value: "pending", label: "等待确认" },
-                  { value: "error", label: "无法开流" },
-                  { value: "disabled", label: "已停用" },
-                ]}
-              />
-            </div>
-            {activeFilterCount ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  setNodeId("all");
-                  setProto("all");
-                  setMode("all");
-                  setReach("all");
-                }}
-              >
-                清除筛选
-              </Button>
-            ) : null}
           </div>
-          {pageData.total === 0 ? (
+          {rows.length === 0 ? (
             <p className="rounded-xl bg-card px-4 py-8 text-center text-sm text-stone shadow-border">
               没有匹配的映射。
             </p>
@@ -250,38 +221,42 @@ export function MappingsPage() {
                   <MappingCard
                     key={m.id}
                     mapping={m}
+                    showNode={showNode}
                     onEdit={() => setEditor({ mode: "edit", mapping: m })}
                     onDelete={() => setPendingDelete(m)}
                     onIssued={setIssuedVisit}
                   />
                 ))}
               </div>
-              <div className="hidden overflow-x-auto rounded-xl bg-card shadow-border md:block">
-                <table className="w-full min-w-[880px] text-left text-sm">
-                  <thead>
-                    <tr className="border-b border-line text-xs text-stone">
-                      <th className="px-4 py-3 font-medium">名称</th>
-                      <th className="px-4 py-3 font-medium">节点</th>
-                      <th className="px-4 py-3 font-medium">现在</th>
-                      <th className="px-4 py-3 font-medium">入口</th>
-                      <th className="px-4 py-3 font-medium">目标</th>
-                      <th className="px-4 py-3 font-medium">配额</th>
-                      <th className="px-4 py-3 font-medium">流量</th>
-                      <th className="px-4 py-3 font-medium" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {list.map((m) => (
-                      <MappingRow
-                        key={m.id}
-                        mapping={m}
-                        onEdit={() => setEditor({ mode: "edit", mapping: m })}
-                        onDelete={() => setPendingDelete(m)}
-                        onIssued={setIssuedVisit}
-                      />
-                    ))}
-                  </tbody>
-                </table>
+              <div className="hidden overflow-hidden rounded-xl bg-card shadow-border md:block">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[800px] text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-line text-xs text-stone">
+                        <th className="px-4 py-3 font-medium">名称</th>
+                        {showNode ? <th className="px-4 py-3 font-medium">节点</th> : null}
+                        <th className="px-4 py-3 font-medium">现在</th>
+                        <th className="px-4 py-3 font-medium">入口</th>
+                        <th className="px-4 py-3 font-medium">目标</th>
+                        <th className="px-4 py-3 font-medium">配额</th>
+                        <th className="px-4 py-3 font-medium">流量</th>
+                        <th className="px-4 py-3 font-medium" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {list.map((m) => (
+                        <MappingRow
+                          key={m.id}
+                          mapping={m}
+                          showNode={showNode}
+                          onEdit={() => setEditor({ mode: "edit", mapping: m })}
+                          onDelete={() => setPendingDelete(m)}
+                          onIssued={setIssuedVisit}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
               <Pager
                 page={pageData.page}
@@ -298,8 +273,9 @@ export function MappingsPage() {
         <SheetContent side="right">
           {editor ? (
             <MappingForm
-              key={editor.mode === "edit" ? editor.mapping.id : "new"}
+              key={editor.mode === "edit" ? editor.mapping.id : `new-${editor.nodeId ?? "any"}`}
               mapping={editor.mode === "edit" ? editor.mapping : null}
+              defaultNodeId={editor.mode === "create" ? editor.nodeId : undefined}
               onDone={() => {
                 setEditor(null);
                 void qc.invalidateQueries({ queryKey: ["umbra"] });
@@ -331,14 +307,15 @@ function trafficLine(m: Mapping) {
   return rate > 0 ? `${base} · ${formatBps(rate)}` : base;
 }
 
-function stealthNote(m: Mapping) {
-  const bits: string[] = [];
-  bits.push(policyLine(m.maxConns, m.idleTimeoutSec, m.proto));
+function quotaBits(m: Mapping) {
+  const bits = policyBits(m.maxConns, m.idleTimeoutSec, m.proto, {
+    spaTtlSec: m.spaTtlSec,
+    udpIdleTimeoutSec: m.udpIdleTimeoutSec,
+    mode: m.mode,
+    rateKbps: m.rateKbps,
+  });
   if (m.allowCidrs) bits.push(m.allowCidrs);
-  if (m.rateKbps) bits.push(`${m.rateKbps} KB/s`);
-  const drops = dropLine(m);
-  if (drops) bits.push(drops);
-  return bits.join(" · ");
+  return bits;
 }
 
 function dropLine(m: Mapping) {
@@ -364,22 +341,53 @@ function reachTone(reach: string | undefined) {
   return "pending";
 }
 
-function ProbeNote({ mapping: m }: { mapping: Mapping }) {
+function grantedNow(m: Mapping) {
+  return Boolean(m.grantUntil && new Date(m.grantUntil).getTime() > Date.now());
+}
+
+function inFlight(m: Mapping) {
+  return m.proto === "udp" ? (m.udpActive ?? m.activeConns) : m.activeConns;
+}
+
+function QuotaNote({ mapping: m }: { mapping: Mapping }) {
+  const drops = dropLine(m);
   return (
-    <p className="mt-1 text-xs text-ink-soft">
-      {stealthNote(m)}
-      {m.lastProbeAt ? ` · 上次探测 ${formatRelative(m.lastProbeAt)}` : ""}
-    </p>
+    <div className="text-xs text-ink-soft">
+      <p>{quotaBits(m).join(" · ")}</p>
+      <p className="font-mono tabular-nums">在途 {inFlight(m)}</p>
+      {drops ? <p className="text-rose">{drops}</p> : null}
+    </div>
+  );
+}
+
+function LiveNote({ mapping: m }: { mapping: Mapping }) {
+  const granted = grantedNow(m);
+  const push = m.pushState;
+  const showPush = push && push !== "acked";
+  return (
+    <div className="flex flex-col gap-1">
+      <StatusDot
+        status={reachTone(m.reach)}
+        label={reachLabel[m.reach ?? ""] ?? m.reach ?? "—"}
+      />
+      {granted && m.grantIP ? (
+        <span className="font-mono text-xs text-ink-soft">已放行 {m.grantIP}</span>
+      ) : null}
+      {showPush ? <span className="text-xs text-stone">{pushLabel[push] ?? push}</span> : null}
+      {m.listenError ? <span className="text-xs text-rose">{m.listenError}</span> : null}
+    </div>
   );
 }
 
 function MappingCard({
   mapping: m,
+  showNode,
   onEdit,
   onDelete,
   onIssued,
 }: {
   mapping: Mapping;
+  showNode?: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onIssued: (v: VisitorIssued) => void;
@@ -390,7 +398,8 @@ function MappingCard({
         <div className="min-w-0">
           <p className="truncate font-medium">{m.name}</p>
           <p className="mt-0.5 text-xs text-stone">
-            {m.nodeName} · {m.proto.toUpperCase()} · {modeLabel[m.mode]}
+            {showNode ? `${m.nodeName} · ` : ""}
+            {m.proto.toUpperCase()} · <ModeName mode={m.mode} />
           </p>
         </div>
         <StatusDot
@@ -401,12 +410,14 @@ function MappingCard({
       <p className="mt-3 font-mono text-xs text-ink-soft">
         {formatPort(m.entryPort, m.mode)} → {m.localHost}:{m.localPort}
       </p>
-      <p className="mt-1 text-xs text-stone">
-        {pushLabel[m.pushState] ?? m.pushState} · {trafficLine(m)}
-        {m.proto === "udp" ? ` · UDP 活跃会话 ${m.udpActive ?? m.activeConns}` : ""}
-      </p>
+      <p className="mt-1 text-xs text-stone">{trafficLine(m)}</p>
       {m.listenError ? <p className="mt-1 text-xs text-rose">{m.listenError}</p> : null}
-      <ProbeNote mapping={m} />
+      <div className="mt-2">
+        <QuotaNote mapping={m} />
+        {grantedNow(m) && m.grantIP ? (
+          <p className="mt-1 font-mono text-xs text-ink-soft">已放行 {m.grantIP}</p>
+        ) : null}
+      </div>
       <div className="mt-3 flex justify-end">
         <MappingMenu mapping={m} onEdit={onEdit} onDelete={onDelete} onIssued={onIssued} />
       </div>
@@ -416,48 +427,44 @@ function MappingCard({
 
 function MappingRow({
   mapping: m,
+  showNode,
   onEdit,
   onDelete,
   onIssued,
 }: {
   mapping: Mapping;
+  showNode?: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onIssued: (v: VisitorIssued) => void;
 }) {
   return (
     <tr className="border-b border-line/70 last:border-0 hover:bg-paper-2/50">
-      <td className="px-4 py-3">
+      <td className="px-4 py-3 align-middle">
         <div className="font-medium">{m.name}</div>
         <p className="text-xs text-stone">
-          {m.proto.toUpperCase()} · {modeLabel[m.mode]}
+          {m.proto.toUpperCase()} · <ModeName mode={m.mode} />
         </p>
-        <ProbeNote mapping={m} />
       </td>
-      <td className="px-4 py-3 text-ink-soft">{m.nodeName}</td>
-      <td className="px-4 py-3">
-        <div className="flex flex-col gap-1">
-          <StatusDot
-            status={reachTone(m.reach)}
-            label={reachLabel[m.reach ?? ""] ?? m.reach ?? "—"}
-          />
-          <span className="text-xs text-stone">{pushLabel[m.pushState] ?? m.pushState}</span>
-          {m.listenError ? <span className="text-xs text-rose">{m.listenError}</span> : null}
-        </div>
+      {showNode ? (
+        <td className="px-4 py-3 align-middle">
+          <span className={m.nodeStatus === "online" ? "text-live" : m.nodeStatus === "revoked" ? "text-rose" : "text-stone"}>
+            {m.nodeName}
+          </span>
+        </td>
+      ) : null}
+      <td className="px-4 py-3 align-middle">
+        <LiveNote mapping={m} />
       </td>
-      <td className="px-4 py-3 font-mono tabular-nums">{formatPort(m.entryPort, m.mode)}</td>
-      <td className="px-4 py-3 font-mono text-xs text-ink-soft">
+      <td className="px-4 py-3 align-middle font-mono tabular-nums">{formatPort(m.entryPort, m.mode)}</td>
+      <td className="px-4 py-3 align-middle font-mono text-xs text-ink-soft">
         {m.localHost}:{m.localPort}
       </td>
-      <td className="px-4 py-3 text-xs text-ink-soft">
-        {policyLine(m.maxConns, m.idleTimeoutSec, m.proto)}
-        <div className="font-mono tabular-nums">
-          在途 {m.proto === "udp" ? (m.udpActive ?? m.activeConns) : m.activeConns}
-        </div>
-        {dropLine(m) ? <div className="text-rose">{dropLine(m)}</div> : null}
+      <td className="px-4 py-3 align-middle">
+        <QuotaNote mapping={m} />
       </td>
-      <td className="px-4 py-3 font-mono text-xs tabular-nums text-ink-soft">{trafficLine(m)}</td>
-      <td className="px-4 py-3 text-right">
+      <td className="px-4 py-3 align-middle font-mono text-xs tabular-nums text-ink-soft">{trafficLine(m)}</td>
+      <td className="px-4 py-3 align-middle text-right">
         <MappingMenu mapping={m} onEdit={onEdit} onDelete={onDelete} onIssued={onIssued} />
       </td>
     </tr>
@@ -489,8 +496,8 @@ function MappingMenu({
   const knock = useMutation({
     mutationFn: () => knockMapping({ data: { id: m.id } }),
     onMutate: () => toast.loading("正在敲门…", { id: `knock-${m.id}` }),
-    onSuccess: () => {
-      toast.success("已放行 60 秒", { id: `knock-${m.id}` });
+    onSuccess: (r) => {
+      toast.success(`已放行 ${r.ip}，${r.ttlSec} 秒内可建新连接`, { id: `knock-${m.id}` });
       void qc.invalidateQueries({ queryKey: ["umbra"] });
     },
     onError: (e: Error) => toast.error(e.message, { id: `knock-${m.id}` }),
@@ -507,7 +514,7 @@ function MappingMenu({
     mutationFn: () => issueVisitor({ data: { id: m.id } }),
     onSuccess: (r) => {
       void navigator.clipboard.writeText(r.visitCmd).catch(() => undefined);
-      toast.success("访客命令已复制，只显示这一次。");
+      toast.success("访问命令已复制，只显示这一次。");
       onIssued(r);
       void qc.invalidateQueries({ queryKey: ["umbra"] });
     },
@@ -538,7 +545,7 @@ function MappingMenu({
           onSelect: () => probe.mutate(),
         },
         {
-          label: issue.isPending ? "签发中…" : "签发访客",
+          label: issue.isPending ? "签发中…" : "签发",
           hidden: !(live && m.mode === "visitor"),
           disabled: issue.isPending,
           onSelect: () => issue.mutate(),
@@ -560,10 +567,18 @@ function MappingMenu({
   );
 }
 
-function MappingForm({ mapping, onDone }: { mapping: Mapping | null; onDone: () => void }) {
+function MappingForm({
+  mapping,
+  defaultNodeId,
+  onDone,
+}: {
+  mapping: Mapping | null;
+  defaultNodeId?: string;
+  onDone: () => void;
+}) {
   const nodes = useQuery({ queryKey: ["umbra", "nodes"], queryFn: () => listNodes() });
   const usable = (nodes.data ?? []).filter((a) => a.status !== "revoked");
-  const [nodeId, setNodeId] = useState(mapping?.nodeId ?? "");
+  const [nodeId, setNodeId] = useState(mapping?.nodeId ?? defaultNodeId ?? "");
   const [name, setName] = useState(mapping?.name ?? "");
   const [proto, setProto] = useState<Proto>(mapping?.proto ?? "tcp");
   const [mode, setMode] = useState<MappingMode>(mapping?.mode ?? "spa");
@@ -572,6 +587,8 @@ function MappingForm({ mapping, onDone }: { mapping: Mapping | null; onDone: () 
   const [localPort, setLocalPort] = useState(String(mapping?.localPort ?? ECHO_PORT));
   const [maxConns, setMaxConns] = useState(String(mapping?.maxConns ?? 1024));
   const [idleTimeout, setIdleTimeout] = useState(String(mapping?.idleTimeoutSec ?? 0));
+  const [spaTtl, setSpaTtl] = useState(String(mapping?.spaTtlSec || 60));
+  const [udpIdle, setUdpIdle] = useState(String(mapping?.udpIdleTimeoutSec || 60));
   const [rateKbps, setRateKbps] = useState(String(mapping?.rateKbps ?? 0));
   const [allowCidrs, setAllowCidrs] = useState(mapping?.allowCidrs ?? "");
   const selected = nodeId || usable[0]?.id || "";
@@ -587,6 +604,8 @@ function MappingForm({ mapping, onDone }: { mapping: Mapping | null; onDone: () 
     localPort: Number(localPort),
     maxConns: Number(maxConns) || 1024,
     idleTimeoutSec: Number(idleTimeout) || 0,
+    spaTtlSec: Number(spaTtl) || 60,
+    udpIdleTimeoutSec: Number(udpIdle) || 60,
     rateKbps: Number(rateKbps) || 0,
     allowCidrs,
   };
@@ -603,7 +622,7 @@ function MappingForm({ mapping, onDone }: { mapping: Mapping | null; onDone: () 
         toast.success(
           m.pushState === "acked"
             ? m.mode === "visitor"
-              ? "已下发，无公网入口"
+              ? "已下发，入口不开放端口"
               : "已下发并监听"
             : "已保存，等待节点上线后下发",
         );
@@ -618,9 +637,7 @@ function MappingForm({ mapping, onDone }: { mapping: Mapping | null; onDone: () 
       <SheetHeader>
         <SheetTitle>{editing ? "编辑映射" : "新建映射"}</SheetTitle>
         <SheetDescription>
-          {editing
-            ? "改端口或目标会热下发，其它映射的在途连接不受影响。"
-            : "保存后立刻下发。暗端口默认丢包；公开口才会一直听。"}
+          {editing ? "改端口或目标会立刻下发，其它映射不受影响。" : "保存后立刻下发到节点。"}
         </SheetDescription>
       </SheetHeader>
       <form
@@ -649,7 +666,7 @@ function MappingForm({ mapping, onDone }: { mapping: Mapping | null; onDone: () 
               onValueChange={setNodeId}
               options={usable.map((a) => ({
                 value: a.id,
-                label: `${a.name}（${a.status === "online" ? "在线" : "离线"}）`,
+                label: `${a.name} · ${a.status === "online" ? "在线" : "离线"}`,
               }))}
             />
           </div>
@@ -667,6 +684,7 @@ function MappingForm({ mapping, onDone }: { mapping: Mapping | null; onDone: () 
             ]}
           />
           <SelectField
+            className="sm:col-span-2"
             label="模式"
             value={mode}
             onValueChange={(v) => {
@@ -676,9 +694,9 @@ function MappingForm({ mapping, onDone }: { mapping: Mapping | null; onDone: () 
               if (next === "spa" && entryPort === "25565") setEntryPort("40222");
             }}
             options={[
-              { value: "spa", label: "暗端口（SPA）" },
-              { value: "visitor", label: "访客（无公网端口）" },
-              { value: "public", label: "公开" },
+              { value: "spa", label: modeLabel.spa, hint: modeHint.spa },
+              { value: "visitor", label: modeLabel.visitor, hint: modeHint.visitor },
+              { value: "public", label: modeLabel.public, hint: modeHint.public },
             ]}
           />
           {mode !== "visitor" ? (
@@ -689,9 +707,7 @@ function MappingForm({ mapping, onDone }: { mapping: Mapping | null; onDone: () 
               onChange={(e) => setEntryPort(e.target.value)}
               required
             />
-          ) : (
-            <p className="self-end text-xs text-stone">访客模式不占用入口端口。</p>
-          )}
+          ) : null}
           <TextField
             label="目标地址"
             value={localHost}
@@ -711,13 +727,32 @@ function MappingForm({ mapping, onDone }: { mapping: Mapping | null; onDone: () 
             value={maxConns}
             onChange={(e) => setMaxConns(e.target.value)}
           />
-          <TextField
-            label="空闲超时（秒）"
-            inputMode="numeric"
-            value={idleTimeout}
-            onChange={(e) => setIdleTimeout(e.target.value)}
-            placeholder="0 表示 TCP 不断开"
-          />
+          {mode === "spa" ? (
+            <TextField
+              label="敲门窗口"
+              inputMode="numeric"
+              value={spaTtl}
+              onChange={(e) => setSpaTtl(e.target.value)}
+              placeholder="秒，只限制新建"
+            />
+          ) : null}
+          {proto === "tcp" ? (
+            <TextField
+              label="TCP 空闲"
+              inputMode="numeric"
+              value={idleTimeout}
+              onChange={(e) => setIdleTimeout(e.target.value)}
+              placeholder="秒，0 不断开"
+            />
+          ) : (
+            <TextField
+              label="UDP 空闲"
+              inputMode="numeric"
+              value={udpIdle}
+              onChange={(e) => setUdpIdle(e.target.value)}
+              placeholder="秒，无报文后回收"
+            />
+          )}
           <TextField
             label="限速 KB/s"
             inputMode="numeric"
@@ -733,9 +768,6 @@ function MappingForm({ mapping, onDone }: { mapping: Mapping | null; onDone: () 
               placeholder="空则不限制，如 10.0.0.0/8"
             />
           </div>
-          <p className="sm:col-span-2 text-xs text-stone">
-            默认最多 1024 路、TCP 空闲不关。SSH / 数据库请保持 0；UDP 无值时仍按约 60 秒回收会话。
-          </p>
         </SheetBody>
         <SheetFooter className="flex items-center justify-between gap-3">
           <p className="text-xs text-stone" aria-live="polite">
@@ -784,10 +816,9 @@ function VisitorIssuedDialog({
     <Dialog open={issued !== null} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>访客命令只显示这一次</DialogTitle>
+          <DialogTitle>访问命令只显示这一次</DialogTitle>
           <DialogDescription>
-            在访问侧运行 umbra-visit 后，本机才会打开 L4
-            端口；入口不暴露业务端口。若尚未安装，请先前往部署页选择访问端平台。
+            在访问端运行后，本机才会打开端口。尚未安装可先去部署页。
           </DialogDescription>
         </DialogHeader>
         {issued ? (
@@ -806,7 +837,7 @@ function VisitorIssuedDialog({
               </Button>
               <Button type="button" variant="outline" asChild>
                 <Link to="/deploy" onClick={onClose}>
-                  安装访客端
+                  安装访问端
                 </Link>
               </Button>
               <Button

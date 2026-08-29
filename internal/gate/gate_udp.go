@@ -298,7 +298,7 @@ func (s *Server) forwardVisitUDP(nodeID, visID string, pkt uplane.Packet) {
 		return
 	}
 	key := udpFlowIndex(pkt.FlowID)
-	idle := time.Duration(policy.IntOr(e.spec.IdleTimeoutSec, 60)) * time.Second
+	idle := policy.UDPIdle(e.spec.UdpIdleTimeoutSec, e.spec.IdleTimeoutSec)
 	e.mu.Lock()
 	sess := e.udpSess[key]
 	if sess == nil {

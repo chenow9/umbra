@@ -138,7 +138,7 @@ export function getTraffic({ data }: { data?: { range?: string; mappingId?: stri
 export function createNode({
   data,
 }: {
-  data: { name: string; comment?: string; os: string; arch: string };
+  data: { name: string; comment?: string; os: string; arch: string; neverExpire?: boolean };
 }) {
   return api<{
     id: string;
@@ -146,6 +146,7 @@ export function createNode({
     os: string;
     arch: string;
     expiresAt?: string;
+    neverExpire?: boolean;
     installCmd?: string;
     listen?: string;
     caURL?: string;
@@ -159,15 +160,17 @@ export function getNodeBootstrap({ data }: { data: { id: string } }) {
   return api<{ token: string }>(`/v1/nodes/${encodeURIComponent(data.id)}/bootstrap`);
 }
 
-export function rotateNodeToken({ data }: { data: { id: string } }) {
+export function rotateNodeToken({ data }: { data: { id: string; neverExpire?: boolean } }) {
   return api<{
     token: string;
     graceSec: number;
     expiresAt?: string;
+    neverExpire?: boolean;
     installCmd?: string;
     listen?: string;
   }>(`/v1/nodes/${encodeURIComponent(data.id)}/rotate`, {
     method: "POST",
+    body: data.neverExpire === undefined ? undefined : JSON.stringify({ neverExpire: data.neverExpire }),
   });
 }
 
@@ -190,7 +193,14 @@ export function revokeNode({ data }: { data: { id: string } }) {
 export function updateNode({
   data,
 }: {
-  data: { id: string; name?: string; comment?: string; os?: string; arch?: string };
+  data: {
+    id: string;
+    name?: string;
+    comment?: string;
+    os?: string;
+    arch?: string;
+    neverExpire?: boolean;
+  };
 }) {
   const { id, ...body } = data;
   return api<Node>(`/v1/nodes/${encodeURIComponent(id)}`, {
@@ -229,8 +239,14 @@ export function deleteMapping({ data }: { data: { id: string } }) {
   return api<{ ok: true }>(`/v1/mappings/${encodeURIComponent(data.id)}/delete`, { method: "POST" });
 }
 
-export function knockMapping({ data }: { data: { id: string } }) {
-  return api<{ until: string }>(`/v1/mappings/${encodeURIComponent(data.id)}/knock`, { method: "POST" });
+export function knockMapping({ data }: { data: { id: string; ip?: string } }) {
+  return api<{ until: string; ip: string; ttlSec: number }>(
+    `/v1/mappings/${encodeURIComponent(data.id)}/knock`,
+    {
+      method: "POST",
+      body: JSON.stringify(data.ip ? { ip: data.ip } : {}),
+    },
+  );
 }
 
 export function probeMapping({ data }: { data: { id: string } }) {

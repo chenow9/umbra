@@ -115,13 +115,13 @@ export function revokeChannel(nodeId: string) {
   return frames;
 }
 
-export function knockChannel(mappingId: string) {
-  const until = knockGrant(mappingId, 60_000);
+export function knockChannel(mappingId: string, ip = "127.0.0.1", ttlSec = 60) {
+  const until = knockGrant(mappingId, ip, ttlSec * 1000);
   return {
     until,
     frames: [
-      frame("c2s", "Knock", { mapping_id: mappingId }),
-      frame("s2c", "KnockOk", { mapping_id: mappingId, ttl_sec: 60 }),
+      frame("c2s", "Knock", { mapping_id: mappingId, ip }),
+      frame("s2c", "KnockOk", { mapping_id: mappingId, ttl_sec: ttlSec, ip }),
     ],
   };
 }
@@ -149,7 +149,7 @@ export async function openStreamProbe(nodeId: string, mapping: MappingWire, payl
   const proto = mapping.proto;
 
   if (mapping.mode === "visitor") {
-    throw Object.assign(new Error("访客模式没有公网入口。签发访客后探访。"), {
+    throw Object.assign(new Error("访问端没有入口端口。签发后再探访。"), {
       frames: [frame("s2c", "Dropped", { mapping_id: mapping.id, reason: "visitor" })],
     });
   }
@@ -160,7 +160,7 @@ export async function openStreamProbe(nodeId: string, mapping: MappingWire, payl
     });
   }
 
-  if (mapping.mode === "spa" && !isGranted(mapping.id)) {
+  if (mapping.mode === "spa" && !isGranted(mapping.id, "127.0.0.1")) {
     if (mapping.entry_port != null) {
       await probeEntry(mapping.entry_port, buf, proto).catch(() => undefined);
     }
@@ -189,7 +189,7 @@ export async function visitStream(nodeId: string, mapping: MappingWire, payload:
   const s = getSession(nodeId);
   if (!s.have.has(mapping.id) && mapping.enabled) s.have.set(mapping.id, mapping);
   if (!mapping.enabled) throw new Error("映射已停用");
-  if (mapping.mode !== "visitor") throw new Error("只有访客模式需要探访");
+  if (mapping.mode !== "visitor") throw new Error("只有访问端映射需要探访");
   const buf = Buffer.from(payload);
   const visit = frame("c2s", "Visit", { mapping_id: mapping.id });
   const dial = mapping.proto === "udp" ? dialUdp : dialTarget;

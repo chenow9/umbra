@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"umbra/internal/policy"
 	"umbra/internal/uplane"
 )
 
@@ -155,10 +156,7 @@ func (rt *session) runUDP(cookieHex, mode string) {
 				mu.Unlock()
 				continue
 			}
-			idle := time.Duration(m.IdleTimeoutSec) * time.Second
-			if idle <= 0 {
-				idle = 60 * time.Second
-			}
+			idle := policy.UDPIdle(m.UdpIdleTimeoutSec, m.IdleTimeoutSec)
 			loc = &udpLocal{c: c, idle: idle}
 			loc.last.Store(time.Now().UnixNano())
 			locals[lkey] = loc

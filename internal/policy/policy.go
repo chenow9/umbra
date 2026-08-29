@@ -80,6 +80,33 @@ func IntOr(v, d int) int {
 	return v
 }
 
+const (
+	DefaultSPATimeoutSec = 60
+	DefaultUDPIdleSec    = 60
+	MaxTimeoutSec        = 86400
+)
+
+func ClampTimeoutSec(v, def int) int {
+	if v <= 0 {
+		return def
+	}
+	if v > MaxTimeoutSec {
+		return MaxTimeoutSec
+	}
+	return v
+}
+
+func SPATimeout(sec int) time.Duration {
+	return time.Duration(ClampTimeoutSec(sec, DefaultSPATimeoutSec)) * time.Second
+}
+
+func UDPIdle(udpSec, idleSec int) time.Duration {
+	if udpSec > 0 {
+		return time.Duration(ClampTimeoutSec(udpSec, DefaultUDPIdleSec)) * time.Second
+	}
+	return time.Duration(IntOr(idleSec, DefaultUDPIdleSec)) * time.Second
+}
+
 const DefaultMaxConns = 1024
 
 func MaxConns(v int) int {

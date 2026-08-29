@@ -6,20 +6,18 @@ import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { ThemeMenu } from "@/components/theme-picker";
-import { useTheme } from "@/components/app-providers";
 import { cn } from "@/lib/utils";
 import { getOwnerStatus, getOverview, logoutOwnerSession } from "@/lib/umbra/api";
 import { formatBps } from "@/lib/umbra/format";
 import { useLiveStatus } from "@/lib/umbra/live";
 
 const nav = [
-  { to: "/", label: "总览", hint: "现在", icon: LayoutGrid },
-  { to: "/nodes", label: "节点", hint: "凭证与在线", icon: Radio },
-  { to: "/mappings", label: "映射", hint: "服务端下发", icon: GitBranch },
-  { to: "/traffic", label: "流量", hint: "入口计数", icon: Activity },
-  { to: "/audit", label: "审计", hint: "操作记录", icon: ScrollText },
-  { to: "/deploy", label: "部署", hint: "安装命令", icon: Server },
+  { to: "/", label: "总览", icon: LayoutGrid },
+  { to: "/nodes", label: "节点", icon: Radio },
+  { to: "/mappings", label: "映射", icon: GitBranch },
+  { to: "/traffic", label: "流量", icon: Activity },
+  { to: "/audit", label: "审计", icon: ScrollText },
+  { to: "/deploy", label: "部署", icon: Server },
 ] as const;
 
 export function AppShell({
@@ -34,7 +32,6 @@ export function AppShell({
   children: ReactNode;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState(false);
   const owner = useQuery({ queryKey: ["umbra", "owner"], queryFn: () => getOwnerStatus() });
 
@@ -48,9 +45,6 @@ export function AppShell({
         <Brand />
         <LiveSummary />
         <Nav pathname={pathname} className="mt-5" />
-        <p className="mt-auto px-2 text-xs leading-relaxed text-stone">
-          配置只在这里改。节点不上配置文件。
-        </p>
       </aside>
 
       <div className="md:pl-60">
@@ -72,7 +66,6 @@ export function AppShell({
               ) : null}
             </div>
             <LiveBadge />
-            <ThemeMenu value={theme} onChange={setTheme} />
             {owner.data?.required ? <SignOut /> : null}
             {action}
           </div>
@@ -164,10 +157,7 @@ function Nav({
             )}
           >
             <Icon className="size-4 opacity-70" />
-            <span className="flex-1">{item.label}</span>
-            <span className={cn("hidden text-xs text-stone lg:inline", active && "text-ink-soft")}>
-              {item.hint}
-            </span>
+            <span>{item.label}</span>
           </Link>
         );
       })}

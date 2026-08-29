@@ -18,7 +18,7 @@ func TestNewFallsBackWhenNetfilterDenied(t *testing.T) {
 		t.Fatalf("mode %s", e.Mode())
 	}
 	e.SetSPA(Port{Proto: "tcp", Port: 9}, true)
-	e.Knock(Port{Proto: "tcp", Port: 9}, 50*time.Millisecond)
+	e.Knock(Port{Proto: "tcp", Port: 9}, "127.0.0.1", 50*time.Millisecond)
 	e.Clear()
 }
 

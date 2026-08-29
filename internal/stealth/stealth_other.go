@@ -18,7 +18,7 @@ func (e *Engine) Mode() string {
 	}
 	return e.mode
 }
-func (e *Engine) Kernel() bool                       { return false }
-func (e *Engine) SetSPA(p Port, drop bool)           {}
-func (e *Engine) Knock(p Port, ttl time.Duration)    {}
-func (e *Engine) Clear()                             {}
+func (e *Engine) Kernel() bool                               { return false }
+func (e *Engine) SetSPA(p Port, drop bool)                   {}
+func (e *Engine) Knock(p Port, ip string, ttl time.Duration) {}
+func (e *Engine) Clear()                                     {}

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"umbra/internal/gate"
+	"umbra/internal/policy"
 )
 
 func rfc3339(t time.Time) string {
@@ -122,6 +123,7 @@ func (c *Console) nodeView(a *nodeRec, live map[string]gateNode, stats map[strin
 		"lastSeen": last, "enabled": a.Enabled && a.Status != "revoked",
 		"createdAt":      rfc3339(a.Created),
 		"tokenExpiresAt": rfc3339(a.TokenUntil),
+		"tokenNoExpiry":  a.TokenNoExpiry,
 		"mappingCount":   n, "bytesIn": in, "bytesOut": outB,
 		"bpsIn": int64(bpsIn), "bpsOut": int64(bpsOut),
 	}
@@ -140,11 +142,23 @@ func (c *Console) mappingView(m *mapRec, live map[string]gateNode, stats map[str
 	lastDrop, lastDropAt := "", ""
 	listen, push, listenErr := m.ListenState, m.PushState, m.ListenError
 	udpVia := ""
-	granted := false
-	grantUntil := ""
-	if until := c.Gate.GrantUntil(m.Spec.ID); !until.IsZero() {
-		granted = true
-		grantUntil = rfc3339(until)
+	grants := c.Gate.MappingGrants(m.Spec.ID)
+	granted := len(grants) > 0
+	grantUntil, grantIP := "", ""
+	grantRows := make([]map[string]any, 0, len(grants))
+	var latest time.Time
+	for _, g := range grants {
+		until := rfc3339(g.Until)
+		grantRows = append(grantRows, map[string]any{"ip": g.IP, "until": until})
+		if g.Until.After(latest) {
+			latest = g.Until
+			grantUntil = until
+			if g.IP != "*" {
+				grantIP = g.IP
+			} else {
+				grantIP = ""
+			}
+		}
 	}
 	if !m.Spec.Enabled {
 		listen, push, listenErr = "disabled", "acked", ""
@@ -201,9 +215,12 @@ func (c *Console) mappingView(m *mapRec, live map[string]gateNode, stats map[str
 		"tcpDropOffline": tcpOff, "tcpDropTunnel": tcpTun, "tcpDropSplice": tcpSplice,
 		"lastDrop": lastDrop, "lastDropAt": lastDropAt,
 		"lastProbeAt": rfc3339Ptr(m.LastProbe), "lastProbePreview": m.LastPreview, "grantUntil": grantUntil,
+		"grantIP": grantIP, "grants": grantRows,
 		"maxConns": m.Spec.MaxConns, "rateKbps": m.Spec.RateKbps, "allowCidrs": m.Spec.AllowCidrs,
-		"idleTimeoutSec": m.Spec.IdleTimeoutSec,
-		"reach":          reach, "udpVia": udpVia, "bpsIn": int64(bps[0]), "bpsOut": int64(bps[1]),
+		"idleTimeoutSec":    m.Spec.IdleTimeoutSec,
+		"spaTtlSec":         policy.ClampTimeoutSec(m.Spec.SpaTTLSec, policy.DefaultSPATimeoutSec),
+		"udpIdleTimeoutSec": policy.ClampTimeoutSec(m.Spec.UdpIdleTimeoutSec, policy.DefaultUDPIdleSec),
+		"reach":             reach, "udpVia": udpVia, "bpsIn": int64(bps[0]), "bpsOut": int64(bps[1]),
 		"createdAt": rfc3339(m.Created),
 		"updatedAt": rfc3339(m.Updated),
 	}

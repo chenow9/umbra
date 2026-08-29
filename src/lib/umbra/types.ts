@@ -17,6 +17,7 @@ export type Node = {
   enabled: boolean;
   createdAt: string;
   tokenExpiresAt?: string;
+  tokenNoExpiry?: boolean;
   mappingCount: number;
   bytesIn: number;
   bytesOut: number;
@@ -57,10 +58,14 @@ export type Mapping = {
   lastProbeAt: string | null;
   lastProbePreview: string | null;
   grantUntil: string | null;
+  grantIP?: string | null;
+  grants?: { ip: string; until: string }[];
   maxConns: number;
   rateKbps: number;
   allowCidrs: string;
   idleTimeoutSec?: number;
+  spaTtlSec?: number;
+  udpIdleTimeoutSec?: number;
   reach?: string;
   createdAt: string;
   updatedAt: string;

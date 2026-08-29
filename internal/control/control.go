@@ -72,6 +72,7 @@ type nodeRec struct {
 	Token                                              string    `json:"token,omitempty"`
 	TokenHash                                          string    `json:"token_hash,omitempty"`
 	TokenUntil                                         time.Time `json:"token_until,omitempty"`
+	TokenNoExpiry                                      bool      `json:"token_no_expiry,omitempty"`
 	PrevHash                                           string    `json:"prev_hash,omitempty"`
 	PrevUntil                                          time.Time `json:"prev_until,omitempty"`
 	Enabled                                            bool
@@ -465,18 +466,23 @@ func (c *Console) load() error {
 			continue
 		}
 		if a.TokenHash != "" {
-			until := a.TokenUntil
-			if until.IsZero() {
-				until = nowLoad.Add(gate.TokenTTL)
-				a.TokenUntil = until
-				migratedTTL = true
-			}
-			if until.After(nowLoad) {
-				c.installToken(a.TokenHash, a.ID, until)
-			} else {
-				c.revokeHash(a.TokenHash)
-				a.TokenHash = ""
+			if a.TokenNoExpiry {
 				a.TokenUntil = time.Time{}
+				c.installToken(a.TokenHash, a.ID, time.Time{})
+			} else {
+				until := a.TokenUntil
+				if until.IsZero() {
+					until = nowLoad.Add(gate.TokenTTL)
+					a.TokenUntil = until
+					migratedTTL = true
+				}
+				if until.After(nowLoad) {
+					c.installToken(a.TokenHash, a.ID, until)
+				} else {
+					c.revokeHash(a.TokenHash)
+					a.TokenHash = ""
+					a.TokenUntil = time.Time{}
+				}
 			}
 		}
 		if a.PrevHash != "" && a.PrevUntil.After(nowLoad) && !c.hashRevoked(a.PrevHash) {
@@ -548,11 +554,18 @@ func (c *Console) load() error {
 	return nil
 }
 
-func (c *Console) installToken(hash, nodeID string, until time.Time) time.Time {
-	if until.IsZero() {
-		until = time.Now().Add(gate.TokenTTL)
+func lifetimeUntil(noExpiry bool) time.Time {
+	if noExpiry {
+		return time.Time{}
 	}
+	return time.Now().Add(gate.TokenTTL)
+}
+
+func (c *Console) installToken(hash, nodeID string, until time.Time) time.Time {
 	c.Gate.SetTokenHashUntil(hash, nodeID, until)
+	if until.IsZero() {
+		return until
+	}
 	delay := time.Until(until)
 	if delay < time.Millisecond {
 		delay = time.Millisecond
@@ -809,18 +822,27 @@ func (c *Console) login(pw, ip string) error {
 	if now.Sub(h.t) > 15*time.Minute {
 		h = hit{}
 	}
-	h.n++
-	h.t = now
-	c.hits[ip] = h
-	if h.n > 8 {
+	if h.n >= 8 {
 		c.mu.Unlock()
 		return fmt.Errorf("试得太勤，过一会儿再来")
 	}
 	stored := c.ownerHash
 	c.mu.Unlock()
 	if !checkPassword(pw, stored) {
+		c.mu.Lock()
+		fail := c.hits[ip]
+		if time.Since(fail.t) > 15*time.Minute {
+			fail = hit{}
+		}
+		fail.n++
+		fail.t = time.Now()
+		c.hits[ip] = fail
+		c.mu.Unlock()
 		return fmt.Errorf("口令不对")
 	}
+	c.mu.Lock()
+	delete(c.hits, ip)
+	c.mu.Unlock()
 	return nil
 }
 

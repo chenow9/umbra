@@ -2,7 +2,9 @@ package control
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -84,4 +86,39 @@ func (c *Console) cookieSecure(r *http.Request) bool {
 		return false
 	}
 	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+func (c *Console) requestIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if strings.TrimSpace(c.TrustProxy) != "" && policy.CidrAllowed(host, c.TrustProxy) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			first := strings.TrimSpace(strings.Split(xff, ",")[0])
+			if first != "" {
+				return policy.NormalizeIP(first)
+			}
+		}
+		if xr := r.Header.Get("X-Real-IP"); xr != "" {
+			return policy.NormalizeIP(xr)
+		}
+	}
+	return policy.NormalizeIP(host)
+}
+
+func readJSONOptional(r *http.Request, v any) error {
+	if r.Body == nil {
+		return nil
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(nil, r.Body, jsonBodyLimit)
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(v); err != nil {
+		if err == io.EOF {
+			return nil
+		}
+		return err
+	}
+	return nil
 }

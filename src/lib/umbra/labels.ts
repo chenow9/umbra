@@ -1,9 +1,15 @@
 import type { MappingMode } from "./types";
 
 export const modeLabel: Record<MappingMode, string> = {
-  visitor: "访客",
-  spa: "暗端口",
-  public: "公开",
+  public: "public",
+  spa: "spa",
+  visitor: "visitor",
+};
+
+export const modeHint: Record<MappingMode, string> = {
+  public: "公开访问",
+  spa: "敲门访问",
+  visitor: "加密隧道访问",
 };
 
 export const listenLabel: Record<string, string> = {
@@ -24,10 +30,10 @@ export const pushLabel: Record<string, string> = {
 export const reachLabel: Record<string, string> = {
   open: "外网可连",
   full: "连接已满",
-  closed: "未敲门，外网不可见",
-  visitor: "访客模式，入口无端口",
-  offline: "节点离线，无法开流",
-  pending: "等待节点确认",
+  closed: "未敲门",
+  visitor: "需签发",
+  offline: "节点离线",
+  pending: "等待确认",
   error: "无法开流",
   disabled: "已停用",
 };
@@ -43,12 +49,30 @@ export const dropReasonLabel: Record<string, string> = {
   rate: "新建过快",
 };
 
-export function policyLine(maxConns: number, idleTimeoutSec: number | undefined, proto: string) {
-  const cap = `最多 ${maxConns || 1024} 路`;
-  if (!idleTimeoutSec) {
-    return proto === "udp" ? `${cap} · UDP 空闲约 60 秒回收` : `${cap} · TCP 空闲不限`;
+export function policyBits(
+  maxConns: number,
+  idleTimeoutSec: number | undefined,
+  proto: string,
+  extra?: { spaTtlSec?: number; udpIdleTimeoutSec?: number; mode?: string; rateKbps?: number },
+) {
+  const bits = [`${maxConns || 1024} 路`];
+  if (extra?.mode === "spa") bits.push(`敲门 ${extra.spaTtlSec || 60}s`);
+  if (proto === "udp") {
+    bits.push(`空闲 ${extra?.udpIdleTimeoutSec || idleTimeoutSec || 60}s`);
+  } else if (idleTimeoutSec) {
+    bits.push(`空闲 ${idleTimeoutSec}s`);
   }
-  return `${cap} · 空闲 ${idleTimeoutSec} 秒断开`;
+  if (extra?.rateKbps) bits.push(`${extra.rateKbps} KB/s`);
+  return bits;
+}
+
+export function policyLine(
+  maxConns: number,
+  idleTimeoutSec: number | undefined,
+  proto: string,
+  extra?: { spaTtlSec?: number; udpIdleTimeoutSec?: number; mode?: string; rateKbps?: number },
+) {
+  return policyBits(maxConns, idleTimeoutSec, proto, extra).join(" · ");
 }
 
 export const frameLabel: Record<string, string> = {
@@ -81,10 +105,10 @@ export const actionLabel: Record<string, string> = {
   "acl.drop": "ACL 丢弃",
   "mapping.push": "MappingSync",
   "mapping.probe": "探测开流",
-  "mapping.knock": "SPA 敲门",
-  "mapping.visit": "访客探访",
-  "visitor.issue": "签发访客",
-  "visitor.revoke": "作废访客票据",
+  "mapping.knock": "敲门",
+  "mapping.visit": "探访",
+  "visitor.issue": "签发",
+  "visitor.revoke": "作废票据",
   "node.disconnect": "节点离线",
   "node.revoke": "吊销凭证",
   "mapping.create": "新建映射",

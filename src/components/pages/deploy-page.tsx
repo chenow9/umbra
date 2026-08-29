@@ -29,7 +29,7 @@ export function DeployPage() {
   const visitor = visitorInstall(visitorOs, visitorArch);
 
   return (
-    <AppShell title="部署" description="入口、内网节点与访客端的安装命令。">
+    <AppShell title="部署">
       <div className="mx-auto flex max-w-3xl flex-col gap-8">
         <p className="text-sm leading-relaxed text-ink-soft">
           入口、节点与访问端支持 Linux、macOS、Windows 与 Docker，架构 amd64 / arm64。 控制台和
@@ -46,6 +46,10 @@ export function DeployPage() {
           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-relaxed text-ink-soft">
             <li>管理口默认只绑定本机；跨主机访问时请放在可信 HTTPS 反向代理之后。</li>
             <li>节点控制通道使用 TLS 1.3，并需要入口签发的 ca.crt。</li>
+            <li>
+              口令、登录会话、节点凭证和映射都写在 <span className="font-mono">-tls-dir</span> 的
+              control.json。Docker 要挂整个目录（默认 /var/lib/umbra），不要只挂证书文件。
+            </li>
             <li>节点凭证只显示一次，不要写进镜像、仓库或共享脚本。</li>
           </ul>
         </aside>
@@ -80,15 +84,14 @@ export function DeployPage() {
               >
                 下载入口 CA
               </Button>
-              <Copy text={visitor} label="复制访客端部署命令" />
+              <Copy text={visitor} label="复制访问端部署命令" />
             </div>
           </div>
           <p className="mb-2 text-xs leading-relaxed text-stone">
-            安装在需要访问内网服务的电脑上，不安装在内网节点。先下载入口
-            CA；再到「映射」中为访客映射签发票据，替换示例命令里的入口地址和票据。
+            装在要连内网的那台电脑上，不要装在节点上。先下载入口 CA，再到映射里签发，换掉示例里的地址和票据。
           </p>
           <Pickers
-            scope="访客端"
+            scope="访问端"
             os={visitorOs}
             arch={visitorArch}
             onOs={setVisitorOs}
@@ -121,8 +124,8 @@ export function DeployPage() {
 
         <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-stone">
           <li>人只用 umbrad 的 HTTP 口（页面和 API）。节点走 4400 的 TLS 控制通道。</li>
-          <li>访客端是按需运行的访问工具，不注册常驻系统服务；停止进程即关闭本机访问口。</li>
-          <li>暗端口默认丢弃未授权连接；公开口是显式选项。</li>
+          <li>访问端按需运行，停掉进程即关闭本机端口。</li>
+          <li>暗端口默认丢掉未授权的包；公开口是显式选项。</li>
           <li>入口热替换时已有连接不中断；增删映射本来就不会重启入口。</li>
           <li>Docker 镜像是 linux/amd64 与 linux/arm64。Windows 容器不支持。</li>
           <li>控制通道默认 TLS 1.3。把入口的 ca.crt 放到节点上。</li>

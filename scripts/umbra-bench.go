@@ -252,6 +252,29 @@ func rrSkipTicks(next time.Time, interval time.Duration, now time.Time) time.Tim
 	return n
 }
 
+// rrNextDelay returns how long to wait before the next RR operation and
+// whether another operation should be attempted. When the next scheduled
+// operation falls at or beyond the hold deadline, it waits out the remaining
+// hold window and tells the caller to stop. This prevents a tight retry loop in
+// the final partial interval.
+func rrNextDelay(opStarted, now, deadline time.Time, interval time.Duration) (time.Duration, bool) {
+	if interval <= 0 {
+		return 0, true
+	}
+	wait := interval - now.Sub(opStarted)
+	if wait <= 0 {
+		return 0, true
+	}
+	if !now.Add(wait).Before(deadline) {
+		remain := deadline.Sub(now)
+		if remain < 0 {
+			remain = 0
+		}
+		return remain, false
+	}
+	return wait, true
+}
+
 func opTimeout(timeout time.Duration, deadline time.Time) time.Duration {
 	remain := time.Until(deadline)
 	const floor = 50 * time.Millisecond
@@ -691,9 +714,12 @@ func runUDPRR(addr string, n, par, size int, timeout, hold, interval, probe time
 					default:
 						corrupt.Add(1)
 					}
-					if interval > 0 {
-						if wait := interval - time.Since(tEcho); wait > 0 && time.Now().Add(wait).Before(deadline) {
+					if wait, again := rrNextDelay(tEcho, time.Now(), deadline, interval); wait > 0 || !again {
+						if wait > 0 {
 							time.Sleep(wait)
+						}
+						if !again {
+							break
 						}
 					}
 				}

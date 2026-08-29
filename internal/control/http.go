@@ -501,6 +501,7 @@ func (c *Console) getNodes(w http.ResponseWriter, r *http.Request) {
 func (c *Console) postNode(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Name, Comment, OS, Arch string
+		NeverExpire             bool `json:"neverExpire"`
 	}
 	if !jsonBody(w, r, &b) {
 		return
@@ -511,11 +512,12 @@ func (c *Console) postNode(w http.ResponseWriter, r *http.Request) {
 	}
 	id := newID("nde")
 	plain, hash := newNodeToken()
-	until := time.Now().Add(gate.TokenTTL)
+	until := lifetimeUntil(b.NeverExpire)
 	c.mu.Lock()
 	rec := &nodeRec{
 		ID: id, Name: strings.TrimSpace(b.Name), Comment: strings.TrimSpace(b.Comment),
-		OS: b.OS, Arch: b.Arch, TokenHash: hash, TokenUntil: until, Status: "offline", Enabled: true, Created: time.Now(),
+		OS: b.OS, Arch: b.Arch, TokenHash: hash, TokenUntil: until, TokenNoExpiry: b.NeverExpire,
+		Status: "offline", Enabled: true, Created: time.Now(),
 		revealed: plain,
 	}
 	c.nodes[id] = rec
@@ -531,7 +533,7 @@ func (c *Console) postNode(w http.ResponseWriter, r *http.Request) {
 	c.mu.Unlock()
 	writeJSON(w, map[string]any{
 		"id": id, "token": plain, "os": rec.OS, "arch": rec.Arch,
-		"expiresAt":  until.UTC().Format(time.RFC3339),
+		"expiresAt": rfc3339(until), "neverExpire": b.NeverExpire,
 		"installCmd": c.enrollCommand(plain), "listen": c.Listen, "caURL": "/v1/ca",
 	})
 }
@@ -542,6 +544,13 @@ func (c *Console) getBootstrap(w http.ResponseWriter, r *http.Request) {
 
 func (c *Console) postRotate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	var b struct {
+		NeverExpire *bool `json:"neverExpire"`
+	}
+	if err := readJSONOptional(r, &b); err != nil {
+		writeErr(w, 400, "bad json")
+		return
+	}
 	c.mu.Lock()
 	a := c.nodes[id]
 	if a == nil || a.Status == "revoked" {
@@ -553,8 +562,12 @@ func (c *Console) postRotate(w http.ResponseWriter, r *http.Request) {
 	old := a.TokenHash
 	oldUntil := a.TokenUntil
 	oldPrev, oldPrevUntil := a.PrevHash, a.PrevUntil
+	oldNoExpiry := a.TokenNoExpiry
+	if b.NeverExpire != nil {
+		a.TokenNoExpiry = *b.NeverExpire
+	}
 	grace := gate.TokenGrace
-	until := time.Now().Add(gate.TokenTTL)
+	until := lifetimeUntil(a.TokenNoExpiry)
 	a.TokenHash = hash
 	a.TokenUntil = until
 	a.Token = ""
@@ -574,16 +587,18 @@ func (c *Console) postRotate(w http.ResponseWriter, r *http.Request) {
 	c.logAudit("node.rotate", id, "")
 	if err := c.save(); err != nil {
 		a.TokenHash, a.TokenUntil, a.PrevHash, a.PrevUntil, a.revealed = old, oldUntil, oldPrev, oldPrevUntil, ""
+		a.TokenNoExpiry = oldNoExpiry
 		c.mu.Unlock()
 		persistFail(w)
 		return
 	}
+	noExpiry := a.TokenNoExpiry
 	c.mu.Unlock()
 	c.Gate.RotateTokenUntil(id, old, hash, until, grace)
 	c.installToken(hash, id, until)
 	writeJSON(w, map[string]any{
 		"token": plain, "graceSec": graceSec,
-		"expiresAt":  until.UTC().Format(time.RFC3339),
+		"expiresAt": rfc3339(until), "neverExpire": noExpiry,
 		"installCmd": c.enrollCommand(plain), "listen": c.Listen, "caURL": "/v1/ca",
 	})
 }
@@ -716,7 +731,7 @@ func validateMapping(proto, mode string, entry *int, localHost string, localPort
 	}
 	if mode == "visitor" {
 		if entry != nil {
-			return fmt.Errorf("访客模式不能占用入口端口")
+			return fmt.Errorf("访问端不能占用入口端口")
 		}
 		return nil
 	}
@@ -781,18 +796,20 @@ func (c *Console) checkSpecs(batch map[string]wire.Mapping) error {
 
 func (c *Console) postMapping(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		NodeID         string `json:"nodeId"`
-		AgentID        string `json:"agentId"`
-		Name           string `json:"name"`
-		Proto          string `json:"proto"`
-		Mode           string `json:"mode"`
-		EntryPort      *int   `json:"entryPort"`
-		LocalHost      string `json:"localHost"`
-		LocalPort      int    `json:"localPort"`
-		MaxConns       int    `json:"maxConns"`
-		RateKbps       int    `json:"rateKbps"`
-		AllowCidrs     string `json:"allowCidrs"`
-		IdleTimeoutSec *int   `json:"idleTimeoutSec"`
+		NodeID            string `json:"nodeId"`
+		AgentID           string `json:"agentId"`
+		Name              string `json:"name"`
+		Proto             string `json:"proto"`
+		Mode              string `json:"mode"`
+		EntryPort         *int   `json:"entryPort"`
+		LocalHost         string `json:"localHost"`
+		LocalPort         int    `json:"localPort"`
+		MaxConns          int    `json:"maxConns"`
+		RateKbps          int    `json:"rateKbps"`
+		AllowCidrs        string `json:"allowCidrs"`
+		IdleTimeoutSec    *int   `json:"idleTimeoutSec"`
+		SpaTTLSec         *int   `json:"spaTtlSec"`
+		UdpIdleTimeoutSec *int   `json:"udpIdleTimeoutSec"`
 	}
 	if !jsonBody(w, r, &b) {
 		return
@@ -813,10 +830,19 @@ func (c *Console) postMapping(w http.ResponseWriter, r *http.Request) {
 			idle = 0
 		}
 	}
+	spaTTL := policy.DefaultSPATimeoutSec
+	if b.SpaTTLSec != nil {
+		spaTTL = policy.ClampTimeoutSec(*b.SpaTTLSec, policy.DefaultSPATimeoutSec)
+	}
+	udpIdle := policy.DefaultUDPIdleSec
+	if b.UdpIdleTimeoutSec != nil {
+		udpIdle = policy.ClampTimeoutSec(*b.UdpIdleTimeoutSec, policy.DefaultUDPIdleSec)
+	}
 	spec := wire.Mapping{
 		ID: id, Name: strings.TrimSpace(b.Name), Proto: b.Proto, Mode: b.Mode,
 		EntryPort: b.EntryPort, LocalHost: strings.TrimSpace(b.LocalHost), LocalPort: b.LocalPort,
 		Enabled: true, MaxConns: max, RateKbps: b.RateKbps, AllowCidrs: b.AllowCidrs, IdleTimeoutSec: idle,
+		SpaTTLSec: spaTTL, UdpIdleTimeoutSec: udpIdle,
 		Generation: 1,
 	}
 	now := time.Now()
@@ -915,11 +941,49 @@ func (c *Console) postDeleteMap(w http.ResponseWriter, r *http.Request) {
 
 func (c *Console) postKnock(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	until := c.Gate.Knock(id, 60*time.Second)
+	var b struct {
+		IP string `json:"ip"`
+	}
+	if err := readJSONOptional(r, &b); err != nil {
+		var mb *http.MaxBytesError
+		if errors.As(err, &mb) {
+			writeErr(w, http.StatusRequestEntityTooLarge, "请求过大")
+			return
+		}
+		writeErr(w, 400, "bad json")
+		return
+	}
 	c.mu.Lock()
-	c.logAudit("mapping.knock", id, "SPA grant 60s")
+	m := c.maps[id]
+	if m == nil {
+		c.mu.Unlock()
+		writeErr(w, 404, "映射不存在")
+		return
+	}
+	if m.Spec.Mode != "spa" || !m.Spec.Enabled {
+		c.mu.Unlock()
+		writeErr(w, 400, "只有启用的暗端口可以敲门")
+		return
+	}
+	ttlSec := policy.ClampTimeoutSec(m.Spec.SpaTTLSec, policy.DefaultSPATimeoutSec)
 	c.mu.Unlock()
-	writeJSON(w, map[string]any{"until": until.UTC().Format(time.RFC3339)})
+	ip := strings.TrimSpace(b.IP)
+	if ip == "" {
+		ip = c.requestIP(r)
+	} else {
+		ip = policy.NormalizeIP(ip)
+		if net.ParseIP(ip) == nil {
+			writeErr(w, 400, "来源 IP 无效")
+			return
+		}
+	}
+	until := c.Gate.Knock(id, ip, time.Duration(ttlSec)*time.Second)
+	c.mu.Lock()
+	c.logAudit("mapping.knock", id, fmt.Sprintf("SPA grant %ds %s", ttlSec, ip))
+	c.mu.Unlock()
+	writeJSON(w, map[string]any{
+		"until": until.UTC().Format(time.RFC3339), "ip": ip, "ttlSec": ttlSec,
+	})
 }
 
 func (c *Console) postKnockRaw(w http.ResponseWriter, r *http.Request) {
@@ -945,7 +1009,7 @@ func (c *Console) probe(w http.ResponseWriter, r *http.Request, visit bool) {
 	}
 	payload := []byte("umbra-probe " + id + "\n")
 	if m.Spec.Mode == "spa" {
-		c.Gate.Knock(id, 60*time.Second)
+		c.Gate.Knock(id, "127.0.0.1", policy.SPATimeout(m.Spec.SpaTTLSec))
 		time.Sleep(50 * time.Millisecond)
 	}
 	var preview string
@@ -1003,7 +1067,7 @@ func (c *Console) postVisitor(w http.ResponseWriter, r *http.Request) {
 	}
 	if m.Spec.Mode != "visitor" {
 		c.mu.Unlock()
-		writeErr(w, 400, "只有访客模式能签发票据")
+		writeErr(w, 400, "只有访问端映射能签发")
 		return
 	}
 	id := newID("vis")
@@ -1196,7 +1260,6 @@ func (c *Console) putToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hash := gate.TicketHash(plain)
-	until := time.Now().Add(gate.TokenTTL)
 	c.mu.Lock()
 	rec := c.nodes[b.NodeID]
 	if rec == nil {
@@ -1208,6 +1271,7 @@ func (c *Console) putToken(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "节点不存在")
 		return
 	}
+	until := lifetimeUntil(rec.TokenNoExpiry)
 	old, oldUntil, oldPrev, oldPrevUntil := rec.TokenHash, rec.TokenUntil, rec.PrevHash, rec.PrevUntil
 	prevRevoked := c.snapshotRevoked()
 	if old != "" && old != hash {

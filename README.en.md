@@ -95,6 +95,8 @@ git push origin v0.1.0
 ```bash
 UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.gate.yml up -d
 # open http://gate:8080 and set a password on first visit
+# named volume umbra-tls → /var/lib/umbra holds certs and control.json
+# (owner password, sessions, node tokens, mappings). Do not mount only ca.crt.
 ```
 
 The console binds loopback by default. A non-loopback `-http` address requires `-http-tls-cert`/`-http-tls-key` (or `-http-tls` to reuse the gate certs). Plain HTTP on a public address is refused at startup.
