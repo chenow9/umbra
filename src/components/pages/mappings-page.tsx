@@ -1,6 +1,7 @@
 "use client";
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
@@ -29,6 +30,7 @@ import {
 } from "@/components/ui/sheet";
 import {
   createMapping,
+  caDownloadURL,
   deleteMapping,
   issueVisitor,
   knockMapping,
@@ -784,7 +786,8 @@ function VisitorIssuedDialog({
         <DialogHeader>
           <DialogTitle>访客命令只显示这一次</DialogTitle>
           <DialogDescription>
-            在访问侧跑这条命令，本机开 L4 口。入口不暴露业务端口。
+            在访问侧运行 umbra-visit 后，本机才会打开 L4
+            端口；入口不暴露业务端口。若尚未安装，请先前往部署页选择访问端平台。
           </DialogDescription>
         </DialogHeader>
         {issued ? (
@@ -794,6 +797,18 @@ function VisitorIssuedDialog({
             </pre>
             <p className="mt-1 text-xs text-stone">到期 {formatRelative(issued.expiresAt)}</p>
             <div className="mt-3 flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => window.open(caDownloadURL(), "_blank", "noopener")}
+              >
+                下载 CA
+              </Button>
+              <Button type="button" variant="outline" asChild>
+                <Link to="/deploy" onClick={onClose}>
+                  安装访客端
+                </Link>
+              </Button>
               <Button
                 type="button"
                 variant="outline"

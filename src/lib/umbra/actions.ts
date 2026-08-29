@@ -879,7 +879,7 @@ export const issueVisitor = createServerFn({ method: "POST" })
     const issued: VisitorIssued = {
       id,
       ticket,
-      visitCmd: `umbra-visit --server gate:4400 --ticket ${ticket} --local 127.0.0.1:2222`,
+      visitCmd: `umbra-visit --server gate:4400 --tls-ca /etc/umbra/ca.crt --ticket ${ticket} --local 127.0.0.1:2222`,
       expiresAt: expires.toISOString(),
     };
     return issued;

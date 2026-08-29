@@ -1049,6 +1049,20 @@ func TestNodeAndMappingUpdateDelete(t *testing.T) {
 		t.Fatalf("visitor should drop entry port %v", mv)
 	}
 
+	res = doJSON(t, srv, "POST", "/v1/mappings/"+m.ID+"/visitor", map[string]any{"label": "laptop"}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("issue visitor %d %s", res.StatusCode, readBody(t, res))
+	}
+	var issued map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&issued); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	cmd, _ := issued["visitCmd"].(string)
+	if !strings.Contains(cmd, "--tls-ca /etc/umbra/ca.crt") {
+		t.Fatalf("visitor command must reference the CA path on the visitor machine: %q", cmd)
+	}
+
 	res = doJSON(t, srv, "POST", "/v1/nodes/"+n.ID+"/delete", nil, nil)
 	if res.StatusCode != http.StatusConflict {
 		t.Fatalf("delete with mapping should 409, got %d %s", res.StatusCode, readBody(t, res))

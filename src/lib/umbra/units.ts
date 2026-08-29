@@ -16,6 +16,9 @@ export const ARCHS: { id: Arch; label: string }[] = [
 export const DOCKERHUB_GATE = "chenow9/umbrad";
 export const DOCKERHUB_NODE = "chenow9/umbra-node";
 
+const visitorTicket = "umbra_vis_…";
+const visitorServer = "gate.example.com:4400";
+
 export function platformLabel(os: string, arch: string) {
   const p = PLATFORMS.find((x) => x.id === os)?.label ?? os;
   return `${p} ${arch}`;
@@ -25,9 +28,71 @@ function goos(platform: Platform) {
   return platform === "docker" ? "linux" : platform;
 }
 
-export function binaryName(kind: "umbrad" | "umbra-node", platform: Platform, arch: Arch) {
+export function binaryName(
+  kind: "umbrad" | "umbra-node" | "umbra-visit",
+  platform: Platform,
+  arch: Arch,
+) {
   const ext = goos(platform) === "windows" ? ".exe" : "";
   return `${kind}_${goos(platform)}_${arch}${ext}`;
+}
+
+export function visitorRunCommand(caPath = "/etc/umbra/ca.crt") {
+  return `umbra-visit --server ${visitorServer} --tls-ca ${caPath} --ticket ${visitorTicket} --local 127.0.0.1:2222`;
+}
+
+export function visitorCompose(arch: Arch) {
+  return `# umbra-visit 已包含在入口镜像中；这里覆盖入口程序，只运行访客端。
+# 签发票据后替换 UMBRA_TICKET；TCP / UDP 都映射到本机 127.0.0.1:2222。
+services:
+  umbra-visit:
+    image: ${DOCKERHUB_GATE}:\${UMBRA_TAG:-latest}
+    platform: linux/${arch}
+    entrypoint: ["/usr/local/bin/umbra-visit"]
+    command:
+      - --server
+      - ${visitorServer}
+      - --tls-ca
+      - /etc/umbra/ca.crt
+      - --ticket
+      - \${UMBRA_TICKET}
+      - --local
+      - 0.0.0.0:2222
+    ports:
+      - "127.0.0.1:2222:2222/tcp"
+      - "127.0.0.1:2222:2222/udp"
+    volumes:
+      - ./ca.crt:/etc/umbra/ca.crt:ro
+    restart: unless-stopped
+`;
+}
+
+export function visitorInstall(platform: Platform, arch: Arch) {
+  const bin = binaryName("umbra-visit", platform, arch);
+  if (platform === "docker") return visitorCompose(arch);
+  if (platform === "linux") {
+    return `sudo install -m 755 ${bin} /usr/local/bin/umbra-visit
+sudo install -d -m 755 /etc/umbra
+sudo install -m 644 ca.crt /etc/umbra/ca.crt
+
+${visitorRunCommand()}
+`;
+  }
+  if (platform === "darwin") {
+    return `sudo install -m 755 ${bin} /usr/local/bin/umbra-visit
+sudo install -d -m 755 /usr/local/etc/umbra
+sudo install -m 644 ca.crt /usr/local/etc/umbra/ca.crt
+
+${visitorRunCommand("/usr/local/etc/umbra/ca.crt")}
+`;
+  }
+  return `mkdir "%ProgramFiles%\\Umbra"
+copy ${bin} "%ProgramFiles%\\Umbra\\umbra-visit.exe"
+mkdir "C:\\ProgramData\\umbra"
+copy ca.crt "C:\\ProgramData\\umbra\\ca.crt"
+
+"%ProgramFiles%\\Umbra\\umbra-visit.exe" --server ${visitorServer} --tls-ca C:\\ProgramData\\umbra\\ca.crt --ticket ${visitorTicket} --local 127.0.0.1:2222
+`;
 }
 
 export const umbradUnit = `[Unit]

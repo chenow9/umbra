@@ -4,11 +4,13 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
+import { caDownloadURL } from "@/lib/umbra/api";
 import {
   nodeInstall,
   ARCHS,
   gateInstall,
   PLATFORMS,
+  visitorInstall,
   type Arch,
   type Platform,
 } from "@/lib/umbra/units";
@@ -20,15 +22,18 @@ export function DeployPage() {
   const [gateArch, setGateArch] = useState<Arch>("amd64");
   const [nodeOs, setNodeOs] = useState<Platform>("linux");
   const [nodeArch, setNodeArch] = useState<Arch>("amd64");
+  const [visitorOs, setVisitorOs] = useState<Platform>("linux");
+  const [visitorArch, setVisitorArch] = useState<Arch>("amd64");
   const gate = gateInstall(gateOs, gateArch);
   const node = nodeInstall(nodeOs, nodeArch, exampleToken);
+  const visitor = visitorInstall(visitorOs, visitorArch);
 
   return (
-    <AppShell title="部署" description="入口与节点的安装命令。凭证在「登记节点」时签发。">
+    <AppShell title="部署" description="入口、内网节点与访客端的安装命令。">
       <div className="mx-auto flex max-w-3xl flex-col gap-8">
         <p className="text-sm leading-relaxed text-ink-soft">
-          入口与节点都支持 Linux、macOS、Windows 与 Docker，架构 amd64 / arm64。 控制台和 API
-          共用一个 HTTP 口；节点走 TLS 控制通道。第一次打开网页时设定口令。
+          入口、节点与访问端支持 Linux、macOS、Windows 与 Docker，架构 amd64 / arm64。 控制台和
+          API 共用一个 HTTP 口；节点和访问端走 TLS 控制通道。第一次打开网页时设定口令。
         </p>
 
         <aside
@@ -64,6 +69,43 @@ export function DeployPage() {
         </section>
 
         <section>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-medium text-ink">访问端 umbra-visit</h2>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => window.open(caDownloadURL(), "_blank", "noopener")}
+              >
+                下载入口 CA
+              </Button>
+              <Copy text={visitor} label="复制访客端部署命令" />
+            </div>
+          </div>
+          <p className="mb-2 text-xs leading-relaxed text-stone">
+            安装在需要访问内网服务的电脑上，不安装在内网节点。先下载入口
+            CA；再到「映射」中为访客映射签发票据，替换示例命令里的入口地址和票据。
+          </p>
+          <Pickers
+            scope="访客端"
+            os={visitorOs}
+            arch={visitorArch}
+            onOs={setVisitorOs}
+            onArch={setVisitorArch}
+          />
+          {visitorOs === "docker" ? (
+            <p className="mb-2 text-xs text-stone">
+              Docker 示例仅把本机 127.0.0.1:2222 暴露给使用者；请设置 UMBRA_TICKET，并把 ca.crt 放在
+              compose 文件旁。
+            </p>
+          ) : null}
+          <pre className="overflow-x-auto rounded-xl bg-card p-4 font-mono text-xs leading-relaxed text-ink shadow-border">
+            {visitor.trim()}
+          </pre>
+        </section>
+
+        <section>
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <h2 className="text-sm font-medium text-ink">内网节点</h2>
             <Copy text={node} label="复制节点部署命令" />
@@ -79,9 +121,7 @@ export function DeployPage() {
 
         <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-stone">
           <li>人只用 umbrad 的 HTTP 口（页面和 API）。节点走 4400 的 TLS 控制通道。</li>
-          <li>
-            访客模式签发票据后，在访问侧跑 umbra-visit，只在本机开 TCP/UDP，入口不暴露业务口。
-          </li>
+          <li>访客端是按需运行的访问工具，不注册常驻系统服务；停止进程即关闭本机访问口。</li>
           <li>暗端口默认丢弃未授权连接；公开口是显式选项。</li>
           <li>入口热替换时已有连接不中断；增删映射本来就不会重启入口。</li>
           <li>Docker 镜像是 linux/amd64 与 linux/arm64。Windows 容器不支持。</li>

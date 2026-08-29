@@ -78,6 +78,19 @@ sudo ./dist/umbrad_linux_amd64 \
 
 在控制台增删映射即可，不必登录节点改任何文件。Linux 安装单元、macOS launchd、Windows 服务、Docker compose 见控制台「部署」页。
 
+**5. 访客端（仅 Visitor 模式）**
+
+在需要访问内网服务的电脑上安装对应平台的 `umbra-visit`，并复制入口的 `ca.crt`。在控制台「映射」中对访客映射选择「签发访客」，然后执行只显示一次的命令：
+
+```bash
+umbra-visit --server gate.example.com:4400 \
+  --tls-ca /etc/umbra/ca.crt \
+  --ticket umbra_vis_… \
+  --local 127.0.0.1:2222
+```
+
+随后业务客户端连接 `127.0.0.1:2222`。`umbra-visit` 是访问侧按需运行的进程，不需要在入口或内网节点上部署；停止进程即关闭这个本机访问口。各平台安装命令和 Docker Compose 示例见控制台「部署 → 访问端 umbra-visit」。
+
 ### Docker（公网入口 + 内网节点）
 
 入口容器就是控制面：`-http` 同时提供网页和 API（默认 `:8080`），节点走 `:4400` TLS。镜像构建时会把控制台打进 `umbrad`，第一次打开网页设定口令。不要再单独跑 `npm run dev`。

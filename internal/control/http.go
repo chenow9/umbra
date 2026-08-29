@@ -1024,14 +1024,10 @@ func (c *Console) postVisitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	listen := c.Listen
-	ca := c.CAFile
 	proto := m.Spec.Proto
 	c.mu.Unlock()
 	local := "127.0.0.1:2222"
-	cmd := "umbra-visit --server " + listen + " --ticket " + ticket + " --local " + local
-	if ca != "" {
-		cmd += " --tls-ca " + ca
-	}
+	cmd := "umbra-visit --server " + listen + " --tls-ca /etc/umbra/ca.crt --ticket " + ticket + " --local " + local
 	if proto == "udp" {
 		cmd += "  # UDP"
 	}
