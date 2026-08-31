@@ -92,8 +92,7 @@ export function AppShell({
 function Brand() {
   return (
     <Link to="/" className="mb-4 flex items-baseline gap-2 px-2">
-      <span className="font-serif text-2xl tracking-tight text-ink italic">幽门</span>
-      <span className="text-xs tracking-[0.18em] text-stone uppercase">Umbra</span>
+      <span className="font-serif text-2xl tracking-tight text-ink italic">umbra</span>
     </Link>
   );
 }

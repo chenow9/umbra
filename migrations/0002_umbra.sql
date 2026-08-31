@@ -1,4 +1,4 @@
--- 幽门 M1 schema: nodes, mappings, traffic, audit. Unowned (auth-off).
+-- umbra M1 schema: nodes, mappings, traffic, audit. Unowned (auth-off).
 
 create table if not exists nodes (
   id            text primary key,

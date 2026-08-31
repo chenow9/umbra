@@ -19,7 +19,7 @@ export const THEMES = [
   {
     id: "yueying",
     name: "月影",
-    hint: "银纸 + 门影，幽门默认",
+    hint: "银纸冷灰，默认主题",
     scheme: "light",
     tokens: {
       paper: "#eef0f4",

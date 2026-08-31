@@ -127,19 +127,26 @@ export function TrafficPage() {
           />
         </section>
 
-        <div className="rounded-xl bg-card p-4 shadow-border">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <p className="text-xs text-stone">累计流量</p>
-            <LiveHint />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-xl bg-card p-4 shadow-border">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-xs text-stone">实时速率</p>
+              <LiveHint />
+            </div>
+            <RateChart
+              kind="rate"
+              data={t?.series ?? []}
+              emptyAction={
+                <Button asChild size="sm" variant="outline">
+                  <Link to="/mappings">检查映射</Link>
+                </Button>
+              }
+            />
           </div>
-          <RateChart
-            data={t?.series ?? []}
-            emptyAction={
-              <Button asChild size="sm" variant="outline">
-                <Link to="/mappings">检查映射</Link>
-              </Button>
-            }
-          />
+          <div className="rounded-xl bg-card p-4 shadow-border">
+            <p className="mb-2 text-xs text-stone">累计流量</p>
+            <RateChart kind="bytes" data={t?.series ?? []} />
+          </div>
         </div>
 
         <div className="flex flex-col gap-3 md:hidden">
@@ -184,20 +191,30 @@ export function TrafficPage() {
             ))
           )}
         </div>
-        <div className="hidden overflow-x-auto rounded-xl bg-card shadow-border md:block">
-          <table className="w-full min-w-[520px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-line text-xs text-stone">
-                <th className="px-4 py-3 font-medium">映射</th>
-                <th className="px-4 py-3 font-medium">协议</th>
-                <th className="px-4 py-3 font-medium">节点</th>
-                <th className="px-4 py-3 font-medium">入站</th>
-                <th className="px-4 py-3 font-medium">出站</th>
-                <th className="px-4 py-3 font-medium">速率</th>
-                <th className="px-4 py-3 font-medium">连接 / UDP 丢弃</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="hidden overflow-hidden rounded-xl bg-card shadow-border md:block">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] table-fixed text-left text-sm">
+              <colgroup>
+                <col className="w-[18%]" />
+                <col className="w-[8%]" />
+                <col className="w-[16%]" />
+                <col className="w-[12%]" />
+                <col className="w-[12%]" />
+                <col className="w-[12%]" />
+                <col className="w-[22%]" />
+              </colgroup>
+              <thead>
+                <tr className="border-b border-line text-xs text-stone">
+                  <th className="px-4 py-3 font-medium">映射</th>
+                  <th className="px-4 py-3 font-medium">协议</th>
+                  <th className="px-4 py-3 font-medium">节点</th>
+                  <th className="px-4 py-3 font-medium">入站</th>
+                  <th className="px-4 py-3 font-medium">出站</th>
+                  <th className="px-4 py-3 font-medium">速率</th>
+                  <th className="px-4 py-3 font-medium">连接 / UDP 丢弃</th>
+                </tr>
+              </thead>
+              <tbody>
               {pageData.total === 0 ? (
                 <tr>
                   <td className="px-4 py-6 text-stone" colSpan={7}>
@@ -222,27 +239,30 @@ export function TrafficPage() {
                       }
                     }}
                   >
-                    <td className="px-4 py-3 font-medium">{m.name}</td>
+                    <td className="truncate px-4 py-3 font-medium">{m.name}</td>
                     <td className="px-4 py-3 font-mono text-xs uppercase">{m.proto}</td>
-                    <td className="px-4 py-3 text-ink-soft">{m.nodeName}</td>
-                    <td className="px-4 py-3 font-mono text-xs tabular-nums">
+                    <td className="truncate px-4 py-3 text-ink-soft">{m.nodeName}</td>
+                    <td className="truncate px-4 py-3 font-mono text-xs tabular-nums whitespace-nowrap">
                       {formatBytes(m.bytesIn)}
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs tabular-nums">
+                    <td className="truncate px-4 py-3 font-mono text-xs tabular-nums whitespace-nowrap">
                       {formatBytes(m.bytesOut)}
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs tabular-nums text-ink-soft">
+                    <td className="truncate px-4 py-3 font-mono text-xs tabular-nums whitespace-nowrap text-ink-soft">
                       {formatBps((m.bpsIn ?? 0) + (m.bpsOut ?? 0))}
                     </td>
                     <td className="px-4 py-3 font-mono tabular-nums">
-                      {m.proto === "udp" ? (m.udpActive ?? m.activeConns) : m.activeConns}
-                      <UdpDropNote mapping={m} />
+                      <div className="whitespace-nowrap">
+                        {m.proto === "udp" ? (m.udpActive ?? m.activeConns) : m.activeConns}
+                      </div>
+                      <UdpDropNote mapping={m} block />
                     </td>
                   </tr>
                 ))
               )}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
         </div>
         {pageData.total > 0 ? (
           <Pager
@@ -265,7 +285,7 @@ function UdpDropNote({ mapping: m, block = false }: { mapping: Mapping; block?: 
   const total = maxConns + perIp + rate;
   if (total <= 0) return null;
   const text = `丢弃 ${total}（连接数 ${maxConns} · 单 IP ${perIp} · 限速 ${rate}）`;
-  if (block) return <p className="mt-1 text-xs text-stone">{text}</p>;
+  if (block) return <p className="mt-1 truncate text-xs text-stone">{text}</p>;
   return <span className="text-xs text-stone"> · {text}</span>;
 }
 

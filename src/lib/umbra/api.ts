@@ -148,8 +148,10 @@ export function createNode({
     expiresAt?: string;
     neverExpire?: boolean;
     installCmd?: string;
+    dockerCmd?: string;
     listen?: string;
     caURL?: string;
+    caPem?: string;
   }>("/v1/nodes", {
     method: "POST",
     body: JSON.stringify(data),
@@ -167,7 +169,9 @@ export function rotateNodeToken({ data }: { data: { id: string; neverExpire?: bo
     expiresAt?: string;
     neverExpire?: boolean;
     installCmd?: string;
+    dockerCmd?: string;
     listen?: string;
+    caPem?: string;
   }>(`/v1/nodes/${encodeURIComponent(data.id)}/rotate`, {
     method: "POST",
     body: data.neverExpire === undefined ? undefined : JSON.stringify({ neverExpire: data.neverExpire }),

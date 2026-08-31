@@ -168,6 +168,7 @@ export type NodeIssued = {
   id: string;
   token: string;
   installCmd: string;
+  dockerCmd?: string;
   unit: string;
 };
 

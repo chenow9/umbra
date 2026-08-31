@@ -222,8 +222,76 @@ export function nodePlist(token: string) {
 `;
 }
 
-export function enrollCmd(token: string) {
-  return `umbra-node --server gate:4400 --tls-ca /etc/umbra/ca.crt --token ${token}`;
+export function shSingleQuote(s: string) {
+  return `'${s.replace(/'/g, `'"'"'`)}'`;
+}
+
+function enrollServer(server?: string) {
+  return server?.trim() || "入口:4400";
+}
+
+function withCAHeredoc(pem: string, bodyBefore: string, bodyAfter: string) {
+  const text = pem.trim();
+  return `${bodyBefore}
+${text}
+UMBRA_CA
+${bodyAfter}`;
+}
+
+export function enrollCmd(token: string, server = "gate:4400") {
+  return `umbra-node --server ${server} --tls-ca /etc/umbra/ca.crt --token ${token}`;
+}
+
+export function nodeEnrollBinCmd(token: string, server?: string, caPem?: string) {
+  const srv = shSingleQuote(enrollServer(server));
+  const tok = shSingleQuote(token);
+  const pem = caPem?.trim();
+  if (!pem) {
+    return `# 先把入口 ca.crt 放到 /etc/umbra/ca.crt，再执行：
+umbra-node --server ${srv} --tls-ca /etc/umbra/ca.crt --token ${tok}
+`;
+  }
+  return withCAHeredoc(
+    pem,
+    `# 入口 CA 已包含在命令中，不必再下载或 scp。
+mkdir -p /etc/umbra
+if [ -d /etc/umbra/ca.crt ]; then rm -rf /etc/umbra/ca.crt; fi
+cat >/etc/umbra/ca.crt <<'UMBRA_CA'`,
+    `umbra-node --server ${srv} --tls-ca /etc/umbra/ca.crt --token ${tok}
+`,
+  );
+}
+
+export function nodeEnrollDockerCmd(token: string, server?: string, caPem?: string) {
+  const srv = shSingleQuote(enrollServer(server));
+  const tok = shSingleQuote(token);
+  const pem = caPem?.trim();
+  const head = `# 入口 CA 已包含在命令中，不必再下载或 scp。
+# --network host 让映射目标 127.0.0.1 指向这台机器。
+# 若提示 name already in use：docker rm -f umbra-node`;
+  const run = `docker run -d --name umbra-node --network host --restart unless-stopped \\
+  -v "$HOME/.umbra/ca.crt":/etc/umbra/ca.crt:ro \\
+  ${DOCKERHUB_NODE}:latest \\
+  --server ${srv} --tls-ca /etc/umbra/ca.crt --token ${tok}
+`;
+  if (!pem) {
+    return `${head}
+# 把入口 ca.crt 放到当前目录后执行：
+docker run -d --name umbra-node --network host --restart unless-stopped \\
+  -v "$PWD/ca.crt":/etc/umbra/ca.crt:ro \\
+  ${DOCKERHUB_NODE}:latest \\
+  --server ${srv} --tls-ca /etc/umbra/ca.crt --token ${tok}
+`;
+  }
+  return withCAHeredoc(
+    pem,
+    `${head}
+umask 077
+mkdir -p "$HOME/.umbra"
+if [ -d "$HOME/.umbra/ca.crt" ]; then rm -rf "$HOME/.umbra/ca.crt"; fi
+cat >"$HOME/.umbra/ca.crt" <<'UMBRA_CA'`,
+    run,
+  );
 }
 
 export function nodeWinService(token: string, arch: Arch = "amd64") {

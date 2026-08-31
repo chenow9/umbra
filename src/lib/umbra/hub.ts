@@ -164,7 +164,7 @@ export async function openStreamProbe(nodeId: string, mapping: MappingWire, payl
     if (mapping.entry_port != null) {
       await probeEntry(mapping.entry_port, buf, proto).catch(() => undefined);
     }
-    throw Object.assign(new Error("暗端口未授权，连接已丢弃。先敲门。"), {
+    throw Object.assign(new Error("spa 未授权，连接已丢弃。先敲门。"), {
       frames: [frame("s2c", "Dropped", { mapping_id: mapping.id, reason: "spa" })],
     });
   }

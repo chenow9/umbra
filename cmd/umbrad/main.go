@@ -198,11 +198,13 @@ func main() {
 				os.Exit(1)
 			}
 			s.WaitIdle(3 * time.Second)
+			con.FlushTraffic()
 			log.Printf("upgrade: old pid %d exiting, replacement pid %d", os.Getpid(), cmd.Process.Pid)
 			os.Exit(0)
 		}
 		s.StopAccept()
 		s.WaitIdle(3 * time.Second)
+		con.FlushTraffic()
 		st.Clear()
 		return
 	}

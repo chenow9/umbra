@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { liveBps, mergeTrafficView, peakBpsFromSeries } from "./live.ts";
+import { liveBps, mergeTrafficView, peakBpsFromSeries, seriesToRate } from "./live.ts";
 import type { LiveEvent, Mapping, Overview, TrafficView } from "./types.ts";
 
 function overview(bpsIn = 0, bpsOut = 0): Overview {
@@ -53,6 +53,21 @@ function ev(partial: Partial<LiveEvent> & Pick<LiveEvent, "ts" | "mappings">): L
     ...partial,
   };
 }
+
+describe("seriesToRate", () => {
+  it("turns cumulative counters into per-interval throughput", () => {
+    const rates = seriesToRate([
+      { ts: "2026-08-28T00:00:00Z", bytesIn: 0, bytesOut: 0 },
+      { ts: "2026-08-28T00:00:02Z", bytesIn: 2000, bytesOut: 1000 },
+      { ts: "2026-08-28T00:00:04Z", bytesIn: 2000, bytesOut: 1000 },
+    ]);
+    assert.equal(rates.length, 2);
+    assert.equal(rates[0].bpsIn, 1000);
+    assert.equal(rates[0].bpsOut, 500);
+    assert.equal(rates[1].bpsIn, 0);
+    assert.equal(rates[1].bpsOut, 0);
+  });
+});
 
 describe("peakBpsFromSeries", () => {
   it("uses positive deltas over elapsed time", () => {

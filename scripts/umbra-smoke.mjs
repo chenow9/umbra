@@ -292,11 +292,11 @@ async function main() {
   );
 
   const spaDrop = await tcpShouldDrop(ports.spaTcp);
-  must("暗端口未敲门丢弃", spaDrop.dropped, spaDrop.reason ?? spaDrop.got);
+  must("spa 未敲门丢弃", spaDrop.dropped, spaDrop.reason ?? spaDrop.got);
 
   await api("POST", "/v1/knock/map_spa");
   const spaOk = await tcpRoundtrip(ports.spaTcp, Buffer.from("after-knock\n"));
-  must("敲门后暗端口可通", spaOk.toString() === "after-knock\n", spaOk.toString());
+  must("敲门后 spa 可通", spaOk.toString() === "after-knock\n", spaOk.toString());
 
   const udp = await udpRoundtrip(ports.pubUdp, Buffer.from("udp-ping"));
   must("公开 UDP 来回", udp.toString() === "udp-ping", udp.toString());
@@ -313,7 +313,7 @@ async function main() {
   must("网段不允许则丢", cidr.dropped, cidr.reason ?? cidr.got);
 
   const issued = await api("POST", "/v1/mappings/map_vis/visitor", { label: "smoke" });
-  must("签发访客票据", Boolean(issued?.ticket), JSON.stringify(issued));
+  must("签发 visitor 票据", Boolean(issued?.ticket), JSON.stringify(issued));
   const visitor = spawnBin(VISIT, [
     "--server", CTRL,
     "--ticket", issued.ticket,
@@ -343,7 +343,7 @@ async function main() {
   );
 
   const issuedUdp = await api("POST", "/v1/mappings/map_vis_udp/visitor", { label: "smoke-udp" });
-  must("签发访客 UDP 票据", Boolean(issuedUdp?.ticket), JSON.stringify(issuedUdp));
+  must("签发 visitor UDP 票据", Boolean(issuedUdp?.ticket), JSON.stringify(issuedUdp));
   const visitorUdp = spawnBin(VISIT, [
     "--server", CTRL,
     "--ticket", issuedUdp.ticket,

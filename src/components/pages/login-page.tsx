@@ -48,8 +48,7 @@ export function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-paper px-4 text-ink">
       <section className="w-full max-w-md rounded-xl bg-card p-7 shadow-border">
-        <p className="font-serif text-3xl italic tracking-tight">幽门</p>
-        <p className="mt-1 text-xs tracking-[0.18em] text-stone uppercase">umbra</p>
+        <p className="font-serif text-3xl italic tracking-tight">umbra</p>
         <p className="mt-3 text-xs text-stone">自托管 L4 隐匿穿透 · 配置只在服务端</p>
         <h1 className="mt-6 text-base font-medium">
           {configuring ? "设定控制台口令" : "登录"}

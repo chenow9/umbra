@@ -114,7 +114,8 @@ export function DeployPage() {
             <Copy text={node} label="复制节点部署命令" />
           </div>
           <p className="mb-2 text-xs text-stone">
-            凭证在「登记节点」时签发，只显示一次。下面是样例。
+            凭证在「登记节点」时签发，只显示一次。登记弹窗里有可粘贴的 Docker 命令，入口 CA
+            已写进命令，不必再单独上传。下面是不含凭证的样例。
           </p>
           <Pickers scope="节点" os={nodeOs} arch={nodeArch} onOs={setNodeOs} onArch={setNodeArch} />
           <pre className="overflow-x-auto rounded-xl bg-card p-4 font-mono text-xs leading-relaxed text-ink shadow-border">
@@ -125,11 +126,11 @@ export function DeployPage() {
         <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-stone">
           <li>人只用 umbrad 的 HTTP 口（页面和 API）。节点走 4400 的 TLS 控制通道。</li>
           <li>访问端按需运行，停掉进程即关闭本机端口。</li>
-          <li>暗端口默认丢掉未授权的包；公开口是显式选项。</li>
+          <li>映射模式是 public / spa / visitor。spa 默认丢掉未敲门的包；public 是显式打开的业务口；visitor 入口不监听业务口。</li>
           <li>入口热替换时已有连接不中断；增删映射本来就不会重启入口。</li>
           <li>Docker 镜像是 linux/amd64 与 linux/arm64。Windows 容器不支持。</li>
-          <li>控制通道默认 TLS 1.3。把入口的 ca.crt 放到节点上。</li>
-          <li>暗端口在 Linux 入口走内核丢弃；换入口程序发 USR2，已有连接不中断。</li>
+          <li>控制通道默认 TLS 1.3。登记弹窗里的命令已包含入口 CA；compose 部署仍可单独挂 ca.crt。</li>
+          <li>spa 在 Linux 入口走内核丢弃（需 CAP_NET_ADMIN）；macOS / Windows 入口是用户态断开。换入口程序发 USR2。</li>
           <li>预览里点「完成并上线」会拉起本机节点连入口。</li>
         </ul>
       </div>

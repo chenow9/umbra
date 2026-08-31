@@ -41,7 +41,7 @@ async function main() {
     const t = (await page.locator("body").innerText()).replace(/\s+/g, " ");
     log(`打开${title}`, t.includes(title), t.slice(0, 80));
     if (path === "/mappings") {
-      log("映射含暗端口", t.includes("暗") || t.includes("spa") || t.includes("回声"));
+      log("映射含 spa", t.includes("spa") || t.includes("敲门") || t.includes("回声"));
       log("映射含游戏口", t.includes("游戏口") || t.includes("UDP") || t.includes("udp"));
     }
     if (path === "/deploy") {
@@ -71,7 +71,7 @@ async function main() {
   await mobile.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 20000 });
   await mobile.waitForTimeout(500);
   const mt = (await mobile.locator("body").innerText()).replace(/\s+/g, " ");
-  log("窄屏总览可看", mt.includes("总览") || mt.includes("幽门"));
+  log("窄屏总览可看", mt.includes("总览") || mt.includes("umbra"));
   await mobile.close();
 
   log("控制台无脚本错误", errors.length === 0, errors.join("; "));

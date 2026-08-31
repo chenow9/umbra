@@ -40,7 +40,7 @@ func Ensure(dir string) (*Bundle, error) {
 	}
 	caTmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "幽门入口 CA", Organization: []string{"Umbra"}},
+		Subject:               pkix.Name{CommonName: "umbra CA", Organization: []string{"Umbra"}},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),
 		IsCA:                  true,

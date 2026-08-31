@@ -209,14 +209,6 @@ func persistFail(w http.ResponseWriter) {
 	writeErr(w, http.StatusInternalServerError, "状态未能落盘")
 }
 
-func (c *Console) enrollCommand(token string) string {
-	server := c.Listen
-	if server == "" {
-		server = "入口:4400"
-	}
-	return "umbra-node --server " + server + " --tls-ca /etc/umbra/ca.crt --token " + token
-}
-
 func (c *Console) getCA(w http.ResponseWriter, _ *http.Request) {
 	if c.CAFile == "" {
 		writeErr(w, 404, "没有 CA 文件")
@@ -531,11 +523,14 @@ func (c *Console) postNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.mu.Unlock()
-	writeJSON(w, map[string]any{
-		"id": id, "token": plain, "os": rec.OS, "arch": rec.Arch,
-		"expiresAt": rfc3339(until), "neverExpire": b.NeverExpire,
-		"installCmd": c.enrollCommand(plain), "listen": c.Listen, "caURL": "/v1/ca",
-	})
+	out := c.enrollFields(plain)
+	out["id"] = id
+	out["token"] = plain
+	out["os"] = rec.OS
+	out["arch"] = rec.Arch
+	out["expiresAt"] = rfc3339(until)
+	out["neverExpire"] = b.NeverExpire
+	writeJSON(w, out)
 }
 
 func (c *Console) getBootstrap(w http.ResponseWriter, r *http.Request) {
@@ -596,11 +591,12 @@ func (c *Console) postRotate(w http.ResponseWriter, r *http.Request) {
 	c.mu.Unlock()
 	c.Gate.RotateTokenUntil(id, old, hash, until, grace)
 	c.installToken(hash, id, until)
-	writeJSON(w, map[string]any{
-		"token": plain, "graceSec": graceSec,
-		"expiresAt": rfc3339(until), "neverExpire": noExpiry,
-		"installCmd": c.enrollCommand(plain), "listen": c.Listen, "caURL": "/v1/ca",
-	})
+	out := c.enrollFields(plain)
+	out["token"] = plain
+	out["graceSec"] = graceSec
+	out["expiresAt"] = rfc3339(until)
+	out["neverExpire"] = noExpiry
+	writeJSON(w, out)
 }
 
 func (c *Console) postHello(w http.ResponseWriter, r *http.Request) {
@@ -736,7 +732,7 @@ func validateMapping(proto, mode string, entry *int, localHost string, localPort
 		return nil
 	}
 	if entry == nil {
-		return fmt.Errorf("公开或暗端口模式必须指定入口端口")
+		return fmt.Errorf("public 或 spa 模式必须指定入口端口")
 	}
 	if *entry < 1 || *entry > 65535 {
 		return fmt.Errorf("入口端口无效")
@@ -962,7 +958,7 @@ func (c *Console) postKnock(w http.ResponseWriter, r *http.Request) {
 	}
 	if m.Spec.Mode != "spa" || !m.Spec.Enabled {
 		c.mu.Unlock()
-		writeErr(w, 400, "只有启用的暗端口可以敲门")
+		writeErr(w, 400, "只有启用的 spa 映射可以敲门")
 		return
 	}
 	ttlSec := policy.ClampTimeoutSec(m.Spec.SpaTTLSec, policy.DefaultSPATimeoutSec)

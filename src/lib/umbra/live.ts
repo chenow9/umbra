@@ -54,16 +54,29 @@ function liveTotals(mappings: Mapping[], nodeId: string, mappingId: string) {
   };
 }
 
+export function seriesToRate(series: TrafficPoint[]): { ts: string; bpsIn: number; bpsOut: number }[] {
+  const out: { ts: string; bpsIn: number; bpsOut: number }[] = [];
+  for (let i = 1; i < series.length; i++) {
+    const dt = (Date.parse(series[i].ts) - Date.parse(series[i - 1].ts)) / 1000;
+    let bpsIn = 0;
+    let bpsOut = 0;
+    if (dt > 0) {
+      const dIn = series[i].bytesIn - series[i - 1].bytesIn;
+      const dOut = series[i].bytesOut - series[i - 1].bytesOut;
+      if (dIn > 0) bpsIn = dIn / dt;
+      if (dOut > 0) bpsOut = dOut / dt;
+    }
+    out.push({ ts: series[i].ts, bpsIn, bpsOut });
+  }
+  return out;
+}
+
 export function peakBpsFromSeries(series: TrafficPoint[]): { in: number; out: number } {
   let peakIn = 0;
   let peakOut = 0;
-  for (let i = 1; i < series.length; i++) {
-    const dt = (Date.parse(series[i].ts) - Date.parse(series[i - 1].ts)) / 1000;
-    if (!(dt > 0)) continue;
-    const dIn = series[i].bytesIn - series[i - 1].bytesIn;
-    const dOut = series[i].bytesOut - series[i - 1].bytesOut;
-    if (dIn > 0) peakIn = Math.max(peakIn, dIn / dt);
-    if (dOut > 0) peakOut = Math.max(peakOut, dOut / dt);
+  for (const p of seriesToRate(series)) {
+    if (p.bpsIn > peakIn) peakIn = p.bpsIn;
+    if (p.bpsOut > peakOut) peakOut = p.bpsOut;
   }
   return { in: peakIn, out: peakOut };
 }

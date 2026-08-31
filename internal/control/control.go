@@ -210,6 +210,7 @@ func New(g *gate.Server, persist string) (*Console, error) {
 	if err := c.load(); err != nil {
 		return nil, err
 	}
+	c.loadTraffic()
 	g.SetObserver(c)
 	go c.sampleLoop()
 	return c, nil
@@ -257,10 +258,19 @@ func (c *Console) sampleLoop() {
 			c.samples = c.samples[len(c.samples)-10000:]
 		}
 		n++
-		if n%6 == 0 {
+		trafficRaw, trafficErr := encodeTrafficFile(c.samples, now)
+		saveCtrl := n%6 == 0
+		c.mu.Unlock()
+		if trafficErr != nil {
+			log.Printf("traffic encode: %v", trafficErr)
+		} else if p := c.trafficPath(); p != "" {
+			if err := writeAtomic(p, trafficRaw, 0o600); err != nil {
+				log.Printf("traffic: %v", err)
+			}
+		}
+		if saveCtrl {
 			_ = c.save()
 		}
-		c.mu.Unlock()
 	}
 }
 

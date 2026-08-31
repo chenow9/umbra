@@ -50,8 +50,28 @@ export function OverviewPage() {
               hint={`共 ${o?.mappingsTotal ?? 0}`}
               tone={(o?.mappingsActive ?? 0) === 0 && (o?.mappingsTotal ?? 0) > 0 ? "warn" : "ok"}
             />
-            <Stat label="今日入站" value={formatBytes(o?.bytesInToday ?? 0)} hint={`现 ${formatBps(o?.bpsIn ?? 0)}`} />
-            <Stat label="今日出站" value={formatBytes(o?.bytesOutToday ?? 0)} hint={`现 ${formatBps(o?.bpsOut ?? 0)}`} />
+            <Stat label="今日入站" value={formatBytes(o?.bytesInToday ?? 0)} hint="自 0 点起" />
+            <Stat label="今日出站" value={formatBytes(o?.bytesOutToday ?? 0)} hint="自 0 点起" />
+            <Stat
+              label="入站速率"
+              value={formatBps(o?.bpsIn ?? 0)}
+              hint={traffic.data?.peakBpsIn ? `峰值 ${formatBps(traffic.data.peakBpsIn)}` : "此刻"}
+            />
+            <Stat
+              label="出站速率"
+              value={formatBps(o?.bpsOut ?? 0)}
+              hint={traffic.data?.peakBpsOut ? `峰值 ${formatBps(traffic.data.peakBpsOut)}` : "此刻"}
+            />
+            <Stat
+              label="累计入站"
+              value={formatBytes(traffic.data?.bytesIn ?? 0)}
+              hint="全部映射"
+            />
+            <Stat
+              label="累计出站"
+              value={formatBytes(traffic.data?.bytesOut ?? 0)}
+              hint="全部映射"
+            />
           </section>
 
           {alerts.length > 0 ? (
@@ -61,12 +81,16 @@ export function OverviewPage() {
           )}
 
           <section>
-            <div className="mb-3 flex items-baseline justify-between gap-3">
-              <h2 className="text-sm font-medium text-ink">近 24 小时</h2>
-              <p className="text-xs text-stone">累计字节</p>
-            </div>
-            <div className="rounded-xl bg-card p-4 shadow-border">
-              <RateChart data={traffic.data?.series ?? []} />
+            <h2 className="mb-3 text-sm font-medium text-ink">近 24 小时</h2>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-xl bg-card p-4 shadow-border">
+                <p className="mb-2 text-xs text-stone">实时速率</p>
+                <RateChart kind="rate" data={traffic.data?.series ?? []} />
+              </div>
+              <div className="rounded-xl bg-card p-4 shadow-border">
+                <p className="mb-2 text-xs text-stone">累计流量</p>
+                <RateChart kind="bytes" data={traffic.data?.series ?? []} />
+              </div>
             </div>
           </section>
 

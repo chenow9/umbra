@@ -42,7 +42,7 @@ import {
   stopNode,
 } from "./gate";
 import { ECHO_HOST, ECHO_PORT } from "./protocol";
-import { nodeInstall, type Arch, type Platform } from "./units";
+import { nodeEnrollBinCmd, nodeEnrollDockerCmd, type Arch, type Platform } from "./units";
 
 type NodeRow = {
   id: string;
@@ -488,7 +488,9 @@ export const createNode = createServerFn({ method: "POST" })
       token,
       os,
       arch,
-      installCmd: nodeInstall(os, arch, token),
+      listen: "gate:4400",
+      installCmd: nodeEnrollBinCmd(token, "gate:4400"),
+      dockerCmd: nodeEnrollDockerCmd(token, "gate:4400"),
     };
   });
 
@@ -607,7 +609,7 @@ export const createMapping = createServerFn({ method: "POST" })
     }
     const entryPort = data.mode === "visitor" ? null : (data.entryPort ?? null);
     if (data.mode !== "visitor" && entryPort == null) {
-      throw new Error("公开或暗端口模式必须指定入口端口");
+      throw new Error("public 或 spa 模式必须指定入口端口");
     }
     const sql = await ownerSql();
     const node = await ownedNode(data.nodeId);
@@ -880,7 +882,7 @@ export const knockMapping = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const sql = await ownerSql();
     const m = await ownedMapping(data.id);
-    if (m.mode !== "spa" || !m.enabled) throw new Error("只有启用的暗端口需要敲门");
+    if (m.mode !== "spa" || !m.enabled) throw new Error("只有启用的 spa 映射需要敲门");
     const ttlSec = Number(m.spa_ttl_sec) || 60;
     const { until, frames } = knockChannel(m.id, "127.0.0.1", ttlSec);
     if (await gateHealth()) await gateKnock(m.id).catch(() => undefined);
