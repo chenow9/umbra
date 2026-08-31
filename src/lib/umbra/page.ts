@@ -128,7 +128,11 @@ function nodeRank(status: NodeStatus) {
   return 2;
 }
 
+const MODE_ORDER = ["public", "spa", "visitor"];
+
 function compareMapping(a: Mapping, b: Mapping) {
+  const mode = MODE_ORDER.indexOf(a.mode) - MODE_ORDER.indexOf(b.mode);
+  if (mode !== 0) return mode;
   const pa = a.entryPort ?? 1_000_000;
   const pb = b.entryPort ?? 1_000_000;
   if (pa !== pb) return pa - pb;
@@ -162,7 +166,6 @@ export function groupMappings(rows: Mapping[], q: MappingFilter = {}): MappingGr
 }
 
 const PROTO_ORDER = ["tcp", "udp"];
-const MODE_ORDER = ["public", "spa", "visitor"];
 const REACH_ORDER = ["open", "closed", "full", "visitor", "offline", "pending", "error", "disabled"];
 
 function tally(rows: Mapping[], key: (m: Mapping) => string): Map<string, number> {

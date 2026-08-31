@@ -8,6 +8,7 @@ import {
   mappingFacets,
   mergeNodeOptions,
   preferredNodeId,
+  sortMappings,
 } from "./page.ts";
 import type { MappingGroup } from "./page.ts";
 import type { Mapping } from "./types.ts";
@@ -45,10 +46,11 @@ describe("groupMappings", () => {
     mapping({ id: "b", nodeId: "n2", nodeName: "load-204", nodeStatus: "offline", name: "ssh", entryPort: 22022 }),
     mapping({ id: "a", nodeId: "n1", nodeName: "load-111", nodeStatus: "online", name: "web", entryPort: 18080 }),
     mapping({ id: "c", nodeId: "n1", nodeName: "load-111", nodeStatus: "online", name: "dns", entryPort: 53, proto: "udp" }),
+    mapping({ id: "e", nodeId: "n1", nodeName: "load-111", nodeStatus: "online", name: "private", entryPort: 1, mode: "spa" }),
     mapping({ id: "d", nodeId: "n1", nodeName: "load-111", nodeStatus: "online", name: "visit", entryPort: null, mode: "visitor" }),
   ];
 
-  it("filters then groups online nodes first and sorts ports", () => {
+  it("filters then groups online nodes first and sorts modes before ports", () => {
     const groups = groupMappings(rows);
     assert.deepEqual(
       groups.map((g) => g.nodeId),
@@ -56,9 +58,12 @@ describe("groupMappings", () => {
     );
     assert.deepEqual(
       groups[0].items.map((m) => m.id),
-      ["c", "a", "d"],
+      ["c", "a", "e", "d"],
     );
-    assert.equal(groups[0].items[2].mode, "visitor");
+    assert.deepEqual(
+      groups[0].items.map((m) => m.mode),
+      ["public", "public", "spa", "visitor"],
+    );
   });
 
   it("keeps proto filter before grouping", () => {
@@ -66,6 +71,21 @@ describe("groupMappings", () => {
     assert.equal(groups.length, 1);
     assert.equal(groups[0].items.length, 1);
     assert.equal(groups[0].items[0].id, "c");
+  });
+});
+
+describe("sortMappings", () => {
+  it("orders public, spa and visitor within each node", () => {
+    const rows = [
+      mapping({ id: "visitor", nodeId: "n1", nodeName: "node", mode: "visitor", entryPort: null }),
+      mapping({ id: "spa", nodeId: "n1", nodeName: "node", mode: "spa", entryPort: 1 }),
+      mapping({ id: "public", nodeId: "n1", nodeName: "node", mode: "public", entryPort: 65535 }),
+    ];
+
+    assert.deepEqual(
+      sortMappings(rows).map((m) => m.id),
+      ["public", "spa", "visitor"],
+    );
   });
 });
 

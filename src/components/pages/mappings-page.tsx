@@ -230,7 +230,17 @@ export function MappingsPage() {
               </div>
               <div className="hidden overflow-hidden rounded-xl bg-card shadow-border md:block">
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[800px] text-left text-sm">
+                  <table className="w-full min-w-[800px] table-fixed text-left text-sm">
+                    <colgroup>
+                      <col className={showNode ? "w-[13%]" : "w-[15%]"} />
+                      {showNode ? <col className="w-[11%]" /> : null}
+                      <col className={showNode ? "w-[18%]" : "w-[24%]"} />
+                      <col className="w-[8%]" />
+                      <col className={showNode ? "w-[17%]" : "w-[18%]"} />
+                      <col className={showNode ? "w-[9%]" : "w-[10%]"} />
+                      <col className={showNode ? "w-[19%]" : "w-[20%]"} />
+                      <col className="w-[5%]" />
+                    </colgroup>
                     <thead>
                       <tr className="border-b border-line text-xs text-stone">
                         <th className="px-4 py-3 font-medium">名称</th>
@@ -354,7 +364,7 @@ function QuotaNote({ mapping: m }: { mapping: Mapping }) {
   return (
     <div className="text-xs text-ink-soft">
       <p>{quotaBits(m).join(" · ")}</p>
-      <p className="font-mono tabular-nums">在途 {inFlight(m)}</p>
+      <p className="font-mono tabular-nums">活跃连接 {inFlight(m)}</p>
       {drops ? <p className="text-rose">{drops}</p> : null}
     </div>
   );
@@ -463,7 +473,9 @@ function MappingRow({
       <td className="px-4 py-3 align-middle">
         <QuotaNote mapping={m} />
       </td>
-      <td className="px-4 py-3 align-middle font-mono text-xs tabular-nums text-ink-soft">{trafficLine(m)}</td>
+      <td className="truncate px-4 py-3 align-middle font-mono text-xs tabular-nums whitespace-nowrap text-ink-soft">
+        {trafficLine(m)}
+      </td>
       <td className="px-4 py-3 align-middle text-right">
         <MappingMenu mapping={m} onEdit={onEdit} onDelete={onDelete} onIssued={onIssued} />
       </td>
