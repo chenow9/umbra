@@ -89,7 +89,7 @@ type nodeConn struct {
 	udpBound  bool
 	udpSeen   atomic.Int64
 	udpIn     *uplane.Opener
-	udpOut    *uplane.Sealer
+	udpOut    *uplane.Writer
 }
 
 type udpSess struct {
@@ -133,41 +133,54 @@ func ParseUDPMode(s string) UDPMode {
 }
 
 type entry struct {
-	spec             Mapping
-	nodeID           string
-	ln               net.Listener
-	pc               net.PacketConn
-	listenErr        string
-	mu               sync.Mutex
-	window           policy.Window
-	udpSess          map[string]*udpSess
-	udpIP            map[string]*udpIPState
-	active           atomic.Int32
-	in               atomic.Int64
-	out              atomic.Int64
-	pin              atomic.Int64
-	pout             atomic.Int64
-	udpDropMaxConns  atomic.Int64
-	udpDropPerIP     atomic.Int64
-	udpDropRate      atomic.Int64
-	tcpDropMaxConns  atomic.Int64
-	tcpDropACL       atomic.Int64
-	tcpDropSPA       atomic.Int64
-	tcpDropOffline   atomic.Int64
-	tcpDropTunnel    atomic.Int64
-	tcpDropSplice    atomic.Int64
-	lastDrop         atomic.Value
-	lastDropAt       atomic.Int64
-	udpMapTokens     float64
-	udpMapLast       time.Time
-	udpLogNSMaxConns atomic.Int64
-	udpLogNSPerIP    atomic.Int64
-	udpLogNSRate     atomic.Int64
-	udpIPSweepNS     atomic.Int64
-	stopCh           chan struct{}
-	stopOnce         sync.Once
-	udpViaUplane     atomic.Bool
-	udpViaYamux      atomic.Bool
+	spec                Mapping
+	nodeID              string
+	ln                  net.Listener
+	pc                  net.PacketConn
+	listenErr           string
+	mu                  sync.Mutex
+	window              policy.Window
+	udpSess             map[string]*udpSess
+	udpIP               map[string]*udpIPState
+	active              atomic.Int32
+	in                  atomic.Int64
+	out                 atomic.Int64
+	pin                 atomic.Int64
+	pout                atomic.Int64
+	udpIngressPackets   atomic.Int64
+	udpIngressBytes     atomic.Int64
+	udpFromNodePackets  atomic.Int64
+	udpFromNodeBytes    atomic.Int64
+	udpDropMaxConns     atomic.Int64
+	udpDropPerIP        atomic.Int64
+	udpDropRate         atomic.Int64
+	udpDropACL          atomic.Int64
+	udpDropSPA          atomic.Int64
+	udpDropTrafficLimit atomic.Int64
+	udpDropNoPath       atomic.Int64
+	udpDropEncode       atomic.Int64
+	udpDropUPlaneWrite  atomic.Int64
+	udpDropTunnelWrite  atomic.Int64
+	udpDropUnknownFlow  atomic.Int64
+	udpDropClientWrite  atomic.Int64
+	tcpDropMaxConns     atomic.Int64
+	tcpDropACL          atomic.Int64
+	tcpDropSPA          atomic.Int64
+	tcpDropOffline      atomic.Int64
+	tcpDropTunnel       atomic.Int64
+	tcpDropSplice       atomic.Int64
+	lastDrop            atomic.Value
+	lastDropAt          atomic.Int64
+	udpMapTokens        float64
+	udpMapLast          time.Time
+	udpLogNSMaxConns    atomic.Int64
+	udpLogNSPerIP       atomic.Int64
+	udpLogNSRate        atomic.Int64
+	udpIPSweepNS        atomic.Int64
+	stopCh              chan struct{}
+	stopOnce            sync.Once
+	udpViaUplane        atomic.Bool
+	udpViaYamux         atomic.Bool
 }
 
 type ticketEnt struct {
@@ -204,6 +217,7 @@ type Server struct {
 	api       net.Listener
 	udpPC     net.PacketConn
 	udpMode   UDPMode
+	udpPlane  udpPlaneCounters
 	hsQuota   *ipQuota
 	sessQuota *ipQuota
 	splices   atomic.Int32
@@ -1015,12 +1029,21 @@ func (s *Server) ensureEntry(nodeID string, m Mapping) {
 		return
 	}
 	var in, out, pin, pout, dropMax, dropIP, dropRate int64
+	var udpIngressPackets, udpIngressBytes, udpFromNodePackets, udpFromNodeBytes int64
+	var udpACL, udpSPA, udpTraffic, udpNoPath, udpEncode, udpUPlaneWrite, udpTunnelWrite, udpUnknownFlow, udpClientWrite int64
 	var tcpMax, tcpACL, tcpSPA, tcpOff, tcpTun, tcpSplice, lastAt int64
 	var last any
 	if cur != nil {
 		in, out = cur.in.Load(), cur.out.Load()
 		pin, pout = cur.pin.Load(), cur.pout.Load()
 		dropMax, dropIP, dropRate = cur.udpDropMaxConns.Load(), cur.udpDropPerIP.Load(), cur.udpDropRate.Load()
+		udpIngressPackets, udpIngressBytes = cur.udpIngressPackets.Load(), cur.udpIngressBytes.Load()
+		udpFromNodePackets, udpFromNodeBytes = cur.udpFromNodePackets.Load(), cur.udpFromNodeBytes.Load()
+		udpACL, udpSPA = cur.udpDropACL.Load(), cur.udpDropSPA.Load()
+		udpTraffic, udpNoPath = cur.udpDropTrafficLimit.Load(), cur.udpDropNoPath.Load()
+		udpEncode, udpUPlaneWrite = cur.udpDropEncode.Load(), cur.udpDropUPlaneWrite.Load()
+		udpTunnelWrite = cur.udpDropTunnelWrite.Load()
+		udpUnknownFlow, udpClientWrite = cur.udpDropUnknownFlow.Load(), cur.udpDropClientWrite.Load()
 		tcpMax, tcpACL, tcpSPA = cur.tcpDropMaxConns.Load(), cur.tcpDropACL.Load(), cur.tcpDropSPA.Load()
 		tcpOff, tcpTun, tcpSplice = cur.tcpDropOffline.Load(), cur.tcpDropTunnel.Load(), cur.tcpDropSplice.Load()
 		last, lastAt = cur.lastDrop.Load(), cur.lastDropAt.Load()
@@ -1035,6 +1058,19 @@ func (s *Server) ensureEntry(nodeID string, m Mapping) {
 	e.udpDropMaxConns.Store(dropMax)
 	e.udpDropPerIP.Store(dropIP)
 	e.udpDropRate.Store(dropRate)
+	e.udpIngressPackets.Store(udpIngressPackets)
+	e.udpIngressBytes.Store(udpIngressBytes)
+	e.udpFromNodePackets.Store(udpFromNodePackets)
+	e.udpFromNodeBytes.Store(udpFromNodeBytes)
+	e.udpDropACL.Store(udpACL)
+	e.udpDropSPA.Store(udpSPA)
+	e.udpDropTrafficLimit.Store(udpTraffic)
+	e.udpDropNoPath.Store(udpNoPath)
+	e.udpDropEncode.Store(udpEncode)
+	e.udpDropUPlaneWrite.Store(udpUPlaneWrite)
+	e.udpDropTunnelWrite.Store(udpTunnelWrite)
+	e.udpDropUnknownFlow.Store(udpUnknownFlow)
+	e.udpDropClientWrite.Store(udpClientWrite)
 	e.tcpDropMaxConns.Store(tcpMax)
 	e.tcpDropACL.Store(tcpACL)
 	e.tcpDropSPA.Store(tcpSPA)
@@ -1083,6 +1119,12 @@ func (s *Server) bindListen(e *entry) (net.Listener, net.PacketConn, error) {
 	addr := net.JoinHostPort(s.bind, fmt.Sprintf("%d", port))
 	if e.spec.Proto == "udp" {
 		pc, err := doListenPacket("udp4", addr)
+		if err == nil {
+			if err = netutil.SetUDPReadBuffer(pc); err != nil {
+				_ = pc.Close()
+				pc = nil
+			}
+		}
 		return nil, pc, err
 	}
 	ln, err := doListenTCP("tcp", addr)
@@ -1423,12 +1465,15 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 		if err != nil {
 			return
 		}
+		e.udpIngressPackets.Add(1)
+		e.udpIngressBytes.Add(int64(n))
 		ip := policy.NormalizeIP(raddr.String())
 		if !policy.CidrAllowed(ip, e.spec.AllowCidrs) {
-			slog.Info("acl drop", "mapping", e.spec.ID, "ip", ip, "proto", "udp")
+			e.noteUDPDrop(ip, "acl")
 			continue
 		}
 		if !e.take(n) {
+			e.noteUDPDrop(ip, "traffic_limit")
 			continue
 		}
 		peerKey := raddr.String()
@@ -1474,6 +1519,7 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 					e.dropUDPSessLocked(sess)
 				}
 				e.mu.Unlock()
+				e.noteUDPDrop(ip, "no_path")
 				continue
 			}
 			sess.path = path
@@ -1494,17 +1540,22 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 		}
 		switch path {
 		case udpPathUPlane:
-			if s.sendNodeUDP(e.nodeID, pkt) {
+			if result := s.sendNodeUDP(e.nodeID, pkt); result == udpSendOK {
 				e.in.Add(int64(n))
 				e.pin.Add(1)
+			} else {
+				e.noteUDPSendDrop(ip, result)
 			}
 		case udpPathYamux:
 			if !s.openUDPFallback(e, sess, udpFlowIndex(flowID), ip, peerPort) {
+				e.noteUDPDrop(ip, "no_path")
 				continue
 			}
 			if err := wire.WriteDatagram(sess.st, buf[:n]); err == nil {
 				e.in.Add(int64(n))
 				e.pin.Add(1)
+			} else {
+				e.noteUDPDrop(ip, "tunnel_write")
 			}
 		}
 	}
@@ -1571,7 +1622,10 @@ func (s *Server) readUDPStream(e *entry, sess *udpSess, key string) {
 			_ = sess.st.Close()
 			return
 		}
+		e.udpFromNodePackets.Add(1)
+		e.udpFromNodeBytes.Add(int64(len(p)))
 		if _, err := sess.pc.WriteTo(p, sess.raddr); err != nil {
+			e.noteUDPDrop("", "client_write")
 			continue
 		}
 		e.out.Add(int64(len(p)))
@@ -1706,17 +1760,47 @@ type statusNode struct {
 }
 
 type Status struct {
-	Nodes             []statusNode `json:"nodes"`
-	Stealth           string       `json:"stealth"`
-	Active            int          `json:"active"`
-	UDPActive         int          `json:"udpActive"`
-	UDPDropMaxConns   int64        `json:"udpDropMaxConns"`
-	UDPDropPerIP      int64        `json:"udpDropPerIP"`
-	UDPDropRate       int64        `json:"udpDropRate"`
-	UDPMaxFlowsPerIP  int          `json:"udpMaxFlowsPerIP"`
-	UDPNewFlowsPerSec int          `json:"udpNewFlowsPerSec"`
-	UDPNewFlowsPerMap int          `json:"udpNewFlowsPerMap"`
-	UDP               string       `json:"udp"`
+	Nodes                   []statusNode `json:"nodes"`
+	Stealth                 string       `json:"stealth"`
+	Active                  int          `json:"active"`
+	UDPActive               int          `json:"udpActive"`
+	UDPDropMaxConns         int64        `json:"udpDropMaxConns"`
+	UDPDropPerIP            int64        `json:"udpDropPerIP"`
+	UDPDropRate             int64        `json:"udpDropRate"`
+	UDPIngressPackets       int64        `json:"udpIngressPackets"`
+	UDPIngressBytes         int64        `json:"udpIngressBytes"`
+	UDPToNodePackets        int64        `json:"udpToNodePackets"`
+	UDPToNodeBytes          int64        `json:"udpToNodeBytes"`
+	UDPFromNodePackets      int64        `json:"udpFromNodePackets"`
+	UDPFromNodeBytes        int64        `json:"udpFromNodeBytes"`
+	UDPToClientPackets      int64        `json:"udpToClientPackets"`
+	UDPToClientBytes        int64        `json:"udpToClientBytes"`
+	UDPDropACL              int64        `json:"udpDropAcl"`
+	UDPDropSPA              int64        `json:"udpDropSpa"`
+	UDPDropTrafficLimit     int64        `json:"udpDropTrafficLimit"`
+	UDPDropNoPath           int64        `json:"udpDropNoPath"`
+	UDPDropEncode           int64        `json:"udpDropEncode"`
+	UDPDropUPlaneWrite      int64        `json:"udpDropUplaneWrite"`
+	UDPDropTunnelWrite      int64        `json:"udpDropTunnelWrite"`
+	UDPDropUnknownFlow      int64        `json:"udpDropUnknownFlow"`
+	UDPDropClientWrite      int64        `json:"udpDropClientWrite"`
+	UDPMaxFlowsPerIP        int          `json:"udpMaxFlowsPerIP"`
+	UDPNewFlowsPerSec       int          `json:"udpNewFlowsPerSec"`
+	UDPNewFlowsPerMap       int          `json:"udpNewFlowsPerMap"`
+	UDP                     string       `json:"udp"`
+	UDPUPlaneRxPackets      int64        `json:"udpUplaneRxPackets"`
+	UDPUPlaneRxBytes        int64        `json:"udpUplaneRxBytes"`
+	UDPUPlaneReadErrors     int64        `json:"udpUplaneReadErrors"`
+	UDPUPlanePeekErrors     int64        `json:"udpUplanePeekErrors"`
+	UDPUPlaneUnknownPeer    int64        `json:"udpUplaneUnknownPeer"`
+	UDPUPlaneDecodeErrors   int64        `json:"udpUplaneDecodeErrors"`
+	UDPUPlaneUnknownType    int64        `json:"udpUplaneUnknownType"`
+	UDPUPlaneUnknownMapping int64        `json:"udpUplaneUnknownMapping"`
+	UDPUPlaneTxPackets      int64        `json:"udpUplaneTxPackets"`
+	UDPUPlaneTxBytes        int64        `json:"udpUplaneTxBytes"`
+	UDPUPlaneNotReady       int64        `json:"udpUplaneNotReady"`
+	UDPUPlaneEncodeErrors   int64        `json:"udpUplaneEncodeErrors"`
+	UDPUPlaneWriteErrors    int64        `json:"udpUplaneWriteErrors"`
 }
 
 func (s *Server) Active() int {
@@ -1736,24 +1820,49 @@ func (s *Server) Status() Status {
 	for _, a := range s.nodes {
 		out = append(out, statusNode{ID: a.id, Online: a.online, Addr: a.addr, OS: a.os, Arch: a.arch, Ver: a.ver, UPlane: a.online && a.udpBound && a.udpAddr != nil && a.udpOut != nil && udpSeenFresh(a.udpSeen.Load())})
 	}
-	n, udpN := 0, 0
-	var dropMax, dropIP, dropRate int64
+	st := Status{Nodes: out, Stealth: s.stealth.Mode(), UDP: string(s.udpMode)}
 	for _, e := range s.ent {
 		a := int(e.active.Load())
-		n += a
+		st.Active += a
 		if e.spec.Proto == "udp" {
-			udpN += a
-			dropMax += e.udpDropMaxConns.Load()
-			dropIP += e.udpDropPerIP.Load()
-			dropRate += e.udpDropRate.Load()
+			st.UDPActive += a
+			st.UDPDropMaxConns += e.udpDropMaxConns.Load()
+			st.UDPDropPerIP += e.udpDropPerIP.Load()
+			st.UDPDropRate += e.udpDropRate.Load()
+			st.UDPIngressPackets += e.udpIngressPackets.Load()
+			st.UDPIngressBytes += e.udpIngressBytes.Load()
+			st.UDPToNodePackets += e.pin.Load()
+			st.UDPToNodeBytes += e.in.Load()
+			st.UDPFromNodePackets += e.udpFromNodePackets.Load()
+			st.UDPFromNodeBytes += e.udpFromNodeBytes.Load()
+			st.UDPToClientPackets += e.pout.Load()
+			st.UDPToClientBytes += e.out.Load()
+			st.UDPDropACL += e.udpDropACL.Load()
+			st.UDPDropSPA += e.udpDropSPA.Load()
+			st.UDPDropTrafficLimit += e.udpDropTrafficLimit.Load()
+			st.UDPDropNoPath += e.udpDropNoPath.Load()
+			st.UDPDropEncode += e.udpDropEncode.Load()
+			st.UDPDropUPlaneWrite += e.udpDropUPlaneWrite.Load()
+			st.UDPDropTunnelWrite += e.udpDropTunnelWrite.Load()
+			st.UDPDropUnknownFlow += e.udpDropUnknownFlow.Load()
+			st.UDPDropClientWrite += e.udpDropClientWrite.Load()
 		}
 	}
-	perIP, perSec, perMap := UDPAdmitLimits()
-	return Status{
-		Nodes: out, Stealth: s.stealth.Mode(), Active: n, UDP: string(s.udpMode),
-		UDPActive: udpN, UDPDropMaxConns: dropMax, UDPDropPerIP: dropIP, UDPDropRate: dropRate,
-		UDPMaxFlowsPerIP: perIP, UDPNewFlowsPerSec: perSec, UDPNewFlowsPerMap: perMap,
-	}
+	st.UDPMaxFlowsPerIP, st.UDPNewFlowsPerSec, st.UDPNewFlowsPerMap = UDPAdmitLimits()
+	st.UDPUPlaneRxPackets = s.udpPlane.rxPackets.Load()
+	st.UDPUPlaneRxBytes = s.udpPlane.rxBytes.Load()
+	st.UDPUPlaneReadErrors = s.udpPlane.readErrors.Load()
+	st.UDPUPlanePeekErrors = s.udpPlane.peekErrors.Load()
+	st.UDPUPlaneUnknownPeer = s.udpPlane.unknownPeer.Load()
+	st.UDPUPlaneDecodeErrors = s.udpPlane.decodeErrors.Load()
+	st.UDPUPlaneUnknownType = s.udpPlane.unknownType.Load()
+	st.UDPUPlaneUnknownMapping = s.udpPlane.unknownMap.Load()
+	st.UDPUPlaneTxPackets = s.udpPlane.txPackets.Load()
+	st.UDPUPlaneTxBytes = s.udpPlane.txBytes.Load()
+	st.UDPUPlaneNotReady = s.udpPlane.notReady.Load()
+	st.UDPUPlaneEncodeErrors = s.udpPlane.encodeErrors.Load()
+	st.UDPUPlaneWriteErrors = s.udpPlane.writeErrors.Load()
+	return st
 }
 
 type MapStat struct {
@@ -1764,6 +1873,23 @@ type MapStat struct {
 	UDPDropMaxConns       int64 `json:"udpDropMaxConns"`
 	UDPDropPerIP          int64 `json:"udpDropPerIP"`
 	UDPDropRate           int64 `json:"udpDropRate"`
+	UDPIngressPackets     int64 `json:"udpIngressPackets"`
+	UDPIngressBytes       int64 `json:"udpIngressBytes"`
+	UDPToNodePackets      int64 `json:"udpToNodePackets"`
+	UDPToNodeBytes        int64 `json:"udpToNodeBytes"`
+	UDPFromNodePackets    int64 `json:"udpFromNodePackets"`
+	UDPFromNodeBytes      int64 `json:"udpFromNodeBytes"`
+	UDPToClientPackets    int64 `json:"udpToClientPackets"`
+	UDPToClientBytes      int64 `json:"udpToClientBytes"`
+	UDPDropACL            int64 `json:"udpDropAcl"`
+	UDPDropSPA            int64 `json:"udpDropSpa"`
+	UDPDropTrafficLimit   int64 `json:"udpDropTrafficLimit"`
+	UDPDropNoPath         int64 `json:"udpDropNoPath"`
+	UDPDropEncode         int64 `json:"udpDropEncode"`
+	UDPDropUPlaneWrite    int64 `json:"udpDropUplaneWrite"`
+	UDPDropTunnelWrite    int64 `json:"udpDropTunnelWrite"`
+	UDPDropUnknownFlow    int64 `json:"udpDropUnknownFlow"`
+	UDPDropClientWrite    int64 `json:"udpDropClientWrite"`
 	TCPDropMaxConns       int64 `json:"tcpDropMaxConns"`
 	TCPDropACL            int64 `json:"tcpDropAcl"`
 	TCPDropSPA            int64 `json:"tcpDropSpa"`
@@ -1826,19 +1952,36 @@ func (s *Server) MappingStats() map[string]MapStat {
 			In: e.in.Load(), Out: e.out.Load(),
 			PacketsIn: e.pin.Load(), PacketsOut: e.pout.Load(),
 			Active: active, UDPActive: udpActive,
-			UDPDropMaxConns: e.udpDropMaxConns.Load(),
-			UDPDropPerIP:    e.udpDropPerIP.Load(),
-			UDPDropRate:     e.udpDropRate.Load(),
-			TCPDropMaxConns: e.tcpDropMaxConns.Load(),
-			TCPDropACL:      e.tcpDropACL.Load(),
-			TCPDropSPA:      e.tcpDropSPA.Load(),
-			TCPDropOffline:  e.tcpDropOffline.Load(),
-			TCPDropTunnel:   e.tcpDropTunnel.Load(),
-			TCPDropSplice:   e.tcpDropSplice.Load(),
-			LastDrop:        last,
-			LastDropAt:      lastAt,
-			NodeID:          e.nodeID,
-			Error:           e.listenErr, Listening: listen && e.listenErr == "",
+			UDPDropMaxConns:     e.udpDropMaxConns.Load(),
+			UDPDropPerIP:        e.udpDropPerIP.Load(),
+			UDPDropRate:         e.udpDropRate.Load(),
+			UDPIngressPackets:   e.udpIngressPackets.Load(),
+			UDPIngressBytes:     e.udpIngressBytes.Load(),
+			UDPToNodePackets:    e.pin.Load(),
+			UDPToNodeBytes:      e.in.Load(),
+			UDPFromNodePackets:  e.udpFromNodePackets.Load(),
+			UDPFromNodeBytes:    e.udpFromNodeBytes.Load(),
+			UDPToClientPackets:  e.pout.Load(),
+			UDPToClientBytes:    e.out.Load(),
+			UDPDropACL:          e.udpDropACL.Load(),
+			UDPDropSPA:          e.udpDropSPA.Load(),
+			UDPDropTrafficLimit: e.udpDropTrafficLimit.Load(),
+			UDPDropNoPath:       e.udpDropNoPath.Load(),
+			UDPDropEncode:       e.udpDropEncode.Load(),
+			UDPDropUPlaneWrite:  e.udpDropUPlaneWrite.Load(),
+			UDPDropTunnelWrite:  e.udpDropTunnelWrite.Load(),
+			UDPDropUnknownFlow:  e.udpDropUnknownFlow.Load(),
+			UDPDropClientWrite:  e.udpDropClientWrite.Load(),
+			TCPDropMaxConns:     e.tcpDropMaxConns.Load(),
+			TCPDropACL:          e.tcpDropACL.Load(),
+			TCPDropSPA:          e.tcpDropSPA.Load(),
+			TCPDropOffline:      e.tcpDropOffline.Load(),
+			TCPDropTunnel:       e.tcpDropTunnel.Load(),
+			TCPDropSplice:       e.tcpDropSplice.Load(),
+			LastDrop:            last,
+			LastDropAt:          lastAt,
+			NodeID:              e.nodeID,
+			Error:               e.listenErr, Listening: listen && e.listenErr == "",
 			UDPVia: via, Generation: e.spec.Generation,
 			Acked: ackedOK(s.acked[id], e.spec.Generation, s.ackErr[id]),
 		}

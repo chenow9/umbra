@@ -138,6 +138,9 @@ func (c *Console) mappingView(m *mapRec, live map[string]gateNode, stats map[str
 	}
 	in, outB, active := m.BytesIn, m.BytesOut, 0
 	udpActive, dropMax, dropIP, dropRate := 0, int64(0), int64(0), int64(0)
+	var udpIngressPackets, udpIngressBytes, udpToNodePackets, udpToNodeBytes int64
+	var udpFromNodePackets, udpFromNodeBytes, udpToClientPackets, udpToClientBytes int64
+	var udpACL, udpSPA, udpTraffic, udpNoPath, udpEncode, udpUPlaneWrite, udpTunnelWrite, udpUnknownFlow, udpClientWrite int64
 	var tcpMax, tcpACL, tcpSPA, tcpOff, tcpTun, tcpSplice int64
 	lastDrop, lastDropAt := "", ""
 	listen, push, listenErr := m.ListenState, m.PushState, m.ListenError
@@ -165,6 +168,14 @@ func (c *Console) mappingView(m *mapRec, live map[string]gateNode, stats map[str
 	} else if s, ok := stats[m.Spec.ID]; ok {
 		active = s.Active
 		udpActive, dropMax, dropIP, dropRate = s.UDPActive, s.UDPDropMaxConns, s.UDPDropPerIP, s.UDPDropRate
+		udpIngressPackets, udpIngressBytes = s.UDPIngressPackets, s.UDPIngressBytes
+		udpToNodePackets, udpToNodeBytes = s.UDPToNodePackets, s.UDPToNodeBytes
+		udpFromNodePackets, udpFromNodeBytes = s.UDPFromNodePackets, s.UDPFromNodeBytes
+		udpToClientPackets, udpToClientBytes = s.UDPToClientPackets, s.UDPToClientBytes
+		udpACL, udpSPA = s.UDPDropACL, s.UDPDropSPA
+		udpTraffic, udpNoPath = s.UDPDropTrafficLimit, s.UDPDropNoPath
+		udpEncode, udpUPlaneWrite = s.UDPDropEncode, s.UDPDropUPlaneWrite
+		udpTunnelWrite, udpUnknownFlow, udpClientWrite = s.UDPDropTunnelWrite, s.UDPDropUnknownFlow, s.UDPDropClientWrite
 		tcpMax, tcpACL, tcpSPA = s.TCPDropMaxConns, s.TCPDropACL, s.TCPDropSPA
 		tcpOff, tcpTun, tcpSplice = s.TCPDropOffline, s.TCPDropTunnel, s.TCPDropSplice
 		lastDrop = s.LastDrop
@@ -211,6 +222,13 @@ func (c *Console) mappingView(m *mapRec, live map[string]gateNode, stats map[str
 		"enabled": m.Spec.Enabled, "listenState": listen, "listenError": nilIfEmpty(listenErr),
 		"pushState": push, "bytesIn": in, "bytesOut": outB, "activeConns": active,
 		"udpActive": udpActive, "udpDropMaxConns": dropMax, "udpDropPerIP": dropIP, "udpDropRate": dropRate,
+		"udpIngressPackets": udpIngressPackets, "udpIngressBytes": udpIngressBytes,
+		"udpToNodePackets": udpToNodePackets, "udpToNodeBytes": udpToNodeBytes,
+		"udpFromNodePackets": udpFromNodePackets, "udpFromNodeBytes": udpFromNodeBytes,
+		"udpToClientPackets": udpToClientPackets, "udpToClientBytes": udpToClientBytes,
+		"udpDropAcl": udpACL, "udpDropSpa": udpSPA, "udpDropTrafficLimit": udpTraffic,
+		"udpDropNoPath": udpNoPath, "udpDropEncode": udpEncode, "udpDropUplaneWrite": udpUPlaneWrite,
+		"udpDropTunnelWrite": udpTunnelWrite, "udpDropUnknownFlow": udpUnknownFlow, "udpDropClientWrite": udpClientWrite,
 		"tcpDropMaxConns": tcpMax, "tcpDropAcl": tcpACL, "tcpDropSpa": tcpSPA,
 		"tcpDropOffline": tcpOff, "tcpDropTunnel": tcpTun, "tcpDropSplice": tcpSplice,
 		"lastDrop": lastDrop, "lastDropAt": lastDropAt,

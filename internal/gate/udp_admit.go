@@ -292,12 +292,43 @@ func (e *entry) ensureUDPIPRoomLocked(now time.Time) {
 }
 
 func (e *entry) noteUDPDrop(ip, reason string) {
+	switch reason {
+	case "acl":
+		e.udpDropACL.Add(1)
+	case "spa":
+		e.udpDropSPA.Add(1)
+	case "traffic_limit":
+		e.udpDropTrafficLimit.Add(1)
+	case "no_path":
+		e.udpDropNoPath.Add(1)
+	case "encode":
+		e.udpDropEncode.Add(1)
+	case "uplane_write":
+		e.udpDropUPlaneWrite.Add(1)
+	case "tunnel_write":
+		e.udpDropTunnelWrite.Add(1)
+	case "unknown_flow":
+		e.udpDropUnknownFlow.Add(1)
+	case "client_write":
+		e.udpDropClientWrite.Add(1)
+	}
 	e.lastDrop.Store(reason)
 	e.lastDropAt.Store(time.Now().UnixNano())
 	if !e.udpLogOK(reason) {
 		return
 	}
 	slog.Info("udp drop", "mapping", e.spec.ID, "ip", ip, "reason", reason)
+}
+
+func (e *entry) noteUDPSendDrop(ip string, result udpSendResult) {
+	switch result {
+	case udpSendNotReady:
+		e.noteUDPDrop(ip, "no_path")
+	case udpSendEncodeError:
+		e.noteUDPDrop(ip, "encode")
+	case udpSendWriteError:
+		e.noteUDPDrop(ip, "uplane_write")
+	}
 }
 
 func (e *entry) udpLogOK(reason string) bool {

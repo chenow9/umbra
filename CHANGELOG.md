@@ -2,13 +2,21 @@
 
 ## 0.1.2
 
-控制台布局。
+UDP 稳定性、可观测性与控制台布局。
 
+- uplane 发送改为有序分配序号、编码并写入，避免高并发乱序被重放窗口误判
+- UDP socket 接收缓冲支持 `UMBRA_UDP_READ_BUFFER`，默认 512 KiB，覆盖 gate、node 和 visitor
+- gate 映射/API 与 node 日志增加 UDP 分段计数，可区分入口、uplane、目标和客户端回写问题
+- 补充入口容量、UDP flow 准入和接收缓冲环境变量文档
 - 侧栏入口卡片：节点在线与映射数并排，入/出速率左右排列，右侧不再空
 - 映射表、节点表操作列加宽并留出右边距，「…」不再贴边
 
-Console layout.
+UDP stability, observability, and console layout.
 
+- Serialize uplane sequence allocation, encoding, and socket writes so concurrent traffic is not misclassified by the replay window
+- Add `UMBRA_UDP_READ_BUFFER` for gate, node, and visitor UDP sockets with a conservative 512 KiB default
+- Add gate mapping/API and node-log UDP stage counters to separate ingress, uplane, target, and client-write issues
+- Document gate capacity, UDP flow admission, and receive-buffer environment variables
 - Sidebar entry card: node online and mapping counts sit side by side; inbound/outbound rates in two columns so the right side is not empty
 - Mapping and node tables widen the action column and add right padding so the ⋯ menu is not flush with the card edge
 

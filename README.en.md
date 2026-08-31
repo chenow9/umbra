@@ -211,6 +211,27 @@ docker compose -f deploy/compose.gate.yml up -d
 
 Before raising the TCP limit, verify file-descriptor limits and available memory on both the gate and nodes. Disabling UDP admission protection increases the risk that one source consumes the flow quota or causes a resource-exhaustion attack.
 
+### UDP socket receive-buffer environment variable
+
+`umbrad`, `umbra-node`, and UDP visitors read the following variable when they start or create a UDP flow:
+
+| Environment variable | Default | Meaning |
+|---|---:|---|
+| `UMBRA_UDP_READ_BUFFER` | `524288` | Requested receive-buffer size in bytes for every UDP socket, including the gate's shared uplane and mapping sockets and node/visitor uplane and local-target sockets. Only positive integers are accepted; an unset or invalid value uses 512 KiB. On Linux, the effective size is capped by the host's `net.core.rmem_max`. Restart the affected process or recreate its container after changing the value. The 512 KiB default is conservative for small 2-vCPU/2-GiB hosts and large UDP flow counts; explicitly raise it only after load testing burst requirements. |
+
+Raise the Linux host limit to at least the requested size before increasing the variable, for example:
+
+```bash
+sysctl -w net.core.rmem_max=16777216
+UMBRA_UDP_READ_BUFFER=8388608 docker compose -f deploy/compose.gate.yml up -d
+```
+
+A larger buffer absorbs bursts and scheduler stalls but does not replace sufficient sustained processing capacity. Use `ss -u -m` to inspect the effective socket `rb` and `Udp:RcvbufErrors` to detect receive-queue overflow.
+
+### UDP loss diagnostics
+
+The gate `/health` and mapping APIs expose cumulative stage counters from the public socket through uplane and the client write-back. Set `UMBRA_UDP_STATS_INTERVAL` on a node to emit matching JSON statistics: `0` disables reporting (the default), while a positive integer is the reporting interval in seconds; `10` is recommended during a load test. Restart the node after changing it. Reports never include credentials, cookies, or keys.
+
 ## Security
 
 - Control channel is TLS 1.3; nodes require `--tls-ca`. Newly issued CAs use subject `umbra CA` (an existing tls-dir is not rewritten).

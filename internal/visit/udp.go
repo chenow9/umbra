@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"umbra/internal/netutil"
 	"umbra/internal/uplane"
 )
 
@@ -24,7 +25,7 @@ func serveUDPPlane(ctx context.Context, cfg Config, tlsConn net.Conn, visitID, c
 		return fmt.Errorf("udp requires tls exported key")
 	}
 	c2s, s2c := uplane.DerivePair(ekm, cookie)
-	out, in := &uplane.Sealer{Key: c2s}, &uplane.Opener{Key: s2c}
+	out, in := &uplane.Writer{Key: c2s}, &uplane.Opener{Key: s2c}
 	uaddr, err := net.ResolveUDPAddr("udp", cfg.Server)
 	if err != nil {
 		return err
@@ -34,15 +35,19 @@ func serveUDPPlane(ctx context.Context, cfg Config, tlsConn net.Conn, visitID, c
 		return err
 	}
 	defer uc.Close()
+	if err := netutil.SetUDPReadBuffer(uc); err != nil {
+		return err
+	}
 	if err := waitBindAck(ctx, uc, out, in, visitID, cookie); err != nil {
 		return err
 	}
-	if raw, err := out.Encode(visitID, uplane.Packet{Type: uplane.TypeBindConfirm, Payload: cookie}); err == nil {
-		_, _ = uc.Write(raw)
-	}
+	_, _ = out.Write(visitID, uplane.Packet{Type: uplane.TypeBindConfirm, Payload: cookie}, uc.Write)
 
 	if pc == nil {
 		return fmt.Errorf("no local udp listener")
+	}
+	if err := netutil.SetUDPReadBuffer(pc); err != nil {
+		return err
 	}
 	go func() {
 		<-ctx.Done()
@@ -105,18 +110,17 @@ func serveUDPPlane(ctx context.Context, cfg Config, tlsConn net.Conn, visitID, c
 			rev[fid] = cloneUDPAddr(raddr)
 		}
 		mu.Unlock()
-		raw, err := out.Encode(visitID, uplane.Packet{
+		_, err = out.Write(visitID, uplane.Packet{
 			Type: uplane.TypeData, MappingID: mappingID, FlowID: fid,
 			PeerIP: raddr.IP, PeerPort: raddr.Port, Payload: append([]byte(nil), buf[:n]...),
-		})
+		}, uc.Write)
 		if err != nil {
 			continue
 		}
-		_, _ = uc.Write(raw)
 	}
 }
 
-func waitBindAck(ctx context.Context, uc *net.UDPConn, out *uplane.Sealer, in *uplane.Opener, id string, cookie []byte) error {
+func waitBindAck(ctx context.Context, uc *net.UDPConn, out *uplane.Writer, in *uplane.Opener, id string, cookie []byte) error {
 	buf := uplane.GetBuf()
 	defer uplane.PutBuf(buf)
 	deadline := time.Now().Add(2 * time.Second)
@@ -124,11 +128,7 @@ func waitBindAck(ctx context.Context, uc *net.UDPConn, out *uplane.Sealer, in *u
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		raw, err := out.Encode(id, uplane.Packet{Type: uplane.TypeBind, Payload: cookie})
-		if err != nil {
-			return err
-		}
-		if _, err := uc.Write(raw); err != nil {
+		if _, err := out.Write(id, uplane.Packet{Type: uplane.TypeBind, Payload: cookie}, uc.Write); err != nil {
 			return err
 		}
 		_ = uc.SetReadDeadline(time.Now().Add(400 * time.Millisecond))

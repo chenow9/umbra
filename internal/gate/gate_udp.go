@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
+	"log/slog"
 	"net"
 	"strconv"
 	"sync/atomic"
@@ -21,6 +23,31 @@ const defaultUDPReadyTTL = 15 * time.Second
 // Zero means defaultUDPReadyTTL. Tests may store a shorter value.
 var udpReadyTTLNS atomic.Int64
 
+type udpPlaneCounters struct {
+	rxPackets    atomic.Int64
+	rxBytes      atomic.Int64
+	readErrors   atomic.Int64
+	peekErrors   atomic.Int64
+	unknownPeer  atomic.Int64
+	decodeErrors atomic.Int64
+	unknownType  atomic.Int64
+	unknownMap   atomic.Int64
+	txPackets    atomic.Int64
+	txBytes      atomic.Int64
+	notReady     atomic.Int64
+	encodeErrors atomic.Int64
+	writeErrors  atomic.Int64
+}
+
+type udpSendResult uint8
+
+const (
+	udpSendOK udpSendResult = iota
+	udpSendNotReady
+	udpSendEncodeError
+	udpSendWriteError
+)
+
 func udpReadyTTL() time.Duration {
 	d := time.Duration(udpReadyTTLNS.Load())
 	if d <= 0 {
@@ -33,7 +60,7 @@ type visitUDP struct {
 	id     string
 	cookie []byte
 	in     *uplane.Opener
-	out    *uplane.Sealer
+	out    *uplane.Writer
 	addr   net.Addr
 	bound  bool
 	seen   atomic.Int64
@@ -47,7 +74,7 @@ type visitUDP struct {
 type udpCred struct {
 	cookie []byte
 	in     *uplane.Opener
-	out    *uplane.Sealer
+	out    *uplane.Writer
 }
 
 func (s *Server) AttachUPlane(pc net.PacketConn) {
@@ -63,8 +90,15 @@ func (s *Server) serveUPlane(pc net.PacketConn) {
 	for {
 		n, addr, err := pc.ReadFrom(buf)
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			s.udpPlane.readErrors.Add(1)
+			slog.Warn("udp uplane read failed", "error", err, "count", s.udpPlane.readErrors.Load())
 			return
 		}
+		s.udpPlane.rxPackets.Add(1)
+		s.udpPlane.rxBytes.Add(int64(n))
 		s.handleUPlane(addr, append([]byte(nil), buf[:n]...))
 	}
 }
@@ -72,6 +106,7 @@ func (s *Server) serveUPlane(pc net.PacketConn) {
 func (s *Server) handleUPlane(addr net.Addr, raw []byte) {
 	id, err := uplane.PeekID(raw)
 	if err != nil {
+		s.udpPlane.peekErrors.Add(1)
 		return
 	}
 	s.mu.Lock()
@@ -84,10 +119,12 @@ func (s *Server) handleUPlane(addr net.Addr, raw []byte) {
 	}
 	s.mu.Unlock()
 	if opener == nil || !online {
+		s.udpPlane.unknownPeer.Add(1)
 		return
 	}
 	_, pkt, err := opener.Decode(raw)
 	if err != nil {
+		s.udpPlane.decodeErrors.Add(1)
 		return
 	}
 	switch pkt.Type {
@@ -99,12 +136,14 @@ func (s *Server) handleUPlane(addr net.Addr, raw []byte) {
 		s.onUDPData(id, addr, pkt)
 	case uplane.TypeClose:
 		s.onUDPClose(id, pkt)
+	default:
+		s.udpPlane.unknownType.Add(1)
 	}
 }
 
 func (s *Server) onUDPBind(id string, addr net.Addr, pkt uplane.Packet) {
 	s.mu.Lock()
-	var out *uplane.Sealer
+	var out *uplane.Writer
 	var cookie []byte
 	if ac := s.nodes[id]; ac != nil && ac.online {
 		if subtle.ConstantTimeCompare(pkt.Payload, ac.udpCookie) != 1 {
@@ -125,11 +164,7 @@ func (s *Server) onUDPBind(id string, addr net.Addr, pkt uplane.Packet) {
 	if out == nil || pc == nil {
 		return
 	}
-	raw, err := out.Encode(id, uplane.Packet{Type: uplane.TypeBindAck, Payload: cookie})
-	if err != nil {
-		return
-	}
-	_, _ = pc.WriteTo(raw, addr)
+	s.sendUPlane(out, id, uplane.Packet{Type: uplane.TypeBindAck, Payload: cookie}, pc, addr)
 }
 
 func (s *Server) onUDPConfirm(id string, addr net.Addr, pkt uplane.Packet) {
@@ -172,8 +207,11 @@ func (s *Server) onUDPData(id string, addr net.Addr, pkt uplane.Packet) {
 		ok := e != nil && e.nodeID == id && e.spec.Enabled && e.spec.Proto == "udp"
 		s.mu.Unlock()
 		if !ok {
+			s.udpPlane.unknownMap.Add(1)
 			return
 		}
+		e.udpFromNodePackets.Add(1)
+		e.udpFromNodeBytes.Add(int64(len(pkt.Payload)))
 		s.deliverFromNode(pkt)
 		return
 	}
@@ -191,6 +229,7 @@ func (s *Server) onUDPData(id string, addr net.Addr, pkt uplane.Packet) {
 	ok := pkt.MappingID == mapID && pkt.FlowID != "" && e != nil && e.nodeID == nodeID && e.spec.Enabled && e.spec.Proto == "udp" && e.spec.Mode == "visitor" && proto == "udp" && mode == "visitor"
 	s.mu.Unlock()
 	if !ok {
+		s.udpPlane.unknownMap.Add(1)
 		return
 	}
 	s.forwardVisitUDP(nodeID, visID, pkt)
@@ -262,6 +301,7 @@ func (s *Server) deliverFromNode(pkt uplane.Packet) {
 	sess := e.udpSess[key]
 	if sess == nil {
 		e.mu.Unlock()
+		e.noteUDPDrop("", "unknown_flow")
 		return
 	}
 	visID := sess.visitID
@@ -269,18 +309,23 @@ func (s *Server) deliverFromNode(pkt uplane.Packet) {
 	sess.touchLocked(e, key)
 	e.mu.Unlock()
 	if visID != "" {
-		if s.sendVisitUDP(visID, pkt) {
+		if result := s.sendVisitUDP(visID, pkt); result == udpSendOK {
 			e.out.Add(int64(len(pkt.Payload)))
 			e.pout.Add(1)
+		} else {
+			e.noteUDPSendDrop("", result)
 		}
 		return
 	}
 	if pc == nil || raddr == nil {
+		e.noteUDPDrop("", "unknown_flow")
 		return
 	}
 	if _, err := pc.WriteTo(pkt.Payload, raddr); err == nil {
 		e.out.Add(int64(len(pkt.Payload)))
 		e.pout.Add(1)
+	} else {
+		e.noteUDPDrop("", "client_write")
 	}
 }
 
@@ -291,7 +336,10 @@ func (s *Server) forwardVisitUDP(nodeID, visID string, pkt uplane.Packet) {
 	if e == nil {
 		return
 	}
+	e.udpIngressPackets.Add(1)
+	e.udpIngressBytes.Add(int64(len(pkt.Payload)))
 	if !e.take(len(pkt.Payload)) {
+		e.noteUDPDrop(visID, "traffic_limit")
 		return
 	}
 	if pkt.FlowID == "" {
@@ -330,18 +378,19 @@ func (s *Server) forwardVisitUDP(nodeID, visID string, pkt uplane.Packet) {
 	sess.visitID = visID
 	sess.touchLocked(e, key)
 	e.mu.Unlock()
-	if !s.sendNodeUDP(nodeID, pkt) {
+	if result := s.sendNodeUDP(nodeID, pkt); result != udpSendOK {
+		e.noteUDPSendDrop(visID, result)
 		return
 	}
 	e.in.Add(int64(len(pkt.Payload)))
 	e.pin.Add(1)
 }
 
-func (s *Server) sendNodeUDP(nodeID string, pkt uplane.Packet) bool {
+func (s *Server) sendNodeUDP(nodeID string, pkt uplane.Packet) udpSendResult {
 	s.mu.Lock()
 	ac := s.nodes[nodeID]
 	pc := s.udpPC
-	var out *uplane.Sealer
+	var out *uplane.Writer
 	var addr net.Addr
 	var id string
 	if ac != nil && ac.online && ac.udpBound && ac.udpAddr != nil && ac.udpOut != nil && udpSeenFresh(ac.udpSeen.Load()) {
@@ -349,30 +398,39 @@ func (s *Server) sendNodeUDP(nodeID string, pkt uplane.Packet) bool {
 	}
 	s.mu.Unlock()
 	if pc == nil || addr == nil || out == nil {
-		return false
+		s.udpPlane.notReady.Add(1)
+		return udpSendNotReady
 	}
-	raw, err := out.Encode(id, pkt)
-	if err != nil {
-		return false
-	}
-	_, err = pc.WriteTo(raw, addr)
-	return err == nil
+	return s.sendUPlane(out, id, pkt, pc, addr)
 }
 
-func (s *Server) sendVisitUDP(visitID string, pkt uplane.Packet) bool {
+func (s *Server) sendVisitUDP(visitID string, pkt uplane.Packet) udpSendResult {
 	s.mu.Lock()
 	v := s.visits[visitID]
 	pc := s.udpPC
 	s.mu.Unlock()
 	if v == nil || !v.bound || v.addr == nil || pc == nil || v.out == nil {
-		return false
+		s.udpPlane.notReady.Add(1)
+		return udpSendNotReady
 	}
-	raw, err := v.out.Encode(v.id, pkt)
+	return s.sendUPlane(v.out, v.id, pkt, pc, v.addr)
+}
+
+func (s *Server) sendUPlane(out *uplane.Writer, id string, pkt uplane.Packet, pc net.PacketConn, addr net.Addr) udpSendResult {
+	n, err := out.Write(id, pkt, func(raw []byte) (int, error) {
+		return pc.WriteTo(raw, addr)
+	})
+	if errors.Is(err, uplane.ErrWriterEncode) {
+		s.udpPlane.encodeErrors.Add(1)
+		return udpSendEncodeError
+	}
 	if err != nil {
-		return false
+		s.udpPlane.writeErrors.Add(1)
+		return udpSendWriteError
 	}
-	_, err = pc.WriteTo(raw, v.addr)
-	return err == nil
+	s.udpPlane.txPackets.Add(1)
+	s.udpPlane.txBytes.Add(int64(n))
+	return udpSendOK
 }
 
 func (s *Server) nodeUDPReady(nodeID string) bool {
@@ -424,7 +482,7 @@ func (s *Server) issueUDP(raw net.Conn) *udpCred {
 	}
 	cookie := newUDPCookie()
 	c2s, s2c := uplane.DerivePair(ekm, cookie)
-	return &udpCred{cookie: cookie, in: &uplane.Opener{Key: c2s}, out: &uplane.Sealer{Key: s2c}}
+	return &udpCred{cookie: cookie, in: &uplane.Opener{Key: c2s}, out: &uplane.Writer{Key: s2c}}
 }
 
 func (s *Server) clearNodeUDP(ac *nodeConn) {

@@ -1002,7 +1002,14 @@ func TestHealthAndMappingsExposeUDPAdmit(t *testing.T) {
 	if res.StatusCode != 200 && res.StatusCode != 503 {
 		t.Fatalf("health %d %v", res.StatusCode, health)
 	}
-	for _, k := range []string{"udpActive", "udpDropMaxConns", "udpDropPerIP", "udpDropRate", "active", "udpMaxFlowsPerIP", "udpNewFlowsPerSec", "udpNewFlowsPerMap"} {
+	for _, k := range []string{
+		"udpActive", "udpDropMaxConns", "udpDropPerIP", "udpDropRate", "active",
+		"udpMaxFlowsPerIP", "udpNewFlowsPerSec", "udpNewFlowsPerMap",
+		"udpIngressPackets", "udpToNodePackets", "udpFromNodePackets", "udpToClientPackets",
+		"udpDropAcl", "udpDropSpa", "udpDropNoPath", "udpDropUnknownFlow", "udpDropClientWrite",
+		"udpUplaneRxPackets", "udpUplaneReadErrors", "udpUplaneDecodeErrors",
+		"udpUplaneTxPackets", "udpUplaneNotReady", "udpUplaneWriteErrors",
+	} {
 		if _, ok := health[k]; !ok {
 			t.Fatalf("health missing %s in %v", k, health)
 		}
@@ -1041,7 +1048,13 @@ func TestHealthAndMappingsExposeUDPAdmit(t *testing.T) {
 		t.Fatal("no mappings")
 	}
 	m := maps[0]
-	for _, k := range []string{"udpActive", "udpDropMaxConns", "udpDropPerIP", "udpDropRate", "activeConns", "reach", "idleTimeoutSec", "spaTtlSec", "udpIdleTimeoutSec", "grants", "tcpDropMaxConns"} {
+	for _, k := range []string{
+		"udpActive", "udpDropMaxConns", "udpDropPerIP", "udpDropRate", "activeConns", "reach",
+		"idleTimeoutSec", "spaTtlSec", "udpIdleTimeoutSec", "grants", "tcpDropMaxConns",
+		"udpIngressPackets", "udpToNodePackets", "udpFromNodePackets", "udpToClientPackets",
+		"udpDropAcl", "udpDropSpa", "udpDropTrafficLimit", "udpDropNoPath",
+		"udpDropEncode", "udpDropUplaneWrite", "udpDropTunnelWrite", "udpDropUnknownFlow", "udpDropClientWrite",
+	} {
 		if _, ok := m[k]; !ok {
 			t.Fatalf("mapping missing %s in %v", k, m)
 		}

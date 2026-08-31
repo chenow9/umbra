@@ -210,6 +210,27 @@ docker compose -f deploy/compose.gate.yml up -d
 
 提高 TCP 上限前，应同时检查入口和节点的文件描述符上限及可用内存。关闭 UDP 准入保护会增加来源地址耗尽 flow 配额或触发资源消耗型攻击的风险。
 
+### UDP socket 接收缓冲环境变量
+
+`umbrad`、`umbra-node` 和 UDP visitor 都会在启动或创建 UDP flow 时读取以下变量：
+
+| 环境变量 | 默认值 | 含义 |
+|---|---:|---|
+| `UMBRA_UDP_READ_BUFFER` | `524288` | 每个 UDP socket 请求的接收缓冲区字节数，覆盖 gate 的共享 uplane socket、业务映射 socket、node/visitor 的 uplane socket 及其本地目标 socket。只接受大于 `0` 的整数；未设置或无效时使用 512 KiB。Linux 实际值受宿主机 `net.core.rmem_max` 限制，修改后需要重启相应进程或重建容器。512 KiB 是兼顾 2C2G 小型服务器和大量 UDP flow 的保守默认值；高突发场景应在压测后显式调大。 |
+
+在 Linux 上提高该值前，需先把宿主机的 `net.core.rmem_max` 调整到不低于请求值，例如：
+
+```bash
+sysctl -w net.core.rmem_max=16777216
+UMBRA_UDP_READ_BUFFER=8388608 docker compose -f deploy/compose.gate.yml up -d
+```
+
+较大的缓冲区可以吸收突发流量和调度停顿，但不能替代足够的持续处理能力。可通过 `ss -u -m` 查看 socket 的实际 `rb`，并通过 `Udp:RcvbufErrors` 判断是否仍发生接收队列溢出。
+
+### UDP 丢包诊断
+
+入口的 `/health` 和映射 API 提供从业务端口、uplane 到客户端回写的分段累计计数。节点可设置 `UMBRA_UDP_STATS_INTERVAL` 输出对应的 JSON 统计日志：默认 `0`（关闭），设置为大于 `0` 的整数时表示输出间隔秒数，压测时建议 `10`。修改后需重启节点；统计日志不包含凭证、cookie 或密钥。
+
 ## 安全注意
 
 - 控制通道默认 TLS 1.3，节点必须带 `--tls-ca`。新签发的 CA 主题是 `umbra CA`（已有 tls-dir 不会改写）。

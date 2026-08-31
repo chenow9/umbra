@@ -85,7 +85,15 @@ func main() {
 		}
 		log.Printf("udp data plane listen %s: %v — UDP will fall back to yamux", *listen, err)
 	} else {
-		s.AttachUPlane(upc)
+		if err := netutil.SetUDPReadBuffer(upc); err != nil {
+			_ = upc.Close()
+			if gate.ParseUDPMode(*udpMode) == gate.UDPRequired {
+				log.Fatalf("udp data plane read buffer: %v", err)
+			}
+			log.Printf("udp data plane read buffer: %v — UDP will fall back to yamux", err)
+		} else {
+			s.AttachUPlane(upc)
+		}
 	}
 	apiAddr := *httpAddr
 	if *api != "" {

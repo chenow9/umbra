@@ -14,12 +14,13 @@ import (
 	"github.com/hashicorp/yamux"
 
 	"umbra/internal/muxcfg"
+	"umbra/internal/netutil"
 	"umbra/internal/preface"
 	"umbra/internal/wire"
 	"umbra/internal/xfer"
 )
 
-const Version = "0.6.0"
+const Version = "0.1.2"
 
 var ErrRevoked = fmt.Errorf("credential revoked")
 
@@ -140,6 +141,10 @@ func relayUDP(st net.Conn, addr string) {
 	}
 	u, err := net.DialUDP("udp", nil, raddr)
 	if err != nil {
+		return
+	}
+	if err := netutil.SetUDPReadBuffer(u); err != nil {
+		_ = u.Close()
 		return
 	}
 	defer u.Close()

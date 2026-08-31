@@ -292,24 +292,69 @@ func (c *Console) getHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(struct {
-		OK                bool   `json:"ok"`
-		Control           bool   `json:"control"`
-		UPlane            bool   `json:"uplane"`
-		Persist           bool   `json:"persist"`
-		UDP               string `json:"udp"`
-		Active            int    `json:"active"`
-		UDPActive         int    `json:"udpActive"`
-		UDPDropMaxConns   int64  `json:"udpDropMaxConns"`
-		UDPDropPerIP      int64  `json:"udpDropPerIP"`
-		UDPDropRate       int64  `json:"udpDropRate"`
-		UDPMaxFlowsPerIP  int    `json:"udpMaxFlowsPerIP"`
-		UDPNewFlowsPerSec int    `json:"udpNewFlowsPerSec"`
-		UDPNewFlowsPerMap int    `json:"udpNewFlowsPerMap"`
+		OK                      bool   `json:"ok"`
+		Control                 bool   `json:"control"`
+		UPlane                  bool   `json:"uplane"`
+		Persist                 bool   `json:"persist"`
+		UDP                     string `json:"udp"`
+		Active                  int    `json:"active"`
+		UDPActive               int    `json:"udpActive"`
+		UDPDropMaxConns         int64  `json:"udpDropMaxConns"`
+		UDPDropPerIP            int64  `json:"udpDropPerIP"`
+		UDPDropRate             int64  `json:"udpDropRate"`
+		UDPIngressPackets       int64  `json:"udpIngressPackets"`
+		UDPIngressBytes         int64  `json:"udpIngressBytes"`
+		UDPToNodePackets        int64  `json:"udpToNodePackets"`
+		UDPToNodeBytes          int64  `json:"udpToNodeBytes"`
+		UDPFromNodePackets      int64  `json:"udpFromNodePackets"`
+		UDPFromNodeBytes        int64  `json:"udpFromNodeBytes"`
+		UDPToClientPackets      int64  `json:"udpToClientPackets"`
+		UDPToClientBytes        int64  `json:"udpToClientBytes"`
+		UDPDropACL              int64  `json:"udpDropAcl"`
+		UDPDropSPA              int64  `json:"udpDropSpa"`
+		UDPDropTrafficLimit     int64  `json:"udpDropTrafficLimit"`
+		UDPDropNoPath           int64  `json:"udpDropNoPath"`
+		UDPDropEncode           int64  `json:"udpDropEncode"`
+		UDPDropUPlaneWrite      int64  `json:"udpDropUplaneWrite"`
+		UDPDropTunnelWrite      int64  `json:"udpDropTunnelWrite"`
+		UDPDropUnknownFlow      int64  `json:"udpDropUnknownFlow"`
+		UDPDropClientWrite      int64  `json:"udpDropClientWrite"`
+		UDPMaxFlowsPerIP        int    `json:"udpMaxFlowsPerIP"`
+		UDPNewFlowsPerSec       int    `json:"udpNewFlowsPerSec"`
+		UDPNewFlowsPerMap       int    `json:"udpNewFlowsPerMap"`
+		UDPUPlaneRxPackets      int64  `json:"udpUplaneRxPackets"`
+		UDPUPlaneRxBytes        int64  `json:"udpUplaneRxBytes"`
+		UDPUPlaneReadErrors     int64  `json:"udpUplaneReadErrors"`
+		UDPUPlanePeekErrors     int64  `json:"udpUplanePeekErrors"`
+		UDPUPlaneUnknownPeer    int64  `json:"udpUplaneUnknownPeer"`
+		UDPUPlaneDecodeErrors   int64  `json:"udpUplaneDecodeErrors"`
+		UDPUPlaneUnknownType    int64  `json:"udpUplaneUnknownType"`
+		UDPUPlaneUnknownMapping int64  `json:"udpUplaneUnknownMapping"`
+		UDPUPlaneTxPackets      int64  `json:"udpUplaneTxPackets"`
+		UDPUPlaneTxBytes        int64  `json:"udpUplaneTxBytes"`
+		UDPUPlaneNotReady       int64  `json:"udpUplaneNotReady"`
+		UDPUPlaneEncodeErrors   int64  `json:"udpUplaneEncodeErrors"`
+		UDPUPlaneWriteErrors    int64  `json:"udpUplaneWriteErrors"`
 	}{
 		OK: ok, Control: ph.Control, UPlane: ph.UPlane, Persist: persistOK, UDP: ph.UDP,
 		Active: st.Active, UDPActive: st.UDPActive,
 		UDPDropMaxConns: st.UDPDropMaxConns, UDPDropPerIP: st.UDPDropPerIP, UDPDropRate: st.UDPDropRate,
+		UDPIngressPackets: st.UDPIngressPackets, UDPIngressBytes: st.UDPIngressBytes,
+		UDPToNodePackets: st.UDPToNodePackets, UDPToNodeBytes: st.UDPToNodeBytes,
+		UDPFromNodePackets: st.UDPFromNodePackets, UDPFromNodeBytes: st.UDPFromNodeBytes,
+		UDPToClientPackets: st.UDPToClientPackets, UDPToClientBytes: st.UDPToClientBytes,
+		UDPDropACL: st.UDPDropACL, UDPDropSPA: st.UDPDropSPA, UDPDropTrafficLimit: st.UDPDropTrafficLimit,
+		UDPDropNoPath: st.UDPDropNoPath, UDPDropEncode: st.UDPDropEncode,
+		UDPDropUPlaneWrite: st.UDPDropUPlaneWrite, UDPDropTunnelWrite: st.UDPDropTunnelWrite,
+		UDPDropUnknownFlow: st.UDPDropUnknownFlow, UDPDropClientWrite: st.UDPDropClientWrite,
 		UDPMaxFlowsPerIP: st.UDPMaxFlowsPerIP, UDPNewFlowsPerSec: st.UDPNewFlowsPerSec, UDPNewFlowsPerMap: st.UDPNewFlowsPerMap,
+		UDPUPlaneRxPackets: st.UDPUPlaneRxPackets, UDPUPlaneRxBytes: st.UDPUPlaneRxBytes,
+		UDPUPlaneReadErrors: st.UDPUPlaneReadErrors, UDPUPlanePeekErrors: st.UDPUPlanePeekErrors,
+		UDPUPlaneUnknownPeer: st.UDPUPlaneUnknownPeer, UDPUPlaneDecodeErrors: st.UDPUPlaneDecodeErrors,
+		UDPUPlaneUnknownType: st.UDPUPlaneUnknownType, UDPUPlaneUnknownMapping: st.UDPUPlaneUnknownMapping,
+		UDPUPlaneTxPackets: st.UDPUPlaneTxPackets, UDPUPlaneTxBytes: st.UDPUPlaneTxBytes,
+		UDPUPlaneNotReady: st.UDPUPlaneNotReady, UDPUPlaneEncodeErrors: st.UDPUPlaneEncodeErrors,
+		UDPUPlaneWriteErrors: st.UDPUPlaneWriteErrors,
 	})
 }
 

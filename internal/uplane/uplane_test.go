@@ -3,7 +3,9 @@ package uplane
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"net"
+	"sync"
 	"testing"
 	"time"
 )
@@ -117,6 +119,58 @@ func TestOpenerReplay(t *testing.T) {
 	}
 	if _, _, err := o.Decode(r2); err == nil {
 		t.Fatal("replay")
+	}
+}
+
+func TestWriterKeepsConcurrentWritesInSequenceOrder(t *testing.T) {
+	c2s, _ := testKeys()
+	w := &Writer{Key: c2s}
+	const count = 256
+	seqs := make([]uint64, 0, count)
+	var gotMu sync.Mutex
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := w.Write("nde1", Packet{Type: TypeData, Payload: []byte("x")}, func(raw []byte) (int, error) {
+				_, pkt, err := Decode(c2s, raw)
+				if err != nil {
+					return 0, err
+				}
+				gotMu.Lock()
+				seqs = append(seqs, pkt.Seq)
+				gotMu.Unlock()
+				return len(raw), nil
+			})
+			if err != nil {
+				t.Errorf("write: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if len(seqs) != count {
+		t.Fatalf("writes=%d want %d", len(seqs), count)
+	}
+	for i, seq := range seqs {
+		if want := uint64(i + 1); seq != want {
+			t.Fatalf("write %d seq=%d want %d", i, seq, want)
+		}
+	}
+}
+
+func TestWriterClassifiesEncodeFailure(t *testing.T) {
+	w := &Writer{}
+	called := false
+	_, err := w.Write("nde1", Packet{Type: TypeData}, func(raw []byte) (int, error) {
+		called = true
+		return len(raw), nil
+	})
+	if !errors.Is(err, ErrWriterEncode) {
+		t.Fatalf("error=%v want ErrWriterEncode", err)
+	}
+	if called {
+		t.Fatal("socket write called after encode failure")
 	}
 }
 

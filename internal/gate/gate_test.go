@@ -763,7 +763,7 @@ func TestVisitorUDPRejectsForeignMapping(t *testing.T) {
 func TestVisitorFlowsDoNotShareSession(t *testing.T) {
 	s := New("127.0.0.1", stealth.New(false))
 	s.udpMode = UDPRequired
-	s.nodes["nde1"] = &nodeConn{id: "nde1", online: true, udpBound: true, udpOut: &uplane.Sealer{Key: make([]byte, 32)}, udpAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 9}}
+	s.nodes["nde1"] = &nodeConn{id: "nde1", online: true, udpBound: true, udpOut: &uplane.Writer{Key: make([]byte, 32)}, udpAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 9}}
 	s.nodes["nde1"].udpSeen.Store(time.Now().UnixNano())
 	s.visits["vis1"] = &visitUDP{id: "vis1", mapID: "map_v", nodeID: "nde1", proto: "udp", mode: "visitor", bound: true}
 	s.visits["vis2"] = &visitUDP{id: "vis2", mapID: "map_v", nodeID: "nde1", proto: "udp", mode: "visitor", bound: true}
@@ -789,7 +789,7 @@ func TestVisitorFlowsDoNotShareSession(t *testing.T) {
 func TestVisitorCloseRejectsForeignFlow(t *testing.T) {
 	s := New("127.0.0.1", stealth.New(false))
 	s.udpMode = UDPRequired
-	s.nodes["nde1"] = &nodeConn{id: "nde1", online: true, udpBound: true, udpOut: &uplane.Sealer{Key: make([]byte, 32)}, udpAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 9}}
+	s.nodes["nde1"] = &nodeConn{id: "nde1", online: true, udpBound: true, udpOut: &uplane.Writer{Key: make([]byte, 32)}, udpAddr: &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 9}}
 	s.nodes["nde1"].udpSeen.Store(time.Now().UnixNano())
 	s.visits["vis1"] = &visitUDP{id: "vis1", mapID: "map_v", nodeID: "nde1", proto: "udp", mode: "visitor", bound: true}
 	s.visits["vis2"] = &visitUDP{id: "vis2", mapID: "map_v", nodeID: "nde1", proto: "udp", mode: "visitor", bound: true}
@@ -888,7 +888,7 @@ func TestBindDoesNotMarkUPlaneReady(t *testing.T) {
 	s.udpPC = pc
 	cookie := []byte("cookie-16-bytes!")
 	c2s, s2c := uplane.DerivePair(bytes.Repeat([]byte{1}, 32), cookie)
-	ac := &nodeConn{id: "nde1", online: true, udpCookie: cookie, udpIn: &uplane.Opener{Key: c2s}, udpOut: &uplane.Sealer{Key: s2c}}
+	ac := &nodeConn{id: "nde1", online: true, udpCookie: cookie, udpIn: &uplane.Opener{Key: c2s}, udpOut: &uplane.Writer{Key: s2c}}
 	s.nodes["nde1"] = ac
 	addr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 40000}
 	s.onUDPBind("nde1", addr, uplane.Packet{Type: uplane.TypeBind, Payload: cookie})

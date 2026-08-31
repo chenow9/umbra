@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -296,6 +297,39 @@ type Sealer struct {
 func (s *Sealer) Encode(id string, p Packet) ([]byte, error) {
 	p.Seq = s.seq.Add(1)
 	return Encode(s.Key, id, p)
+}
+
+// ErrWriterEncode identifies a Writer failure that happened before the
+// datagram reached the supplied socket write function.
+var ErrWriterEncode = errors.New("uplane writer encode")
+
+// Writer keeps sequence allocation, packet encoding, and the socket write in
+// one ordered critical section. Callers sharing a directional key must share
+// one Writer so the packet sequence observed on the wire cannot be reordered
+// by concurrent goroutines after sequence allocation.
+type Writer struct {
+	Key []byte
+	mu  sync.Mutex
+	seq uint64
+}
+
+// Write encodes p and calls send while holding the directional writer lock.
+// A failed socket write consumes its sequence number, which is safe because
+// the receiver's replay window permits gaps.
+func (w *Writer) Write(id string, p Packet, send func([]byte) (int, error)) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.seq++
+	p.Seq = w.seq
+	raw, err := Encode(w.Key, id, p)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %v", ErrWriterEncode, err)
+	}
+	n, err := send(raw)
+	if err == nil && n != len(raw) {
+		err = io.ErrShortWrite
+	}
+	return n, err
 }
 
 type Opener struct {
