@@ -3,9 +3,10 @@
 import { Area, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatBps, formatBytes } from "@/lib/umbra/format";
 import { seriesToRate } from "@/lib/umbra/live";
+import { downsampleChart, paddedMax, stepYMax, type ChartPt } from "@/lib/umbra/chart-smooth";
 import type { TrafficPoint } from "@/lib/umbra/types";
 import { useTheme } from "@/components/app-providers";
-import { useId, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 
 function cssVar(name: string, fallback: string) {
   if (typeof document === "undefined") return fallback;
@@ -20,6 +21,66 @@ function Swatch({ color, label }: { color: string; label: string }) {
       {label}
     </span>
   );
+}
+
+function toChartPts(data: TrafficPoint[], kind: "rate" | "bytes"): ChartPt[] {
+  const src =
+    kind === "rate"
+      ? seriesToRate(data).map((p) => ({ t: Date.parse(p.ts), inn: p.bpsIn, out: p.bpsOut }))
+      : data.map((p) => ({ t: Date.parse(p.ts), inn: p.bytesIn, out: p.bytesOut }));
+  return downsampleChart(src.filter((p) => Number.isFinite(p.t)));
+}
+
+function formatX(t: number, span: number): string {
+  const d = new Date(t);
+  if (span > 36 * 3600 * 1000) {
+    return d.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  }
+  if (span < 4 * 60 * 1000) {
+    return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  }
+  return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function usePlotMax(target: ChartPt[]): number {
+  const [yMax, setYMax] = useState(() => paddedMax(target));
+  const yRef = useRef(yMax);
+  const headRef = useRef(target[0]?.t ?? 0);
+  const targetRef = useRef(target);
+  targetRef.current = target;
+  const sig =
+    target.length === 0
+      ? "0"
+      : `${target.length}:${target[0].t}:${target[target.length - 1].t}:${target[target.length - 1].inn}:${target[target.length - 1].out}`;
+
+  useEffect(() => {
+    const pts = targetRef.current;
+    const next = paddedMax(pts);
+    const head = pts[0]?.t ?? 0;
+    if (pts.length === 0 || head !== headRef.current) {
+      headRef.current = head;
+      yRef.current = next;
+      setYMax(next);
+      return;
+    }
+    const stepped = stepYMax(yRef.current, next);
+    yRef.current = stepped;
+    setYMax(stepped);
+  }, [sig]);
+
+  return Math.max(1, yMax);
+}
+
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReduced(mq.matches);
+    const onChange = () => setReduced(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return reduced;
 }
 
 export function RateChart({
@@ -41,6 +102,10 @@ export function RateChart({
   const ink = cssVar("--ink", "#1a1814");
   const outFill = `out-${gid}`;
   const formatTick = kind === "rate" ? formatBps : formatBytes;
+  const target = useMemo(() => toChartPts(data, kind), [data, kind]);
+  const yMax = usePlotMax(target);
+  const reduced = usePrefersReducedMotion();
+  const plot = useMemo(() => target.map((p) => ({ t: p.t, 入站: p.inn, 出站: p.out })), [target]);
 
   const hasBytes = data.some((p) => p.bytesIn > 0 || p.bytesOut > 0);
   if (data.length === 0 || !hasBytes) {
@@ -52,8 +117,7 @@ export function RateChart({
     );
   }
 
-  const rates = seriesToRate(data);
-  if (kind === "rate" && rates.length === 0) {
+  if (kind === "rate" && target.length === 0) {
     return (
       <div className="flex h-48 flex-col items-center justify-center gap-3 text-center text-sm text-stone">
         <span>再等一个采样即可画出速率。</span>
@@ -62,19 +126,10 @@ export function RateChart({
     );
   }
 
-  const src =
-    kind === "rate"
-      ? rates.map((p) => ({ ts: p.ts, 入站: p.bpsIn, 出站: p.bpsOut }))
-      : data.map((p) => ({ ts: p.ts, 入站: p.bytesIn, 出站: p.bytesOut }));
-  const t0 = new Date(src[0].ts).getTime();
-  const t1 = new Date(src[src.length - 1].ts).getTime();
-  const daily = t1 - t0 > 36 * 3600 * 1000;
-  const rows = src.map((p) => ({
-    ...p,
-    label: daily
-      ? new Date(p.ts).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })
-      : new Date(p.ts).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
-  }));
+  const xMin = target[0].t;
+  const xMax = target[target.length - 1].t;
+  const span = Math.max(0, xMax - xMin);
+  const animate = !reduced;
 
   return (
     <div>
@@ -84,7 +139,7 @@ export function RateChart({
       </div>
       <div className="h-52 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={rows} margin={{ top: 18, right: 8, left: 4, bottom: 4 }}>
+          <ComposedChart data={plot} margin={{ top: 18, right: 8, left: 4, bottom: 4 }}>
             <defs>
               <linearGradient id={outFill} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={amber} stopOpacity={0.4} />
@@ -92,11 +147,14 @@ export function RateChart({
               </linearGradient>
             </defs>
             <XAxis
-              dataKey="label"
+              dataKey="t"
+              type="number"
+              domain={[xMin === xMax ? xMin - 1000 : xMin, xMin === xMax ? xMax + 1000 : xMax]}
               tick={{ fill: stone, fontSize: 11 }}
               axisLine={false}
               tickLine={false}
-              minTickGap={24}
+              minTickGap={28}
+              tickFormatter={(v: number) => formatX(v, span)}
             />
             <YAxis
               tick={{ fill: stone, fontSize: 11 }}
@@ -104,7 +162,7 @@ export function RateChart({
               tickLine={false}
               width={80}
               tickMargin={6}
-              domain={[0, (max: number) => (max > 0 ? max * 1.08 : 1)]}
+              domain={[0, yMax]}
               tickFormatter={(v: number) => formatTick(v).replace(/\s/g, "")}
             />
             <Tooltip
@@ -115,6 +173,7 @@ export function RateChart({
                 fontSize: 12,
                 color: ink,
               }}
+              labelFormatter={(value) => formatX(Number(value), span)}
               formatter={(value) => formatTick(Number(value ?? 0))}
             />
             <Area
@@ -123,18 +182,29 @@ export function RateChart({
               stroke={amber}
               fill={`url(#${outFill})`}
               strokeWidth={2}
+              strokeLinejoin="round"
+              strokeLinecap="round"
               dot={false}
               activeDot={{ r: 4, strokeWidth: 0, fill: amber }}
-              isAnimationActive={false}
+              isAnimationActive={animate}
+              animationDuration={700}
+              animationEasing="ease-out"
+              animationBegin={0}
+              baseValue={0}
             />
             <Line
               type="monotone"
               dataKey="入站"
               stroke={live}
               strokeWidth={2.5}
+              strokeLinejoin="round"
+              strokeLinecap="round"
               dot={false}
               activeDot={{ r: 4, strokeWidth: 0, fill: live }}
-              isAnimationActive={false}
+              isAnimationActive={animate}
+              animationDuration={700}
+              animationEasing="ease-out"
+              animationBegin={0}
             />
           </ComposedChart>
         </ResponsiveContainer>

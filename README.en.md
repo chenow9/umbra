@@ -13,7 +13,7 @@ Expose TCP / UDP services behind NAT through a self-hosted gate, with business p
 1. L4 only — TCP and UDP. No user-traffic L7 reverse proxy.
 2. **Server is the only config truth.** A node keeps the gate address and a credential. Mappings, modes and ACL are edited in the console and pushed live; you do not log into the node to edit files.
 3. The gate binds and releases ports at runtime; in-flight connections on other mappings stay up. Replace the gate binary with USR2; existing tunnels stay in the old process until they end.
-4. Three mapping modes: `spa` (knock; default for new mappings), `visitor` (no business listener on the gate; a ticket opens a local L4 port on the accessing machine), `public` (an explicit open listener).
+4. Three mapping modes: `public` (open; default for new mappings), `spa` (knock), `visitor` (no business listener on the gate; a ticket opens a local L4 port on the accessing machine).
 5. Per-node and per-mapping live rate plus cumulative traffic. The console and API share one HTTP port; first visit sets a local password.
 
 ## Pieces
@@ -35,7 +35,7 @@ The console and API use these identifiers (hints in the UI):
 | `visitor` (encrypted tunnel) | No. The gate does not listen on a business port. | Issue a ticket (`umbra_vis_…`, 24 hours), run `umbra-visit` on the accessing machine |
 | `public` (open) | Yes. Visible to scanners; anyone can connect (optional CIDR allow-list). | Connect to the entry port, e.g. game UDP |
 
-New mappings default to `spa`. `public` must be chosen explicitly.
+New mappings default to `public`. Choose `spa` when the port should stay hidden.
 
 ## Quick start
 

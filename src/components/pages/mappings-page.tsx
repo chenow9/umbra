@@ -2,16 +2,17 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { FilterChips, NodeSwitcher } from "@/components/filter-chips";
-import { ModeName } from "@/components/mode-name";
 import { SelectField, TextField } from "@/components/field";
+import { Label } from "@/components/ui/label";
 import { StatusDot } from "@/components/status-dot";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { ActionMenu } from "@/components/ui/menu";
 import { Pager } from "@/components/ui/pager";
 import {
@@ -46,7 +47,18 @@ import {
   updateMapping,
   visitMapping,
 } from "@/lib/umbra/api";
-import { formatBytes, formatBps, formatPort, formatRelative } from "@/lib/umbra/format";
+import {
+  formatBytes,
+  formatBps,
+  formatPort,
+  formatRateDisplay,
+  formatRateHint,
+  formatRelative,
+  pickRateUnit,
+  RATE_UNITS,
+  unitToKbps,
+  type RateUnit,
+} from "@/lib/umbra/format";
 import {
   dropReasonLabel,
   listenLabel,
@@ -230,15 +242,15 @@ export function MappingsPage() {
               </div>
               <div className="hidden overflow-hidden rounded-xl bg-card shadow-border md:block">
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[800px] table-fixed text-left text-sm">
+                  <table className="w-full min-w-[880px] table-fixed text-left text-sm">
                     <colgroup>
+                      <col className={showNode ? "w-[15%]" : "w-[18%]"} />
+                      {showNode ? <col className="w-[10%]" /> : null}
                       <col className={showNode ? "w-[13%]" : "w-[15%]"} />
-                      {showNode ? <col className="w-[11%]" /> : null}
-                      <col className={showNode ? "w-[18%]" : "w-[24%]"} />
-                      <col className="w-[8%]" />
-                      <col className={showNode ? "w-[17%]" : "w-[18%]"} />
-                      <col className={showNode ? "w-[9%]" : "w-[10%]"} />
-                      <col className={showNode ? "w-[19%]" : "w-[20%]"} />
+                      <col className="w-[7%]" />
+                      <col className={showNode ? "w-[15%]" : "w-[16%]"} />
+                      <col className={showNode ? "w-[16%]" : "w-[17%]"} />
+                      <col className={showNode ? "w-[19%]" : "w-[22%]"} />
                       <col className="w-[5%]" />
                     </colgroup>
                     <thead>
@@ -317,6 +329,17 @@ function trafficLine(m: Mapping) {
   return rate > 0 ? `${base} · ${formatBps(rate)}` : base;
 }
 
+function TrafficNote({ mapping: m }: { mapping: Mapping }) {
+  const rate = (m.bpsIn ?? 0) + (m.bpsOut ?? 0);
+  return (
+    <div className="font-mono text-xs tabular-nums text-ink-soft" title={trafficLine(m)}>
+      <p className="whitespace-nowrap">入 {formatBytes(m.bytesIn)}</p>
+      <p className="whitespace-nowrap">出 {formatBytes(m.bytesOut)}</p>
+      {rate > 0 ? <p className="whitespace-nowrap">{formatBps(rate)}</p> : null}
+    </div>
+  );
+}
+
 function quotaBits(m: Mapping) {
   const bits = policyBits(m.maxConns, m.idleTimeoutSec, m.proto, {
     spaTtlSec: m.spaTtlSec,
@@ -328,7 +351,7 @@ function quotaBits(m: Mapping) {
   return bits;
 }
 
-function dropLine(m: Mapping) {
+function dropInfo(m: Mapping) {
   const n =
     (m.tcpDropMaxConns ?? 0) +
     (m.tcpDropAcl ?? 0) +
@@ -339,9 +362,9 @@ function dropLine(m: Mapping) {
     (m.udpDropMaxConns ?? 0) +
     (m.udpDropPerIP ?? 0) +
     (m.udpDropRate ?? 0);
-  if (n <= 0) return "";
-  const why = dropReasonLabel[m.lastDrop ?? ""] ?? m.lastDrop ?? "丢弃";
-  return `丢弃 ${n}（${why}）`;
+  if (n <= 0) return null;
+  const why = dropReasonLabel[m.lastDrop ?? ""] ?? m.lastDrop ?? "原因未知";
+  return { count: n, why };
 }
 
 function reachTone(reach: string | undefined) {
@@ -360,12 +383,21 @@ function inFlight(m: Mapping) {
 }
 
 function QuotaNote({ mapping: m }: { mapping: Mapping }) {
-  const drops = dropLine(m);
+  const drop = dropInfo(m);
   return (
-    <div className="text-xs text-ink-soft">
-      <p>{quotaBits(m).join(" · ")}</p>
-      <p className="font-mono tabular-nums">活跃连接 {inFlight(m)}</p>
-      {drops ? <p className="text-rose">{drops}</p> : null}
+    <div className="flex flex-col gap-0.5 text-xs text-ink-soft">
+      {quotaBits(m).map((bit) => (
+        <p key={bit} className={bit.includes("/") ? "break-all" : "whitespace-nowrap"}>
+          {bit}
+        </p>
+      ))}
+      <p className="whitespace-nowrap font-mono tabular-nums">活跃连接 {inFlight(m)}</p>
+      {drop ? (
+        <div className="text-rose">
+          <p className="whitespace-nowrap">丢弃 {drop.count}</p>
+          <p className="whitespace-nowrap">{drop.why}</p>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -407,9 +439,10 @@ function MappingCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate font-medium">{m.name}</p>
-          <p className="mt-0.5 text-xs text-stone">
+          <p className="mt-0.5 truncate text-xs text-stone">
             {showNode ? `${m.nodeName} · ` : ""}
-            {m.proto.toUpperCase()} · <ModeName mode={m.mode} />
+            {m.proto.toUpperCase()} · {m.mode}
+            <span className="text-stone"> · {modeHint[m.mode]}</span>
           </p>
         </div>
         <StatusDot
@@ -451,10 +484,17 @@ function MappingRow({
   return (
     <tr className="border-b border-line/70 last:border-0 hover:bg-paper-2/50">
       <td className="px-4 py-3 align-middle">
-        <div className="font-medium">{m.name}</div>
-        <p className="text-xs text-stone">
-          {m.proto.toUpperCase()} · <ModeName mode={m.mode} />
-        </p>
+        <div className="min-w-0">
+          <p className="truncate font-medium leading-snug" title={m.name}>
+            {m.name}
+          </p>
+          <p
+            className="mt-0.5 truncate font-mono text-xs leading-snug text-stone"
+            title={`${m.proto.toUpperCase()} · ${m.mode} · ${modeHint[m.mode]}`}
+          >
+            {m.proto.toUpperCase()} · {m.mode}
+          </p>
+        </div>
       </td>
       {showNode ? (
         <td className="px-4 py-3 align-middle">
@@ -473,8 +513,8 @@ function MappingRow({
       <td className="px-4 py-3 align-middle">
         <QuotaNote mapping={m} />
       </td>
-      <td className="truncate px-4 py-3 align-middle font-mono text-xs tabular-nums whitespace-nowrap text-ink-soft">
-        {trafficLine(m)}
+      <td className="px-4 py-3 align-middle">
+        <TrafficNote mapping={m} />
       </td>
       <td className="px-4 py-3 align-middle text-right">
         <MappingMenu mapping={m} onEdit={onEdit} onDelete={onDelete} onIssued={onIssued} />
@@ -579,6 +619,59 @@ function MappingMenu({
   );
 }
 
+function RateLimitField({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+  const id = useId();
+  const hintId = `${id}-hint`;
+  const kbps = Number(value) || 0;
+  const [unit, setUnit] = useState<RateUnit>(() => pickRateUnit(kbps));
+  const [draft, setDraft] = useState(() => formatRateDisplay(kbps, pickRateUnit(kbps)));
+
+  function commit(raw: string, nextUnit: RateUnit) {
+    const trimmed = raw.trim();
+    if (trimmed === "" || trimmed === "0") {
+      onChange("0");
+      setDraft(trimmed === "" ? "" : "0");
+      return;
+    }
+    const n = Number(trimmed);
+    if (!Number.isFinite(n) || n < 0) return;
+    const next = String(unitToKbps(n, nextUnit));
+    onChange(next);
+    setDraft(raw);
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <Label htmlFor={id}>限速</Label>
+      <div className="flex h-11 min-w-0 overflow-hidden rounded-md bg-paper shadow-border focus-within:ring-2 focus-within:ring-pine/35">
+        <Input
+          id={id}
+          inputMode="decimal"
+          value={draft}
+          aria-describedby={hintId}
+          placeholder="0"
+          className="h-11 rounded-none shadow-none focus-visible:ring-0"
+          onChange={(e) => commit(e.target.value, unit)}
+        />
+        <Select
+          aria-label="限速单位"
+          value={unit}
+          onValueChange={(v) => {
+            const next = v as RateUnit;
+            setUnit(next);
+            setDraft(formatRateDisplay(Number(value) || 0, next));
+          }}
+          options={RATE_UNITS.map((u) => ({ value: u.id, label: u.label }))}
+          triggerClassName="w-auto shrink-0 rounded-none border-l border-line bg-paper-2 px-2 shadow-none focus-visible:ring-0"
+        />
+      </div>
+      <p id={hintId} className="font-mono text-xs tabular-nums text-stone">
+        {formatRateHint(Number(value) || 0)}
+      </p>
+    </div>
+  );
+}
+
 function MappingForm({
   mapping,
   defaultNodeId,
@@ -593,7 +686,7 @@ function MappingForm({
   const [nodeId, setNodeId] = useState(mapping?.nodeId ?? defaultNodeId ?? "");
   const [name, setName] = useState(mapping?.name ?? "");
   const [proto, setProto] = useState<Proto>(mapping?.proto ?? "tcp");
-  const [mode, setMode] = useState<MappingMode>(mapping?.mode ?? "spa");
+  const [mode, setMode] = useState<MappingMode>(mapping?.mode ?? "public");
   const [entryPort, setEntryPort] = useState(String(mapping?.entryPort ?? 40222));
   const [localHost, setLocalHost] = useState(mapping?.localHost ?? "127.0.0.1");
   const [localPort, setLocalPort] = useState(String(mapping?.localPort ?? ECHO_PORT));
@@ -706,9 +799,9 @@ function MappingForm({
               if (next === "spa" && entryPort === "25565") setEntryPort("40222");
             }}
             options={[
+              { value: "public", label: modeLabel.public, hint: modeHint.public },
               { value: "spa", label: modeLabel.spa, hint: modeHint.spa },
               { value: "visitor", label: modeLabel.visitor, hint: modeHint.visitor },
-              { value: "public", label: modeLabel.public, hint: modeHint.public },
             ]}
           />
           {mode !== "visitor" ? (
@@ -765,13 +858,7 @@ function MappingForm({
               placeholder="秒，无报文后回收"
             />
           )}
-          <TextField
-            label="限速 KB/s"
-            inputMode="numeric"
-            value={rateKbps}
-            onChange={(e) => setRateKbps(e.target.value)}
-            placeholder="0 不限制"
-          />
+          <RateLimitField value={rateKbps} onChange={setRateKbps} />
           <div className="sm:col-span-2">
             <TextField
               label="允许网段"

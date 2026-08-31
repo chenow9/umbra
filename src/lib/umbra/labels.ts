@@ -42,7 +42,7 @@ export const dropReasonLabel: Record<string, string> = {
   maxconns: "连接已满",
   acl: "网段不允许",
   spa: "未敲门",
-  offline: "节点不在线",
+  offline: "当时节点离线",
   splice: "入口配额已满",
   tunnel: "隧道开流失败",
   per_ip: "单 IP 流过多",

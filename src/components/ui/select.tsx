@@ -12,6 +12,8 @@ export function Select({
   placeholder = "选择",
   disabled,
   id,
+  "aria-label": ariaLabel,
+  triggerClassName,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -19,6 +21,8 @@ export function Select({
   placeholder?: string;
   disabled?: boolean;
   id?: string;
+  "aria-label"?: string;
+  triggerClassName?: string;
 }) {
   return (
     <SelectPrimitive.Root
@@ -28,11 +32,13 @@ export function Select({
     >
       <SelectPrimitive.Trigger
         id={id}
+        aria-label={ariaLabel}
         className={cn(
           "flex h-11 w-full min-w-0 items-center justify-between gap-2 rounded-md bg-paper px-3 text-left text-sm text-ink shadow-border",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine/35",
           "disabled:cursor-not-allowed disabled:opacity-50",
           "data-[placeholder]:text-stone",
+          triggerClassName,
         )}
       >
         <span className="min-w-0 flex-1 truncate">

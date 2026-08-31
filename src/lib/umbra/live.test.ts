@@ -141,6 +141,72 @@ describe("mergeTrafficView peaks and rates", () => {
     assert.ok(next.peakBpsOut >= 8_000);
   });
 
+  it("keeps one live tail after the latest sample instead of appending every tick", () => {
+    const key = ["umbra", "traffic", "24h", "", ""];
+    const sample = { ts: "2026-08-28T00:00:00Z", bytesIn: 100, bytesOut: 50 };
+    const m = mapping({ id: "m1", bytesIn: 150, bytesOut: 80 });
+    let view = mergeTrafficView(
+      undefined,
+      ev({
+        ts: "2026-08-28T00:00:01Z",
+        mappings: [m],
+        sample,
+      }),
+      key,
+    );
+    assert.equal(view.series.length, 2);
+    assert.equal(view.series[0].ts, sample.ts);
+    assert.equal(view.series[1].bytesIn, 150);
+
+    view = mergeTrafficView(
+      view,
+      ev({
+        ts: "2026-08-28T00:00:02Z",
+        mappings: [{ ...m, bytesIn: 180, bytesOut: 90 }],
+        sample,
+      }),
+      key,
+    );
+    assert.equal(view.series.length, 2);
+    assert.equal(view.series[0].ts, sample.ts);
+    assert.equal(view.series[1].ts, "2026-08-28T00:00:02Z");
+    assert.equal(view.series[1].bytesIn, 180);
+
+    const nextSample = { ts: "2026-08-28T00:00:10Z", bytesIn: 400, bytesOut: 200 };
+    view = mergeTrafficView(
+      view,
+      ev({
+        ts: "2026-08-28T00:00:11Z",
+        mappings: [{ ...m, bytesIn: 420, bytesOut: 210 }],
+        sample: nextSample,
+      }),
+      key,
+    );
+    assert.equal(view.series.length, 3);
+    assert.equal(view.series[1].ts, nextSample.ts);
+    assert.equal(view.series[2].ts, "2026-08-28T00:00:11Z");
+    assert.equal(view.series[2].bytesIn, 420);
+  });
+
+  it("does not densify when sample is missing and ticks are a second apart", () => {
+    const key = ["umbra", "traffic", "24h", "", ""];
+    const m = mapping({ id: "m1", bytesIn: 10, bytesOut: 4 });
+    let view = mergeTrafficView(undefined, ev({ ts: "2026-08-28T00:00:01Z", mappings: [m] }), key);
+    view = mergeTrafficView(
+      view,
+      ev({ ts: "2026-08-28T00:00:02Z", mappings: [{ ...m, bytesIn: 20, bytesOut: 8 }] }),
+      key,
+    );
+    view = mergeTrafficView(
+      view,
+      ev({ ts: "2026-08-28T00:00:04Z", mappings: [{ ...m, bytesIn: 30, bytesOut: 9 }] }),
+      key,
+    );
+    assert.equal(view.series.length, 1);
+    assert.equal(view.series[0].ts, "2026-08-28T00:00:04Z");
+    assert.equal(view.series[0].bytesIn, 30);
+  });
+
   it("uses mapping bps when the traffic query is filtered", () => {
     const rates = liveBps(
       ev({

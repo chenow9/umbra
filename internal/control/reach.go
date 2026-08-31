@@ -115,7 +115,7 @@ func dropReasonLabel(reason string) string {
 	case "spa":
 		return "未敲门"
 	case "offline":
-		return "节点不在线"
+		return "当时节点离线"
 	case "splice":
 		return "入口配额已满"
 	case "tunnel":

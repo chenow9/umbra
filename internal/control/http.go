@@ -813,6 +813,9 @@ func (c *Console) postMapping(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(b.NodeID) == "" {
 		b.NodeID = strings.TrimSpace(b.AgentID)
 	}
+	if strings.TrimSpace(b.Mode) == "" {
+		b.Mode = "public"
+	}
 	if err := validateMapping(b.Proto, b.Mode, b.EntryPort, b.LocalHost, b.LocalPort); err != nil {
 		writeErr(w, 400, err.Error())
 		return

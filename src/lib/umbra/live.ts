@@ -20,6 +20,17 @@ function upsertByTs(series: TrafficPoint[], point: TrafficPoint): TrafficPoint[]
   return [...series, point];
 }
 
+function replaceLast(series: TrafficPoint[], point: TrafficPoint): TrafficPoint[] {
+  if (series.length === 0) return [point];
+  const next = series.slice(0, -1);
+  next.push(point);
+  return next;
+}
+
+function tsAt(series: TrafficPoint[], i: number): number {
+  return Date.parse(series[i].ts);
+}
+
 function filteredSample(ev: LiveEvent, nodeId: string, mappingId: string): TrafficPoint | null {
   if (!ev.sample) return null;
   if (!nodeId && !mappingId) {
@@ -103,18 +114,36 @@ export function mergeTrafficView(old: TrafficView | undefined, ev: LiveEvent, ke
   const totals = liveTotals(ev.mappings, nodeId, mappingId);
   let series = old?.series ? old.series.slice() : [];
   const sample = filteredSample(ev, nodeId, mappingId);
+  const livePoint: TrafficPoint = { ts: ev.ts, bytesIn: totals.bytesIn, bytesOut: totals.bytesOut };
+  const liveAt = Date.parse(ev.ts);
+  // Samples are ~10s; live ticks are ~1s. Keep committed samples plus one live tail.
   if (sample) {
     const sampleAt = Date.parse(sample.ts);
-    while (series.length && Date.parse(series[series.length - 1].ts) > sampleAt) {
+    while (series.length && tsAt(series, series.length - 1) > sampleAt) {
       series.pop();
     }
+    if (series.length >= 2) {
+      const lastAt = tsAt(series, series.length - 1);
+      const prevAt = tsAt(series, series.length - 2);
+      if (lastAt < sampleAt && lastAt - prevAt < 8_000) {
+        series.pop();
+      }
+    }
     series = upsertByTs(series, sample);
+    const lastAt = tsAt(series, series.length - 1);
+    series = liveAt > lastAt + 500 ? [...series, livePoint] : replaceLast(series, livePoint);
+  } else if (series.length === 0) {
+    series = [livePoint];
+  } else {
+    const lastAt = tsAt(series, series.length - 1);
+    const prevAt = series.length > 1 ? tsAt(series, series.length - 2) : Number.NaN;
+    const lastIsLiveTail = series.length === 1 || (Number.isFinite(prevAt) && lastAt - prevAt < 8_000);
+    if (lastIsLiveTail && liveAt + 1 >= lastAt) {
+      series = replaceLast(series, livePoint);
+    } else if (liveAt > lastAt) {
+      series = [...series, livePoint];
+    }
   }
-  const livePoint: TrafficPoint = { ts: ev.ts, bytesIn: totals.bytesIn, bytesOut: totals.bytesOut };
-  if (series.length && Date.parse(ev.ts) - Date.parse(series[series.length - 1].ts) < 1500) {
-    series = series.slice(0, -1);
-  }
-  series = [...series, livePoint];
   if (series.length > 2500) series = series.slice(series.length - 2500);
   void range;
   const rates = liveBps(ev, nodeId, mappingId);
