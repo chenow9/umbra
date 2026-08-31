@@ -106,9 +106,26 @@ function LiveSummary() {
       <p className="mt-1 font-mono text-sm tabular-nums text-ink">
         {o ? `${o.nodesOnline}/${o.nodesTotal} 在线` : "—"}
       </p>
-      <p className="mt-0.5 font-mono text-xs tabular-nums text-stone">
-        {o ? `${formatBps(o.bpsIn)} ↓ · ${formatBps(o.bpsOut)} ↑` : "等待计数"}
-      </p>
+      {o ? (
+        <p className="mt-0.5 grid grid-cols-2 gap-x-2 font-mono text-xs tabular-nums text-ink">
+          <span className="flex min-w-0 items-baseline gap-1">
+            <span className="shrink-0 text-live" aria-hidden>
+              ↓
+            </span>
+            <span className="truncate whitespace-nowrap">{formatBps(o.bpsIn)}</span>
+            <span className="sr-only">入站</span>
+          </span>
+          <span className="flex min-w-0 items-baseline gap-1">
+            <span className="shrink-0 text-amber" aria-hidden>
+              ↑
+            </span>
+            <span className="truncate whitespace-nowrap">{formatBps(o.bpsOut)}</span>
+            <span className="sr-only">出站</span>
+          </span>
+        </p>
+      ) : (
+        <p className="mt-0.5 font-mono text-xs tabular-nums text-stone">等待计数</p>
+      )}
     </div>
   );
 }
