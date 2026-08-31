@@ -16,6 +16,13 @@ services:
     cap_add:
       - NET_ADMIN
       - NET_BIND_SERVICE
+    # 容量与 UDP 新 flow 准入。可在 shell 或 Compose 的 .env 文件中覆盖。
+    # UDP 的 0 表示关闭对应限制；UMBRA_MAX_SPLICES 必须是大于 0 的整数。
+    environment:
+      UMBRA_MAX_SPLICES: ${UMBRA_MAX_SPLICES:-8192}
+      UMBRA_UDP_MAX_FLOWS_PER_IP: ${UMBRA_UDP_MAX_FLOWS_PER_IP:-256}
+      UMBRA_UDP_NEW_FLOWS_PER_SEC: ${UMBRA_UDP_NEW_FLOWS_PER_SEC:-256}
+      UMBRA_UDP_NEW_FLOWS_PER_MAP: ${UMBRA_UDP_NEW_FLOWS_PER_MAP:-1024}
     command:
       - -listen
       - :4400

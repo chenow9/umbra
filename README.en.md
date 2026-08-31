@@ -188,6 +188,29 @@ Common `umbrad` flags (`umbrad -h`):
 
 Node: `--server`, `--token`, `--tls-ca`. Visitor also needs `--ticket` and `--local`.
 
+### Gate capacity and UDP admission environment variables
+
+`umbrad` reads these variables at startup, so restart or recreate the gate container after changing them. They define gate-wide defaults; each mapping's own `maxConns` limit still applies independently.
+
+| Environment variable | Default | Meaning |
+|---|---:|---|
+| `UMBRA_MAX_SPLICES` | `8192` | Maximum number of active TCP forwarding connections (splices) across the entire gate, shared by all TCP mappings and visitor forwarding. Effective concurrency is also limited by each mapping's `maxConns`. Only positive integers are accepted. Reaching the limit rejects new TCP forwarding without interrupting existing connections. |
+| `UMBRA_UDP_MAX_FLOWS_PER_IP` | `256` | Maximum active UDP flows from one source IPv4 address within each mapping; IPv6 sources are grouped by `/64`. A UDP flow is identified by its source address and port and remains active until the UDP idle timeout. `0` disables this limit. |
+| `UMBRA_UDP_NEW_FLOWS_PER_SEC` | `256` | Maximum new UDP flows per second from one source IPv4 address within each mapping; IPv6 sources are grouped by `/64`. A token bucket permits bounded bursts. `0` disables this limit. This does not limit packet rate (pps) on established flows. |
+| `UMBRA_UDP_NEW_FLOWS_PER_MAP` | `1024` | Maximum aggregate new UDP flows per second for one mapping across all source addresses. A token bucket permits bounded bursts. `0` disables this limit. This does not limit packet rate (pps) on established flows. |
+
+The total number of active UDP flows is still capped by the mapping's `maxConns`. A new flow must satisfy `maxConns`, the per-source active-flow limit, the per-source creation rate, and the per-mapping creation rate. Reaching any limit rejects that new flow without affecting established flows.
+
+Override the defaults through the shell or a Compose `.env` file, for example:
+
+```bash
+UMBRA_MAX_SPLICES=16384 \
+UMBRA_UDP_MAX_FLOWS_PER_IP=512 \
+docker compose -f deploy/compose.gate.yml up -d
+```
+
+Before raising the TCP limit, verify file-descriptor limits and available memory on both the gate and nodes. Disabling UDP admission protection increases the risk that one source consumes the flow quota or causes a resource-exhaustion attack.
+
 ## Security
 
 - Control channel is TLS 1.3; nodes require `--tls-ca`. Newly issued CAs use subject `umbra CA` (an existing tls-dir is not rewritten).

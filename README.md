@@ -187,6 +187,29 @@ deploy/             入口 / 节点 Docker Compose
 
 节点：`--server`、`--token`、`--tls-ca`。访问端另加 `--ticket`、`--local`。
 
+### 入口容量与 UDP 准入环境变量
+
+这些变量由 `umbrad` 在启动时读取，修改后需要重启或重建入口容器。它们是入口级默认策略；映射自身的 `maxConns` 仍会独立生效。
+
+| 环境变量 | 默认值 | 含义 |
+|---|---:|---|
+| `UMBRA_MAX_SPLICES` | `8192` | 整个入口允许同时存在的 TCP 转发连接（splice）总数，所有 TCP 映射和访客转发共享。实际可用并发还受各映射 `maxConns` 限制；只接受大于 `0` 的整数。达到上限后拒绝新的 TCP 转发，不中断已有连接。 |
+| `UMBRA_UDP_MAX_FLOWS_PER_IP` | `256` | 每个映射内，同一来源 IPv4（IPv6 按 `/64` 聚合）允许同时存在的 UDP flow 数。UDP flow 由来源地址和端口标识，并保持到 UDP 空闲超时；`0` 表示关闭此限制。 |
+| `UMBRA_UDP_NEW_FLOWS_PER_SEC` | `256` | 每个映射内，每个来源 IPv4（IPv6 按 `/64` 聚合）每秒允许新建的 UDP flow 数，采用令牌桶限制突发建流；`0` 表示关闭此限制。它不限制已有 flow 的 UDP 包速率（pps）。 |
+| `UMBRA_UDP_NEW_FLOWS_PER_MAP` | `1024` | 单个映射每秒允许新建的 UDP flow 总数，所有来源地址合计，采用令牌桶限制突发建流；`0` 表示关闭此限制。它不限制已有 flow 的 UDP 包速率（pps）。 |
+
+UDP 的活动 flow 总数仍受映射 `maxConns` 限制。新 flow 必须同时满足 `maxConns`、单来源活动 flow 上限、单来源建流速率和单映射建流速率；任何一项达到上限都会拒绝该新 flow，已有 flow 不受影响。
+
+Docker Compose 可通过 shell 或 Compose 的 `.env` 文件覆盖默认值，例如：
+
+```bash
+UMBRA_MAX_SPLICES=16384 \
+UMBRA_UDP_MAX_FLOWS_PER_IP=512 \
+docker compose -f deploy/compose.gate.yml up -d
+```
+
+提高 TCP 上限前，应同时检查入口和节点的文件描述符上限及可用内存。关闭 UDP 准入保护会增加来源地址耗尽 flow 配额或触发资源消耗型攻击的风险。
+
 ## 安全注意
 
 - 控制通道默认 TLS 1.3，节点必须带 `--tls-ca`。新签发的 CA 主题是 `umbra CA`（已有 tls-dir 不会改写）。
