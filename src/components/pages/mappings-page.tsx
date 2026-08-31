@@ -250,8 +250,8 @@ export function MappingsPage() {
                       <col className="w-[7%]" />
                       <col className={showNode ? "w-[15%]" : "w-[16%]"} />
                       <col className={showNode ? "w-[16%]" : "w-[17%]"} />
-                      <col className={showNode ? "w-[19%]" : "w-[22%]"} />
-                      <col className="w-[5%]" />
+                      <col className={showNode ? "w-[16%]" : "w-[19%]"} />
+                      <col className="w-20" />
                     </colgroup>
                     <thead>
                       <tr className="border-b border-line text-xs text-stone">
@@ -262,7 +262,7 @@ export function MappingsPage() {
                         <th className="px-4 py-3 font-medium">目标</th>
                         <th className="px-4 py-3 font-medium">配额</th>
                         <th className="px-4 py-3 font-medium">流量</th>
-                        <th className="px-4 py-3 font-medium" />
+                        <th className="py-3 pr-5 pl-2 font-medium" />
                       </tr>
                     </thead>
                     <tbody>
@@ -516,7 +516,7 @@ function MappingRow({
       <td className="px-4 py-3 align-middle">
         <TrafficNote mapping={m} />
       </td>
-      <td className="px-4 py-3 align-middle text-right">
+      <td className="py-3 pr-5 pl-2 align-middle text-right">
         <MappingMenu mapping={m} onEdit={onEdit} onDelete={onDelete} onIssued={onIssued} />
       </td>
     </tr>

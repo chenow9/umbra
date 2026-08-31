@@ -226,7 +226,7 @@ export function NodesPage() {
                       <col className="w-[8%]" />
                       <col className="w-[20%]" />
                       <col className="w-[14%]" />
-                      <col className="w-[16%]" />
+                      <col className="w-28" />
                     </colgroup>
                     <thead>
                       <tr className="border-b border-line text-xs text-stone">
@@ -236,7 +236,7 @@ export function NodesPage() {
                         <th className="px-4 py-3 font-medium">映射</th>
                         <th className="px-4 py-3 font-medium">流量</th>
                         <th className="px-4 py-3 font-medium">心跳</th>
-                        <th className="px-4 py-3 font-medium" />
+                        <th className="py-3 pr-5 pl-2 font-medium" />
                       </tr>
                     </thead>
                     <tbody>
@@ -430,7 +430,7 @@ function NodeRow({
         <div className="truncate whitespace-nowrap">{formatRelative(node.lastSeen)}</div>
         {tokenLine ? <div className="truncate">{tokenLine}</div> : null}
       </td>
-      <td className="px-4 py-3 align-middle text-right">
+      <td className="py-3 pr-5 pl-2 align-middle text-right">
         <div className="flex items-center justify-end gap-1">
           <NodeMappingsButton node={node} />
           <NodeMenu node={node} onEdit={onEdit} onDelete={onDelete} onRotate={onRotate} />
