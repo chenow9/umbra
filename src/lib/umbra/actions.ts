@@ -42,7 +42,7 @@ import {
   stopNode,
 } from "./gate";
 import { ECHO_HOST, ECHO_PORT } from "./protocol";
-import { nodeEnrollBinCmd, nodeEnrollDockerCmd, type Arch, type Platform } from "./units";
+import { nodeEnrollDockerCmd, nodeEnrollServiceCmd, type Arch, type Platform } from "./units";
 
 type NodeRow = {
   id: string;
@@ -219,9 +219,7 @@ async function persistFrames(nodeId: string, frames: ControlFrame[]) {
       [f.ts, nodeId, f.dir, f.type, JSON.stringify(f.body)],
     );
   }
-  await sql.query(
-    `delete from control_frames where ts < now() - interval '6 hours'`,
-  );
+  await sql.query(`delete from control_frames where ts < now() - interval '6 hours'`);
 }
 
 function toWire(m: {
@@ -363,7 +361,11 @@ function normalizeCidrs(raw: string) {
 }
 
 function statesFor(nodeStatus: string, enabled: boolean, mode: string) {
-  if (!enabled) return { listenState: "disabled", pushState: nodeStatus === "online" ? "acked" : "pending_offline" };
+  if (!enabled)
+    return {
+      listenState: "disabled",
+      pushState: nodeStatus === "online" ? "acked" : "pending_offline",
+    };
   if (nodeStatus !== "online") {
     return { listenState: "pending", pushState: "pending_offline" };
   }
@@ -397,17 +399,13 @@ const mappingSelect = `
 
 export const listNodes = createServerFn({ method: "GET" }).handler(async () => {
   const sql = await ownerSql();
-  const rows = await sql.query<NodeRow>(
-    `${agentSelect} group by a.id order by a.created_at desc`,
-  );
+  const rows = await sql.query<NodeRow>(`${agentSelect} group by a.id order by a.created_at desc`);
   return rows.map(mapNode);
 });
 
 export const listMappings = createServerFn({ method: "GET" }).handler(async () => {
   const sql = await ownerSql();
-  const rows = await sql.query<MappingRow>(
-    `${mappingSelect} order by m.created_at desc`,
-  );
+  const rows = await sql.query<MappingRow>(`${mappingSelect} order by m.created_at desc`);
   return rows.map(mapMapping);
 });
 
@@ -459,7 +457,6 @@ export const getOverview = createServerFn({ method: "GET" }).handler(async () =>
 });
 
 export const createNode = createServerFn({ method: "POST" })
-  
   .validator(
     z.object({
       name: z.string().min(1).max(64),
@@ -489,13 +486,12 @@ export const createNode = createServerFn({ method: "POST" })
       os,
       arch,
       listen: "gate:4400",
-      installCmd: nodeEnrollBinCmd(token, "gate:4400"),
+      installCmd: nodeEnrollServiceCmd(os === "docker" ? "linux" : os, arch, token, "gate:4400"),
       dockerCmd: nodeEnrollDockerCmd(token, "gate:4400"),
     };
   });
 
 export const helloNode = createServerFn({ method: "POST" })
-  
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const sql = await ownerSql();
@@ -536,7 +532,6 @@ export const helloNode = createServerFn({ method: "POST" })
   });
 
 export const disconnectNode = createServerFn({ method: "POST" })
-  
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const sql = await ownerSql();
@@ -558,7 +553,6 @@ export const disconnectNode = createServerFn({ method: "POST" })
   });
 
 export const revokeNode = createServerFn({ method: "POST" })
-  
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const sql = await ownerSql();
@@ -601,7 +595,6 @@ const mappingInput = z.object({
 });
 
 export const createMapping = createServerFn({ method: "POST" })
-  
   .validator(mappingInput)
   .handler(async ({ data }) => {
     if (!isAllowedTarget(data.localHost)) {
@@ -654,11 +647,7 @@ export const createMapping = createServerFn({ method: "POST" })
         udpIdleTimeoutSec,
       ],
     );
-    await audit(
-      "mapping.create",
-      id,
-      `${data.name} ${data.proto} ${data.mode} → ${node.id}`,
-    );
+    await audit("mapping.create", id, `${data.name} ${data.proto} ${data.mode} → ${node.id}`);
     if (node.status === "online") {
       const [created] = await sql.query<{
         id: string;
@@ -689,15 +678,11 @@ export const createMapping = createServerFn({ method: "POST" })
       }
     }
     await liveSync(data.nodeId, node.status === "online");
-    const [row] = await sql.query<MappingRow>(
-      `${mappingSelect} where m.id = $1`,
-      [id],
-    );
+    const [row] = await sql.query<MappingRow>(`${mappingSelect} where m.id = $1`, [id]);
     return mapMapping(row);
   });
 
 export const setMappingPolicy = createServerFn({ method: "POST" })
-  
   .validator(
     z.object({
       id: z.string(),
@@ -716,10 +701,9 @@ export const setMappingPolicy = createServerFn({ method: "POST" })
        where id = $4`,
       [data.maxConns, data.rateKbps, allowCidrs, data.id],
     );
-    const [agent] = await sql.query<{ status: string }>(
-      `select status from nodes where id = $1`,
-      [m.node_id],
-    );
+    const [agent] = await sql.query<{ status: string }>(`select status from nodes where id = $1`, [
+      m.node_id,
+    ]);
     if (agent?.status === "online") {
       const wires = await loadWires(m.node_id);
       const spec = wires.find((w) => w.id === data.id);
@@ -729,20 +713,22 @@ export const setMappingPolicy = createServerFn({ method: "POST" })
       }
     }
     await liveSync(m.node_id, agent?.status === "online");
-    await audit("mapping.policy", data.id, `${data.maxConns}路 ${data.rateKbps}kbps ${allowCidrs || "any"}`);
+    await audit(
+      "mapping.policy",
+      data.id,
+      `${data.maxConns}路 ${data.rateKbps}kbps ${allowCidrs || "any"}`,
+    );
     return { ok: true as const };
   });
 
 export const setMappingEnabled = createServerFn({ method: "POST" })
-  
   .validator(z.object({ id: z.string(), enabled: z.boolean() }))
   .handler(async ({ data }) => {
     const sql = await ownerSql();
     const m = await ownedMapping(data.id);
-    const [agent] = await sql.query<{ status: string }>(
-      `select status from nodes where id = $1`,
-      [m.node_id],
-    );
+    const [agent] = await sql.query<{ status: string }>(`select status from nodes where id = $1`, [
+      m.node_id,
+    ]);
     const st = statesFor(agent?.status ?? "offline", data.enabled, m.mode);
     await sql`
       update mappings
@@ -770,15 +756,13 @@ export const setMappingEnabled = createServerFn({ method: "POST" })
   });
 
 export const deleteMapping = createServerFn({ method: "POST" })
-  
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const sql = await ownerSql();
     const m = await ownedMapping(data.id);
-    const [agent] = await sql.query<{ status: string }>(
-      `select status from nodes where id = $1`,
-      [m.node_id],
-    );
+    const [agent] = await sql.query<{ status: string }>(`select status from nodes where id = $1`, [
+      m.node_id,
+    ]);
     if (agent?.status === "online") {
       const { frames } = syncMappings(m.node_id, [], [data.id]);
       await persistFrames(m.node_id, frames);
@@ -837,7 +821,6 @@ export const listAudit = createServerFn({ method: "GET" }).handler(async () => {
 });
 
 export const probeMapping = createServerFn({ method: "POST" })
-  
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const sql = await ownerSql();
@@ -867,17 +850,16 @@ export const probeMapping = createServerFn({ method: "POST" })
       if (frames) await persistFrames(m.node_id, frames);
       const message = err instanceof Error ? err.message : "探测失败";
       if (!message.includes("未授权") && !message.includes("访问端")) {
-        await sql.query(
-          `update mappings set listen_error = $1, updated_at = now() where id = $2`,
-          [message, m.id],
-        );
+        await sql.query(`update mappings set listen_error = $1, updated_at = now() where id = $2`, [
+          message,
+          m.id,
+        ]);
       }
       throw new Error(message);
     }
   });
 
 export const knockMapping = createServerFn({ method: "POST" })
-  
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const sql = await ownerSql();
@@ -892,7 +874,6 @@ export const knockMapping = createServerFn({ method: "POST" })
   });
 
 export const issueVisitor = createServerFn({ method: "POST" })
-  
   .validator(z.object({ id: z.string(), label: z.string().max(64).optional() }))
   .handler(async ({ data }) => {
     const sql = await ownerSql();
@@ -917,7 +898,6 @@ export const issueVisitor = createServerFn({ method: "POST" })
   });
 
 export const visitMapping = createServerFn({ method: "POST" })
-  
   .validator(z.object({ id: z.string() }))
   .handler(async ({ data }) => {
     const sql = await ownerSql();
@@ -950,7 +930,6 @@ export const visitMapping = createServerFn({ method: "POST" })
   });
 
 export const getTraffic = createServerFn({ method: "GET" })
-  
   .validator(
     z.object({
       range: z.enum(["1h", "24h", "7d"]).optional(),
@@ -974,7 +953,11 @@ export const getTraffic = createServerFn({ method: "GET" })
       clauses.push(`node_id = $${params.length}`);
     }
     const where = clauses.join(" and ");
-    const series = await sql.query<{ ts: string | Date; bytes_in: number | string; bytes_out: number | string }>(
+    const series = await sql.query<{
+      ts: string | Date;
+      bytes_in: number | string;
+      bytes_out: number | string;
+    }>(
       `select date_trunc('${trunc}', ts) as ts,
               sum(bytes_in)::bigint as bytes_in,
               sum(bytes_out)::bigint as bytes_out
@@ -1219,4 +1202,3 @@ export const runDemo = createServerFn({ method: "POST" }).handler(async () => {
   };
   return out;
 });
-

@@ -5,7 +5,6 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
-import { DemoButton } from "@/components/demo-button";
 import { getOverview, getTraffic, queryNodes } from "@/lib/umbra/api";
 import { formatBps, formatBytes, formatRelative } from "@/lib/umbra/format";
 import { actionLabel } from "@/lib/umbra/labels";
@@ -17,7 +16,10 @@ import { cn } from "@/lib/utils";
 
 export function OverviewPage() {
   const overview = useQuery({ queryKey: ["umbra", "overview"], queryFn: () => getOverview() });
-  const traffic = useQuery({ queryKey: ["umbra", "traffic", "24h"], queryFn: () => getTraffic({ data: { range: "24h" } }) });
+  const traffic = useQuery({
+    queryKey: ["umbra", "traffic", "24h"],
+    queryFn: () => getTraffic({ data: { range: "24h" } }),
+  });
   const nodes = useQuery({
     queryKey: ["umbra", "nodes", "page", { page: 1, size: 5 }],
     queryFn: () => queryNodes({ page: 1, size: 5 }),
@@ -26,7 +28,8 @@ export function OverviewPage() {
   const o = overview.data;
   const empty = !overview.isLoading && (o?.nodesTotal ?? 0) === 0;
   const preview = nodes.data ?? emptyPage<Node>(1, 5);
-  const probed = (o?.bytesInToday ?? 0) + (o?.bytesOutToday ?? 0) > 0 || (traffic.data?.bytesIn ?? 0) > 0;
+  const probed =
+    (o?.bytesInToday ?? 0) + (o?.bytesOutToday ?? 0) > 0 || (traffic.data?.bytesIn ?? 0) > 0;
   const alerts = o?.alerts ?? [];
 
   return (
@@ -60,7 +63,9 @@ export function OverviewPage() {
             <Stat
               label="出站速率"
               value={formatBps(o?.bpsOut ?? 0)}
-              hint={traffic.data?.peakBpsOut ? `峰值 ${formatBps(traffic.data.peakBpsOut)}` : "此刻"}
+              hint={
+                traffic.data?.peakBpsOut ? `峰值 ${formatBps(traffic.data.peakBpsOut)}` : "此刻"
+              }
             />
             <Stat
               label="累计入站"
@@ -77,7 +82,11 @@ export function OverviewPage() {
           {alerts.length > 0 ? (
             <AlertStrip alerts={alerts} />
           ) : (
-            <NextHint online={o?.nodesOnline ?? 0} mappings={o?.mappingsTotal ?? 0} probed={probed} />
+            <NextHint
+              online={o?.nodesOnline ?? 0}
+              mappings={o?.mappingsTotal ?? 0}
+              probed={probed}
+            />
           )}
 
           <section>
@@ -111,12 +120,20 @@ export function OverviewPage() {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{a.name}</p>
                         <p className="truncate text-xs text-stone">
-                          {[a.addr || (a.status === "online" ? "" : "未上线"), a.comment].filter(Boolean).join(" · ")}
+                          {[a.addr || (a.status === "online" ? "" : "未上线"), a.comment]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </p>
                       </div>
                       <StatusDot
                         status={a.status}
-                        label={a.status === "online" ? "在线" : a.status === "revoked" ? "已吊销" : "离线"}
+                        label={
+                          a.status === "online"
+                            ? "在线"
+                            : a.status === "revoked"
+                              ? "已吊销"
+                              : "离线"
+                        }
                       />
                     </li>
                   ))
@@ -135,12 +152,21 @@ export function OverviewPage() {
                   <li className="px-4 py-6 text-sm text-stone">还没有审计记录。</li>
                 ) : (
                   (o?.recentAudit ?? []).slice(0, 5).map((item) => (
-                    <li key={item.id} className="flex items-baseline justify-between gap-3 px-4 py-3">
+                    <li
+                      key={item.id}
+                      className="flex items-baseline justify-between gap-3 px-4 py-3"
+                    >
                       <div className="min-w-0">
-                        <p className="truncate text-sm">{actionLabel[item.action] ?? item.action}</p>
-                        <p className="truncate text-xs text-stone">{item.targetName || item.detail || item.target || "—"}</p>
+                        <p className="truncate text-sm">
+                          {actionLabel[item.action] ?? item.action}
+                        </p>
+                        <p className="truncate text-xs text-stone">
+                          {item.targetName || item.detail || item.target || "—"}
+                        </p>
                       </div>
-                      <span className="shrink-0 font-mono text-xs text-stone">{formatRelative(item.ts)}</span>
+                      <span className="shrink-0 font-mono text-xs text-stone">
+                        {formatRelative(item.ts)}
+                      </span>
                     </li>
                   ))
                 )}
@@ -162,7 +188,9 @@ function AlertStrip({ alerts }: { alerts: OverviewAlert[] }) {
           key={`${a.kind}-${a.id ?? i}`}
           className="flex flex-wrap items-center justify-between gap-3 border-b border-line/70 px-4 py-3 last:border-0"
         >
-          <span className={cn("text-sm", a.level === "error" ? "text-rose" : "text-ink")}>{a.title}</span>
+          <span className={cn("text-sm", a.level === "error" ? "text-rose" : "text-ink")}>
+            {a.title}
+          </span>
           {a.href ? (
             <Link
               to={a.href === "/nodes" ? "/nodes" : "/mappings"}
@@ -256,13 +284,12 @@ function EmptyGate() {
       <div>
         <h2 className="font-serif text-3xl italic tracking-tight text-ink">先让一台节点上线</h2>
         <p className="mt-2 text-sm leading-relaxed text-ink-soft">
-          演示会登记节点、开一条 spa 和一条 public。
+          登记节点并执行一次性上线命令，随后即可创建映射。
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <DemoButton />
-        <Button asChild variant="ghost">
-          <Link to="/nodes">手动登记</Link>
+        <Button asChild>
+          <Link to="/nodes">登记节点</Link>
         </Button>
       </div>
     </div>

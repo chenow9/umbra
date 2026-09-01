@@ -568,7 +568,7 @@ func (c *Console) postNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.mu.Unlock()
-	out := c.enrollFields(plain)
+	out := c.enrollFields(plain, rec.OS, rec.Arch)
 	out["id"] = id
 	out["token"] = plain
 	out["os"] = rec.OS
@@ -633,10 +633,11 @@ func (c *Console) postRotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	noExpiry := a.TokenNoExpiry
+	nodeOS, nodeArch := a.OS, a.Arch
 	c.mu.Unlock()
 	c.Gate.RotateTokenUntil(id, old, hash, until, grace)
 	c.installToken(hash, id, until)
-	out := c.enrollFields(plain)
+	out := c.enrollFields(plain, nodeOS, nodeArch)
 	out["token"] = plain
 	out["graceSec"] = graceSec
 	out["expiresAt"] = rfc3339(until)

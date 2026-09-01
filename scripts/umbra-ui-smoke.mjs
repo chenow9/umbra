@@ -18,15 +18,11 @@ async function main() {
   await page.goto(`${BASE}/`, { waitUntil: "networkidle", timeout: 25000 });
   await page.waitForTimeout(600);
   let body = (await page.locator("body").innerText()).replace(/\s+/g, " ");
-  log("总览无登录墙", !body.includes("用 Google") && !body.includes("登录控制台") && body.includes("总览"));
-  log("总览有演示按钮", /跑一遍演示|再跑一遍/.test(body));
-
-  const demo = page.getByRole("button", { name: /跑一遍演示|再跑一遍/ }).first();
-  await demo.click();
-  await page.waitForTimeout(12000);
-  body = (await page.locator("body").innerText()).replace(/\s+/g, " ");
-  log("演示后节点在线", body.includes("在线") && !body.includes("未连上"));
-  log("演示后有流量", /今日入站\s+[1-9]/.test(body) || /\d+\s*B/.test(body));
+  log(
+    "总览无登录墙",
+    !body.includes("用 Google") && !body.includes("登录控制台") && body.includes("总览"),
+  );
+  log("总览无演示入口", !/演示|demo/i.test(body));
 
   const routes = [
     ["/nodes", "节点"],

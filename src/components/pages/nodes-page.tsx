@@ -5,7 +5,6 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
-import { DemoButton } from "@/components/demo-button";
 import { StatusDot } from "@/components/status-dot";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
@@ -35,7 +34,6 @@ import {
   createNode,
   deleteNode,
   disconnectNode,
-  helloNode,
   queryNodes,
   rotateNodeToken,
   revokeNode,
@@ -48,9 +46,8 @@ import type { Node } from "@/lib/umbra/types";
 import {
   ARCHS,
   PLATFORMS,
-  nodeEnrollBinCmd,
   nodeEnrollDockerCmd,
-  nodeInstall,
+  nodeEnrollServiceCmd,
   platformLabel,
   type Arch,
   type Platform,
@@ -329,7 +326,6 @@ function EmptyNodes({ onCreate }: { onCreate: () => void }) {
         <Button type="button" onClick={onCreate}>
           登记节点
         </Button>
-        <DemoButton variant="outline" size="default" label="跑一遍演示" />
       </div>
     </div>
   );
@@ -462,15 +458,6 @@ function NodeMenu({
   onRotate: () => void;
 }) {
   const qc = useQueryClient();
-  const hello = useMutation({
-    mutationFn: () => helloNode({ data: { id: node.id } }),
-    onMutate: () => toast.loading("正在上线…", { id: `hello-${node.id}` }),
-    onSuccess: () => {
-      toast.success("已 Hello，映射全量下发并 Ack", { id: `hello-${node.id}` });
-      void qc.invalidateQueries({ queryKey: ["umbra"] });
-    },
-    onError: (e: Error) => toast.error(e.message, { id: `hello-${node.id}` }),
-  });
   const bye = useMutation({
     mutationFn: () => disconnectNode({ data: { id: node.id } }),
     onSuccess: () => {
@@ -503,12 +490,6 @@ function NodeMenu({
           onSelect: () => {
             window.open(caDownloadURL(), "_blank", "noopener");
           },
-        },
-        {
-          label: hello.isPending ? "握手中…" : "本机上线",
-          hidden: node.status === "revoked" || node.status === "online",
-          disabled: hello.isPending,
-          onSelect: () => hello.mutate(),
         },
         {
           label: "断开",
@@ -641,8 +622,7 @@ function EditNodeForm({ node, onDone }: { node: Node; onDone: () => void }) {
   const [arch, setArch] = useState<Arch>((node.arch as Arch) || "amd64");
   const [neverExpire, setNeverExpire] = useState(Boolean(node.tokenNoExpiry));
   const save = useMutation({
-    mutationFn: () =>
-      updateNode({ data: { id: node.id, name, comment, os, arch, neverExpire } }),
+    mutationFn: () => updateNode({ data: { id: node.id, name, comment, os, arch, neverExpire } }),
     onSuccess: () => {
       toast.success("节点已更新");
       onDone();
@@ -720,9 +700,9 @@ function IssuedDialog({ issued, onClose }: { issued: Issued | null; onClose: () 
     <Dialog open={issued !== null} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>把凭证放到内网节点上</DialogTitle>
+          <DialogTitle>节点凭证已签发</DialogTitle>
           <DialogDescription>
-            凭证只显示一次，之后只能轮换。命令已写入入口 CA，粘贴到节点终端即可，不必再下载或 scp。
+            凭证只显示一次，之后只能轮换。复制一键命令并粘贴到节点终端即可。
             {issued?.listen?.startsWith("127.0.0.1")
               ? " 命令里的 127.0.0.1 请换成节点能连上的入口地址。"
               : ""}
@@ -741,7 +721,6 @@ function defaultEnrollKind(os: Platform): "docker" | "bin" {
 }
 
 function IssuedBody({ issued, onClose }: { issued: Issued; onClose: () => void }) {
-  const qc = useQueryClient();
   const [kind, setKind] = useState<"docker" | "bin">(defaultEnrollKind(issued.os));
   const [fetchedPem, setFetchedPem] = useState(issued.caPem ?? "");
   useEffect(() => {
@@ -756,35 +735,30 @@ function IssuedBody({ issued, onClose }: { issued: Issued; onClose: () => void }
     return () => ac.abort();
   }, [issued.caPem]);
 
-  const hello = useMutation({
-    mutationFn: () => helloNode({ data: { id: issued.id } }),
-    onMutate: () => toast.loading("正在上线…", { id: "hello-new" }),
-    onSuccess: () => {
-      toast.success("已上线，映射会立刻下发", { id: "hello-new" });
-      void qc.invalidateQueries({ queryKey: ["umbra"] });
-      onClose();
-    },
-    onError: (e: Error) => toast.error(e.message, { id: "hello-new" }),
-  });
-
   const server = issued.listen?.trim() || "入口:4400";
   const pem = (issued.caPem || fetchedPem).trim();
   const dockerCmd =
     issued.dockerCmd && (issued.dockerCmd.includes("BEGIN CERTIFICATE") || !pem)
       ? issued.dockerCmd
       : nodeEnrollDockerCmd(issued.token, server, pem || undefined);
-  const binCmd =
-    issued.os === "windows"
-      ? nodeInstall("windows", issued.arch, issued.token)
-      : issued.installCmd && (issued.installCmd.includes("BEGIN CERTIFICATE") || !pem)
-        ? issued.installCmd
-        : nodeEnrollBinCmd(issued.token, server, pem || undefined);
+  const servicePlatform = issued.os === "docker" ? "linux" : issued.os;
+  const binCmd = nodeEnrollServiceCmd(
+    servicePlatform,
+    issued.arch,
+    issued.token,
+    server,
+    pem || undefined,
+  );
   const cmd = (kind === "docker" ? dockerCmd : binCmd).trim();
   const hasCA = cmd.includes("BEGIN CERTIFICATE");
 
   return (
     <>
-      <div role="tablist" aria-label="安装方式" className="mt-1 flex rounded-md bg-paper-2 p-0.5 shadow-border">
+      <div
+        role="tablist"
+        aria-label="安装方式"
+        className="mt-1 flex rounded-md bg-paper-2 p-0.5 shadow-border"
+      >
         <button
           type="button"
           role="tab"
@@ -794,7 +768,7 @@ function IssuedBody({ issued, onClose }: { issued: Issued; onClose: () => void }
           }`}
           onClick={() => setKind("docker")}
         >
-          Docker
+          Docker（推荐）
         </button>
         <button
           type="button"
@@ -805,42 +779,60 @@ function IssuedBody({ issued, onClose }: { issued: Issued; onClose: () => void }
           }`}
           onClick={() => setKind("bin")}
         >
-          二进制
+          二进制服务
         </button>
       </div>
-      <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-paper-2 p-3 font-mono text-xs leading-relaxed text-ink">
-        {cmd}
-      </pre>
-      <p className="mt-2 text-xs leading-relaxed text-stone">
-        {hasCA
-          ? kind === "docker"
-            ? "粘贴到节点终端即可。host 网络让映射目标 127.0.0.1 指向这台机器；不映射本机服务时可去掉 --network host。看到心跳「刚刚」即上线。"
-            : "粘贴到节点终端即可。需要能写 /etc/umbra；否则在命令前加 sudo。看到心跳「刚刚」即上线。"
-          : "命令里还没有 CA。点「单独下载 CA」后放到节点再执行，或等证书加载完成后重新复制。"}
-      </p>
-      <div className="mt-4 flex flex-wrap justify-end gap-2">
+      <div className="mt-3 rounded-md bg-paper-2 p-4 shadow-border">
+        <p className="text-sm font-medium text-ink">
+          {kind === "docker" ? "Docker 一键命令已准备好" : "系统服务命令已准备好"}
+        </p>
+        <p className="mt-1 text-xs leading-relaxed text-stone">
+          {hasCA
+            ? kind === "docker"
+              ? "命令已包含入口 CA 和本次凭证，并会创建可自动重启的容器。"
+              : "命令已包含入口 CA 和本次凭证，并会安装为开机自动启动的系统服务。"
+            : "命令尚未包含入口 CA，请先下载 CA 并按命令提示放置。"}
+        </p>
         <Button
           type="button"
-          variant="outline"
-          onClick={() => window.open(caDownloadURL(), "_blank", "noopener")}
-        >
-          单独下载 CA
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
+          className="mt-3"
           onClick={() => {
             void navigator.clipboard.writeText(cmd);
-            toast.success("已复制命令");
+            toast.success("一键命令已复制");
           }}
         >
-          复制命令
+          复制一键命令
         </Button>
-        <Button type="button" variant="ghost" onClick={onClose}>
-          稍后再上线
-        </Button>
-        <Button type="button" onClick={() => hello.mutate()} disabled={hello.isPending}>
-          {hello.isPending ? "正在上线…" : "本机演示上线"}
+      </div>
+
+      <details className="mt-3 rounded-md bg-paper-2 shadow-border">
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-ink">
+          查看完整命令
+        </summary>
+        <pre className="max-h-64 overflow-y-auto border-t border-line whitespace-pre-wrap break-all p-3 font-mono text-xs leading-relaxed text-ink">
+          {cmd}
+        </pre>
+      </details>
+
+      <p className="mt-2 text-xs leading-relaxed text-stone">
+        {kind === "docker"
+          ? "host 网络让映射目标 127.0.0.1 指向节点本机。执行后回到节点列表等待心跳更新。"
+          : issued.os === "windows"
+            ? "请把对应的二进制放在当前目录，并在管理员 PowerShell 中执行；终端关闭后服务仍会运行。"
+            : "请把对应的二进制放在当前目录后执行；命令会请求管理员权限，终端关闭后服务仍会运行。"}
+      </p>
+      <div className="mt-4 flex flex-wrap justify-end gap-2">
+        {!hasCA ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => window.open(caDownloadURL(), "_blank", "noopener")}
+          >
+            下载入口 CA
+          </Button>
+        ) : null}
+        <Button type="button" variant="outline" onClick={onClose}>
+          关闭
         </Button>
       </div>
     </>

@@ -47,6 +47,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build embedded console
+        run: |
+          npm ci
+          npm run build:embed-ui
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:

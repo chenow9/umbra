@@ -34,11 +34,28 @@ type session struct {
 }
 
 func Run(server, token string, tlsConf *tls.Config) error {
+	return RunContext(context.Background(), server, token, tlsConf)
+}
+
+// RunContext keeps a node session alive until the connection ends or ctx is
+// cancelled. The cancellable form is used by native service managers so a
+// service stop request can close an active tunnel cleanly.
+func RunContext(ctx context.Context, server, token string, tlsConf *tls.Config) error {
 	d := net.Dialer{Timeout: 8 * time.Second}
-	raw, err := d.Dial("tcp", server)
+	raw, err := d.DialContext(ctx, "tcp", server)
 	if err != nil {
 		return err
 	}
+	baseConn := raw
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = baseConn.Close()
+		case <-done:
+		}
+	}()
+	defer close(done)
 	_ = raw.SetDeadline(time.Now().Add(8 * time.Second))
 	if tlsConf != nil {
 		tc := tls.Client(raw, tlsConf)
@@ -78,9 +95,9 @@ func Run(server, token string, tlsConf *tls.Config) error {
 
 	have := map[string]wire.Mapping{}
 	var haveMu sync.Mutex
-	ctx, cancel := context.WithCancel(context.Background())
+	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	rt := &session{server: server, raw: raw, have: have, haveMu: &haveMu, ctx: ctx}
+	rt := &session{server: server, raw: raw, have: have, haveMu: &haveMu, ctx: sessionCtx}
 	go acceptStreams(sess, have, &haveMu)
 
 	for {

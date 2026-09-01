@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.3
+
+跨平台发布、节点系统服务与控制台部署流程。
+
+- CI 构建并上传 Linux、macOS、Windows 的 amd64 / arm64 二进制文件
+- 节点登记按所选平台生成可直接执行的系统服务命令：Linux systemd、macOS launchd、Windows Service
+- `umbra-node` 支持 Windows Service Control Manager，并在停止服务时正常关闭隧道和重试循环
+- Windows 安装改用 PowerShell `New-Service`，增加管理员权限、服务删除等待和失败退出码检查
+- 节点命令选择正确架构的二进制，内嵌入口 CA 和凭证；终端关闭或系统重启后节点继续运行
+- Docker 节点命令可重复执行，会替换已有容器并保留自动重启策略
+- 部署页只生成填写了真实入口地址的命令；节点和访问端命令回到登记、签发流程，移除演示入口和占位内容
+- 中英文文档补充 Linux、macOS、Windows 节点服务的状态、停止、启动、禁用和卸载命令
+
+Cross-platform releases, node system services, and a clearer console deployment flow.
+
+- Build and upload Linux, macOS, and Windows binaries for amd64 and arm64 in CI
+- Generate ready-to-run native node services for the selected platform: systemd, launchd, or Windows Service
+- Add Windows Service Control Manager support to `umbra-node`, including graceful tunnel and retry-loop shutdown
+- Use PowerShell `New-Service` on Windows with administrator, deletion-wait, and native exit-code checks
+- Select the correct node binary architecture and embed the gate CA and credential; nodes survive terminal close and host reboot
+- Make the Docker node command repeatable by replacing an existing container while retaining its restart policy
+- Generate gate commands only after a real address is supplied; move node and visitor commands back to enrollment/issuance and remove demo placeholders
+- Document node service status, stop, start, disable, and uninstall operations for Linux, macOS, and Windows in both READMEs
+
 ## 0.1.2
 
 UDP 稳定性、可观测性与控制台布局。

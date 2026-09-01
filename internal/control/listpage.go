@@ -187,7 +187,7 @@ var auditActionLabels = map[string]string{
 	"mapping.delete":   "删除映射",
 	"mapping.enable":   "启用映射",
 	"mapping.disable":  "停用映射",
-	"demo.run":         "跑通演示",
+	"demo.run":         "连通性探测",
 }
 
 func filterAuditViews(views []map[string]any, q, action string) []map[string]any {

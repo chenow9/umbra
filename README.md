@@ -81,6 +81,105 @@ sudo ./dist/umbrad_linux_amd64 \
 
 节点凭证默认 90 天，也可按节点设为永不过期；过期前轮换，或随时吊销。轮换后旧凭证大约 90 秒内仍可用。
 
+### 节点系统服务管理
+
+控制台生成的二进制安装命令会把 `umbra-node` 注册为系统服务。命令执行完成后可以关闭终端；节点会继续运行，并随系统启动自动上线。
+
+**Linux（systemd）**
+
+```bash
+# 查看状态和最近日志
+sudo systemctl status umbra-node
+sudo journalctl -u umbra-node -n 100 --no-pager
+
+# 临时停止；下次开机仍会自动启动
+sudo systemctl stop umbra-node
+
+# 启动或重启
+sudo systemctl start umbra-node
+sudo systemctl restart umbra-node
+
+# 停止并禁用开机启动
+sudo systemctl disable --now umbra-node
+
+# 恢复开机启动并立即运行
+sudo systemctl enable --now umbra-node
+```
+
+彻底卸载 Linux 服务：
+
+```bash
+sudo systemctl disable --now umbra-node
+sudo rm -f /etc/systemd/system/umbra-node.service
+sudo systemctl daemon-reload
+sudo rm -f /usr/local/bin/umbra-node
+```
+
+**macOS（launchd）**
+
+```bash
+# 查看状态
+sudo launchctl print system/io.umbra.node
+
+# 临时停止；下次开机仍会自动启动
+sudo launchctl bootout system/io.umbra.node
+
+# 再次启动
+sudo launchctl bootstrap system /Library/LaunchDaemons/io.umbra.node.plist
+
+# 重启
+sudo launchctl kickstart -k system/io.umbra.node
+
+# 停止并禁用开机启动
+sudo launchctl bootout system/io.umbra.node 2>/dev/null || true
+sudo launchctl disable system/io.umbra.node
+
+# 恢复开机启动并立即运行
+sudo launchctl enable system/io.umbra.node
+sudo launchctl bootstrap system /Library/LaunchDaemons/io.umbra.node.plist
+```
+
+彻底卸载 macOS 服务：
+
+```bash
+sudo launchctl bootout system/io.umbra.node 2>/dev/null || true
+sudo launchctl disable system/io.umbra.node
+sudo rm -f /Library/LaunchDaemons/io.umbra.node.plist
+sudo rm -f /usr/local/libexec/umbra-node-run
+sudo rm -f /usr/local/bin/umbra-node
+```
+
+**Windows（管理员 PowerShell）**
+
+```powershell
+# 查看状态
+Get-Service -Name UmbraNode
+
+# 临时停止；下次开机仍会自动启动
+Stop-Service -Name UmbraNode
+
+# 启动或重启
+Start-Service -Name UmbraNode
+Restart-Service -Name UmbraNode
+
+# 停止并禁用开机启动
+Stop-Service -Name UmbraNode -ErrorAction SilentlyContinue
+Set-Service -Name UmbraNode -StartupType Disabled
+
+# 恢复开机启动并立即运行
+Set-Service -Name UmbraNode -StartupType Automatic
+Start-Service -Name UmbraNode
+```
+
+彻底卸载 Windows 服务：
+
+```powershell
+Stop-Service -Name UmbraNode -ErrorAction SilentlyContinue
+sc.exe delete UmbraNode
+```
+
+卸载系统服务默认保留 CA 和本地配置，方便重新安装。确认不再使用该节点时，先在控制台吊销节点凭证，再按需删除 `/etc/umbra`、`/usr/local/etc/umbra` 或 `C:\ProgramData\Umbra`；删除本地文件不会自动删除控制台中的节点记录。
+
 **4. 控制台**
 
 `umbrad -http` 同时提供 API 和静态页面，默认 `127.0.0.1:8080`。第一次打开设定口令。

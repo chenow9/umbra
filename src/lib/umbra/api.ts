@@ -2,7 +2,6 @@ import type {
   Node,
   AuditItem,
   ControlFrameRow,
-  DemoResult,
   Mapping,
   Overview,
   ProbeResult,
@@ -126,7 +125,9 @@ export function queryFrames(data: { page: number; size: number }) {
   return api<ListPage<ControlFrameRow>>(`/v1/frames?${q}`);
 }
 
-export function getTraffic({ data }: { data?: { range?: string; mappingId?: string; nodeId?: string } } = {}) {
+export function getTraffic({
+  data,
+}: { data?: { range?: string; mappingId?: string; nodeId?: string } } = {}) {
   const q = new URLSearchParams();
   if (data?.range) q.set("range", data.range);
   if (data?.mappingId) q.set("mappingId", data.mappingId);
@@ -174,7 +175,10 @@ export function rotateNodeToken({ data }: { data: { id: string; neverExpire?: bo
     caPem?: string;
   }>(`/v1/nodes/${encodeURIComponent(data.id)}/rotate`, {
     method: "POST",
-    body: data.neverExpire === undefined ? undefined : JSON.stringify({ neverExpire: data.neverExpire }),
+    body:
+      data.neverExpire === undefined
+        ? undefined
+        : JSON.stringify({ neverExpire: data.neverExpire }),
   });
 }
 
@@ -183,7 +187,9 @@ export function logoutAllOwnerSessions() {
 }
 
 export function helloNode({ data }: { data: { id: string } }) {
-  return api<{ ok: true; pushed: number }>(`/v1/nodes/${encodeURIComponent(data.id)}/hello`, { method: "POST" });
+  return api<{ ok: true; pushed: number }>(`/v1/nodes/${encodeURIComponent(data.id)}/hello`, {
+    method: "POST",
+  });
 }
 
 export function disconnectNode({ data }: { data: { id: string } }) {
@@ -240,7 +246,9 @@ export function setMappingEnabled({ data }: { data: { id: string; enabled: boole
 }
 
 export function deleteMapping({ data }: { data: { id: string } }) {
-  return api<{ ok: true }>(`/v1/mappings/${encodeURIComponent(data.id)}/delete`, { method: "POST" });
+  return api<{ ok: true }>(`/v1/mappings/${encodeURIComponent(data.id)}/delete`, {
+    method: "POST",
+  });
 }
 
 export function knockMapping({ data }: { data: { id: string; ip?: string } }) {
@@ -279,8 +287,4 @@ export function revokeTicket({ data }: { data: { id: string } }) {
 
 export function caDownloadURL() {
   return "/v1/ca";
-}
-
-export function runDemo() {
-  return api<DemoResult>("/v1/demo", { method: "POST" });
 }

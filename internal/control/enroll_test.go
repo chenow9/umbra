@@ -80,6 +80,9 @@ func TestEnrollScriptsEmbedCA(t *testing.T) {
 	if !strings.Contains(n.DockerCmd, "--network host") {
 		t.Fatalf("dockerCmd missing host net: %q", n.DockerCmd)
 	}
+	if !strings.Contains(n.DockerCmd, "docker rm -f umbra-node") {
+		t.Fatalf("dockerCmd must replace an existing node container: %q", n.DockerCmd)
+	}
 	if !strings.Contains(n.DockerCmd, `$HOME/.umbra/ca.crt`) {
 		t.Fatalf("dockerCmd should persist CA under $HOME/.umbra: %q", n.DockerCmd)
 	}
@@ -143,5 +146,48 @@ func TestEnrollScriptsWithoutCA(t *testing.T) {
 	}
 	if !strings.Contains(rot.InstallCmd, rot.Token) {
 		t.Fatalf("rotate installCmd missing new token: %q", rot.InstallCmd)
+	}
+}
+
+func TestEnrollBinaryScriptsUseNativeSystemServices(t *testing.T) {
+	c, _, dir := newTestConsole(t)
+	c.Listen = "114.55.129.94:4400"
+	caPath := filepath.Join(dir, "ca.crt")
+	if err := os.WriteFile(caPath, []byte(testCAPEM+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c.CAFile = caPath
+
+	tests := []struct {
+		name     string
+		platform string
+		arch     string
+		want     []string
+	}{
+		{
+			name: "linux arm64", platform: "linux", arch: "arm64",
+			want: []string{"umbra-node_linux_arm64", "/etc/systemd/system/umbra-node.service", "systemctl enable umbra-node", "systemctl restart umbra-node"},
+		},
+		{
+			name: "macOS amd64", platform: "darwin", arch: "amd64",
+			want: []string{"umbra-node_darwin_amd64", "/Library/LaunchDaemons/io.umbra.node.plist", "launchctl bootstrap system", "launchctl kickstart -k system/io.umbra.node"},
+		},
+		{
+			name: "windows arm64", platform: "windows", arch: "arm64",
+			want: []string{"umbra-node_windows_arm64.exe", "WindowsBuiltInRole]::Administrator", "New-Service -Name 'UmbraNode'", "$LASTEXITCODE -ne 0", "Start-Service -Name 'UmbraNode'"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := c.enrollBinScript("umbra_boot_abc", tt.platform, tt.arch)
+			for _, want := range tt.want {
+				if !strings.Contains(cmd, want) {
+					t.Fatalf("command missing %q:\n%s", want, cmd)
+				}
+			}
+			if !strings.Contains(cmd, testCAPEM) || !strings.Contains(cmd, "umbra_boot_abc") {
+				t.Fatalf("command must embed CA and token:\n%s", cmd)
+			}
+		})
 	}
 }
