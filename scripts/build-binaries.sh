@@ -1,7 +1,6 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-export PATH="/usr/local/go/bin:${PATH}"
 mkdir -p dist
 build() {
   goos=$1
@@ -19,7 +18,9 @@ build darwin amd64
 build darwin arm64
 build windows amd64
 build windows arm64
-install -m 755 dist/umbrad_linux_amd64 /usr/local/bin/umbrad
-install -m 755 dist/umbra-node_linux_amd64 /usr/local/bin/umbra-node
-install -m 755 dist/umbra-visit_linux_amd64 /usr/local/bin/umbra-visit
+if [ "${UMBRA_INSTALL_LOCAL:-1}" = "1" ]; then
+  install -m 755 dist/umbrad_linux_amd64 /usr/local/bin/umbrad
+  install -m 755 dist/umbra-node_linux_amd64 /usr/local/bin/umbra-node
+  install -m 755 dist/umbra-visit_linux_amd64 /usr/local/bin/umbra-visit
+fi
 ls -l dist
