@@ -334,3 +334,7 @@ The gate `/health` and mapping APIs expose cumulative stage counters from the pu
 - Node tokens default to 90 days or never expire. Visitor tickets last 24 hours. Tokens are shown once; revoke them in the console.
 - For nmap `filtered` on `spa` mappings, run the gate with `CAP_NET_ADMIN`.
 - Mapping targets default to loopback or RFC1918 only.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

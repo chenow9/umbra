@@ -333,3 +333,7 @@ UMBRA_UDP_READ_BUFFER=8388608 docker compose -f deploy/compose.gate.yml up -d
 - 节点凭证默认 90 天，可永不过期；访客票据 24 小时。凭证只显示一次，吊销在控制台操作。
 - `spa` 要对 nmap 显示 filtered，入口进程需要 `CAP_NET_ADMIN`。
 - 映射目标默认仅本机或 RFC1918。
+
+## 许可
+
+Apache License 2.0。见 [LICENSE](LICENSE)。
