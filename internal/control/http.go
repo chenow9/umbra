@@ -1189,17 +1189,9 @@ func (c *Console) getTraffic(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	mappingID := q.Get("mappingId")
 	nodeID := q.Get("nodeId")
-	since := time.Now()
-	switch q.Get("range") {
-	case "1h":
-		since = since.Add(-time.Hour)
-	case "7d":
-		since = since.Add(-7 * 24 * time.Hour)
-	default:
-		since = since.Add(-24 * time.Hour)
-	}
-	stats := c.Gate.MappingStats()
 	now := time.Now()
+	since, step := trafficWindow(q.Get("range"), now)
+	stats := c.Gate.MappingStats()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.absorbAllLocked(stats)
@@ -1226,17 +1218,16 @@ func (c *Console) getTraffic(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	series := []map[string]any{}
-	var prevIn, prevOut int64
-	var prevTs time.Time
-	var peakIn, peakOut float64
-	first := true
+	picked := make([]sampleRec, 0, 2048)
 	for _, s := range c.samples {
 		if s.Ts.Before(since) {
 			continue
 		}
 		in, out := s.In, s.Out
 		if mappingID != "" || nodeID != "" {
+			if len(s.By) == 0 {
+				continue
+			}
 			in, out = 0, 0
 			for id, pair := range s.By {
 				if allow[id] {
@@ -1245,26 +1236,35 @@ func (c *Console) getTraffic(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		picked = append(picked, sampleRec{Ts: s.Ts, In: in, Out: out})
+	}
+	picked = bucketSamples(picked, step)
+	series := make([]map[string]any, 0, len(picked))
+	var prevIn, prevOut int64
+	var prevTs time.Time
+	var peakIn, peakOut float64
+	for i, s := range picked {
 		series = append(series, map[string]any{
-			"ts": s.Ts.UTC().Format(time.RFC3339), "bytesIn": in, "bytesOut": out,
+			"ts": s.Ts.UTC().Format(time.RFC3339), "bytesIn": s.In, "bytesOut": s.Out,
 		})
-		if !first {
-			dt := s.Ts.Sub(prevTs).Seconds()
-			if dt > 0 {
-				if d := in - prevIn; d > 0 {
-					if bps := float64(d) / dt; bps > peakIn {
-						peakIn = bps
-					}
+		if i == 0 {
+			prevIn, prevOut, prevTs = s.In, s.Out, s.Ts
+			continue
+		}
+		dt := s.Ts.Sub(prevTs).Seconds()
+		if dt > 0 {
+			if d := s.In - prevIn; d > 0 {
+				if bps := float64(d) / dt; bps > peakIn {
+					peakIn = bps
 				}
-				if d := out - prevOut; d > 0 {
-					if bps := float64(d) / dt; bps > peakOut {
-						peakOut = bps
-					}
+			}
+			if d := s.Out - prevOut; d > 0 {
+				if bps := float64(d) / dt; bps > peakOut {
+					peakOut = bps
 				}
 			}
 		}
-		first = false
-		prevIn, prevOut, prevTs = in, out, s.Ts
+		prevIn, prevOut, prevTs = s.In, s.Out, s.Ts
 	}
 	writeJSON(w, map[string]any{
 		"bytesIn": liveIn, "bytesOut": liveOut,

@@ -10,15 +10,13 @@ import { Pager } from "@/components/ui/pager";
 import { Button } from "@/components/ui/button";
 import { getTraffic, listNodes, listMappings, queryMappings } from "@/lib/umbra/api";
 import { formatBps, formatBytes } from "@/lib/umbra/format";
-import { useLiveStatus } from "@/lib/umbra/live";
+import { useLiveStatus, type TrafficRange } from "@/lib/umbra/live";
 import { emptyPage, PAGE_SIZE } from "@/lib/umbra/page";
 import type { Mapping } from "@/lib/umbra/types";
 import { cn } from "@/lib/utils";
 
-type Range = "1h" | "24h" | "7d";
-
 export function TrafficPage() {
-  const [range, setRange] = useState<Range>("24h");
+  const [range, setRange] = useState<TrafficRange>("24h");
   const [nodeId, setNodeId] = useState("");
   const [mappingId, setMappingId] = useState("");
   const [page, setPage] = useState(1);
@@ -135,6 +133,7 @@ export function TrafficPage() {
             </div>
             <RateChart
               kind="rate"
+              range={range}
               data={t?.series ?? []}
               emptyAction={
                 <Button asChild size="sm" variant="outline">
@@ -145,7 +144,7 @@ export function TrafficPage() {
           </div>
           <div className="rounded-xl bg-card p-4 shadow-border">
             <p className="mb-2 text-xs text-stone">累计流量</p>
-            <RateChart kind="bytes" data={t?.series ?? []} />
+            <RateChart kind="bytes" range={range} data={t?.series ?? []} />
           </div>
         </div>
 

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { liveBps, mergeTrafficView, peakBpsFromSeries, seriesToRate } from "./live.ts";
+import { liveBps, mergeTrafficView, peakBpsFromSeries, seriesToRate, trafficRangeMs } from "./live.ts";
 import type { LiveEvent, Mapping, Overview, TrafficView } from "./types.ts";
 
 function overview(bpsIn = 0, bpsOut = 0): Overview {
@@ -53,6 +53,15 @@ function ev(partial: Partial<LiveEvent> & Pick<LiveEvent, "ts" | "mappings">): L
     ...partial,
   };
 }
+
+describe("trafficRangeMs", () => {
+  it("maps 1h / 24h / 7d to window length", () => {
+    assert.equal(trafficRangeMs("1h"), 3_600_000);
+    assert.equal(trafficRangeMs("24h"), 86_400_000);
+    assert.equal(trafficRangeMs("7d"), 7 * 86_400_000);
+    assert.equal(trafficRangeMs(""), 86_400_000);
+  });
+});
 
 describe("seriesToRate", () => {
   it("turns cumulative counters into per-interval throughput", () => {
@@ -205,6 +214,89 @@ describe("mergeTrafficView peaks and rates", () => {
     assert.equal(view.series.length, 1);
     assert.equal(view.series[0].ts, "2026-08-28T00:00:04Z");
     assert.equal(view.series[0].bytesIn, 30);
+  });
+
+  it("keeps a full 24h series instead of capping at 2500 points", () => {
+    const key = ["umbra", "traffic", "24h", "", ""];
+    const start = Date.parse("2026-08-28T00:00:00Z");
+    const series = [];
+    for (let i = 0; i < 3000; i++) {
+      series.push({
+        ts: new Date(start + i * 10_000).toISOString(),
+        bytesIn: i * 10,
+        bytesOut: i * 4,
+      });
+    }
+    const last = series[series.length - 1];
+    const old: TrafficView = {
+      bytesIn: last.bytesIn,
+      bytesOut: last.bytesOut,
+      bpsIn: 0,
+      bpsOut: 0,
+      peakBpsIn: 0,
+      peakBpsOut: 0,
+      series,
+    };
+    const next = mergeTrafficView(
+      old,
+      ev({
+        ts: new Date(start + 3000 * 10_000 + 1000).toISOString(),
+        mappings: [mapping({ id: "m1", bytesIn: last.bytesIn + 1, bytesOut: last.bytesOut + 1 })],
+      }),
+      key,
+    );
+    assert.ok(next.series.length > 2500, `got ${next.series.length}`);
+  });
+
+  it("does not cliff cumulative series to zero when mappings are empty", () => {
+    const key = ["umbra", "traffic", "24h", "", ""];
+    const old: TrafficView = {
+      bytesIn: 100,
+      bytesOut: 80,
+      bpsIn: 0,
+      bpsOut: 0,
+      peakBpsIn: 0,
+      peakBpsOut: 0,
+      series: [{ ts: "2026-08-28T00:00:00Z", bytesIn: 100, bytesOut: 80 }],
+    };
+    const next = mergeTrafficView(
+      old,
+      ev({
+        ts: "2026-08-28T00:00:01Z",
+        mappings: [],
+        sample: { ts: "2026-08-28T00:00:00Z", bytesIn: 100, bytesOut: 80 },
+      }),
+      key,
+    );
+    assert.ok(next.series.every((p) => p.bytesIn > 0 && p.bytesOut > 0));
+  });
+
+  it("drops points outside the selected 1h window", () => {
+    const key = ["umbra", "traffic", "1h", "", ""];
+    const old: TrafficView = {
+      bytesIn: 3,
+      bytesOut: 3,
+      bpsIn: 0,
+      bpsOut: 0,
+      peakBpsIn: 0,
+      peakBpsOut: 0,
+      series: [
+        { ts: "2026-08-28T00:00:00Z", bytesIn: 1, bytesOut: 1 },
+        { ts: "2026-08-28T01:30:00Z", bytesIn: 2, bytesOut: 2 },
+        { ts: "2026-08-28T02:00:00Z", bytesIn: 3, bytesOut: 3 },
+      ],
+    };
+    const next = mergeTrafficView(
+      old,
+      ev({
+        ts: "2026-08-28T02:00:05Z",
+        mappings: [mapping({ id: "m1", bytesIn: 3, bytesOut: 3 })],
+      }),
+      key,
+    );
+    const times = next.series.map((p) => p.ts);
+    assert.equal(times.includes("2026-08-28T00:00:00Z"), false);
+    assert.equal(times.includes("2026-08-28T01:30:00Z"), true);
   });
 
   it("uses mapping bps when the traffic query is filtered", () => {

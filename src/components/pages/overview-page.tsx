@@ -94,11 +94,11 @@ export function OverviewPage() {
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="rounded-xl bg-card p-4 shadow-border">
                 <p className="mb-2 text-xs text-stone">实时速率</p>
-                <RateChart kind="rate" data={traffic.data?.series ?? []} />
+                <RateChart kind="rate" range="24h" data={traffic.data?.series ?? []} />
               </div>
               <div className="rounded-xl bg-card p-4 shadow-border">
                 <p className="mb-2 text-xs text-stone">累计流量</p>
-                <RateChart kind="bytes" data={traffic.data?.series ?? []} />
+                <RateChart kind="bytes" range="24h" data={traffic.data?.series ?? []} />
               </div>
             </div>
           </section>

@@ -9,9 +9,11 @@ import (
 )
 
 const (
-	trafficSchema   = 1
-	trafficByKeep   = time.Hour
-	trafficFileName = "traffic"
+	trafficSchema     = 1
+	trafficKeep       = 7 * 24 * time.Hour
+	trafficRawKeep    = time.Hour
+	trafficMinuteKeep = 24 * time.Hour
+	trafficFileName   = "traffic"
 )
 
 type trafficFile struct {
@@ -33,12 +35,88 @@ func (c *Console) trafficPath() string {
 	return filepath.Join(filepath.Dir(c.Persist), trafficFileName)
 }
 
+func trafficWindow(rangeName string, now time.Time) (since time.Time, step time.Duration) {
+	switch rangeName {
+	case "1h":
+		return now.Add(-time.Hour), 0
+	case "7d":
+		return now.Add(-7 * 24 * time.Hour), 5 * time.Minute
+	default:
+		return now.Add(-24 * time.Hour), time.Minute
+	}
+}
+
+func bucketSamples(in []sampleRec, step time.Duration) []sampleRec {
+	if step <= 0 || len(in) < 2 {
+		return in
+	}
+	sec := int64(step / time.Second)
+	if sec <= 0 {
+		return in
+	}
+	out := make([]sampleRec, 0, len(in))
+	var prev int64 = -1
+	for _, s := range in {
+		b := s.Ts.Unix() / sec
+		if len(out) > 0 && b == prev {
+			out[len(out)-1] = s
+			continue
+		}
+		out = append(out, s)
+		prev = b
+	}
+	return out
+}
+
+// compactSamples keeps 7d of history: 10s in the last hour, 1min for 24h, 5min beyond.
+func compactSamples(samples []sampleRec, now time.Time) []sampleRec {
+	if len(samples) == 0 {
+		return samples
+	}
+	keepFrom := now.Add(-trafficKeep)
+	rawFrom := now.Add(-trafficRawKeep)
+	minuteFrom := now.Add(-trafficMinuteKeep)
+	out := make([]sampleRec, 0, 4096)
+	var prevBucket int64
+	var prevStep time.Duration
+	bucketed := false
+	for _, s := range samples {
+		if s.Ts.Before(keepFrom) {
+			continue
+		}
+		var step time.Duration
+		switch {
+		case !s.Ts.Before(rawFrom):
+			step = 0
+		case !s.Ts.Before(minuteFrom):
+			step = time.Minute
+		default:
+			step = 5 * time.Minute
+		}
+		if step == 0 {
+			out = append(out, s)
+			bucketed = false
+			continue
+		}
+		bucket := s.Ts.Unix() / int64(step/time.Second)
+		if bucketed && step == prevStep && bucket == prevBucket {
+			out[len(out)-1] = s
+			continue
+		}
+		out = append(out, s)
+		prevBucket = bucket
+		prevStep = step
+		bucketed = true
+	}
+	return out
+}
+
 func encodeTrafficFile(samples []sampleRec, now time.Time) ([]byte, error) {
-	cutoff := now.Add(-trafficByKeep)
+	samples = compactSamples(samples, now)
 	out := make([]trafficPoint, 0, len(samples))
 	for _, s := range samples {
 		p := trafficPoint{T: s.Ts.Unix(), In: s.In, Out: s.Out}
-		if !s.Ts.Before(cutoff) && len(s.By) > 0 {
+		if len(s.By) > 0 {
 			p.By = s.By
 		}
 		out = append(out, p)
@@ -70,9 +148,6 @@ func decodeTrafficFile(raw []byte) ([]sampleRec, error) {
 			By:  by,
 		})
 	}
-	if len(out) > 10000 {
-		out = out[len(out)-10000:]
-	}
 	return out, nil
 }
 
@@ -93,7 +168,7 @@ func (c *Console) loadTraffic() {
 		log.Printf("traffic: 忽略损坏文件: %v", err)
 		return
 	}
-	c.samples = samples
+	c.samples = compactSamples(samples, time.Now())
 }
 
 func (c *Console) saveTrafficLocked() error {

@@ -9,6 +9,14 @@ export function useLiveStatus() {
   return useContext(LiveStatusCtx);
 }
 
+export type TrafficRange = "1h" | "24h" | "7d";
+
+export function trafficRangeMs(range: string): number {
+  if (range === "1h") return 3_600_000;
+  if (range === "7d") return 7 * 86_400_000;
+  return 86_400_000;
+}
+
 function upsertByTs(series: TrafficPoint[], point: TrafficPoint): TrafficPoint[] {
   if (series.length === 0) return [point];
   const last = series[series.length - 1];
@@ -29,6 +37,13 @@ function replaceLast(series: TrafficPoint[], point: TrafficPoint): TrafficPoint[
 
 function tsAt(series: TrafficPoint[], i: number): number {
   return Date.parse(series[i].ts);
+}
+
+function trimToRange(series: TrafficPoint[], range: string, nowMs: number): TrafficPoint[] {
+  const cutoff = nowMs - trafficRangeMs(range);
+  let i = 0;
+  while (i < series.length && tsAt(series, i) < cutoff) i++;
+  return i === 0 ? series : series.slice(i);
 }
 
 function filteredSample(ev: LiveEvent, nodeId: string, mappingId: string): TrafficPoint | null {
@@ -114,7 +129,10 @@ export function mergeTrafficView(old: TrafficView | undefined, ev: LiveEvent, ke
   const totals = liveTotals(ev.mappings, nodeId, mappingId);
   let series = old?.series ? old.series.slice() : [];
   const sample = filteredSample(ev, nodeId, mappingId);
-  const livePoint: TrafficPoint = { ts: ev.ts, bytesIn: totals.bytesIn, bytesOut: totals.bytesOut };
+  const livePoint: TrafficPoint =
+    sample && ev.mappings.length === 0 && !nodeId && !mappingId
+      ? { ts: ev.ts, bytesIn: sample.bytesIn, bytesOut: sample.bytesOut }
+      : { ts: ev.ts, bytesIn: totals.bytesIn, bytesOut: totals.bytesOut };
   const liveAt = Date.parse(ev.ts);
   // Samples are ~10s; live ticks are ~1s. Keep committed samples plus one live tail.
   if (sample) {
@@ -144,8 +162,7 @@ export function mergeTrafficView(old: TrafficView | undefined, ev: LiveEvent, ke
       series = [...series, livePoint];
     }
   }
-  if (series.length > 2500) series = series.slice(series.length - 2500);
-  void range;
+  series = trimToRange(series, range, liveAt);
   const rates = liveBps(ev, nodeId, mappingId);
   const fromSeries = peakBpsFromSeries(series);
   return {

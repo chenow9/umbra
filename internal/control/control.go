@@ -253,10 +253,7 @@ func (c *Console) sampleLoop() {
 			out += rec.BytesOut
 			by[id] = [2]int64{rec.BytesIn, rec.BytesOut}
 		}
-		c.samples = append(c.samples, sampleRec{Ts: now, In: in, Out: out, By: by})
-		if len(c.samples) > 10000 {
-			c.samples = c.samples[len(c.samples)-10000:]
-		}
+		c.samples = compactSamples(append(c.samples, sampleRec{Ts: now, In: in, Out: out, By: by}), now)
 		n++
 		trafficRaw, trafficErr := encodeTrafficFile(c.samples, now)
 		saveCtrl := n%6 == 0
