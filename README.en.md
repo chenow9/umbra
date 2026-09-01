@@ -208,22 +208,17 @@ Then point the business client at `127.0.0.1:2222`. `umbra-visit` is an on-deman
 
 The gate container is the control plane: `-http` serves the UI and API on one port (default `127.0.0.1:8080`). Nodes use `:4400` TLS. The console is compiled into `umbrad` at image build time; first visit sets a password. Do not run a separate `npm run dev` in production.
 
-Push a semver tag (`v1.2.3`) to build **linux/amd64** and **linux/arm64** images and push them to Docker Hub:
+Docker Hub provides **linux/amd64** and **linux/arm64** images:
 
 - `chenow9/umbrad` (includes `umbrad` and `umbra-visit`)
 - `chenow9/umbra-node`
 
-Tags: `1.2.3`, `1.2`. `latest` is only applied on tags without `-`. A prerelease such as `v0.0.1-beta` publishes `0.0.1-beta` only.
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+Pin production deployments to the current stable version, `0.1.3`, so a future `latest` update cannot change the running version unexpectedly.
 
 **Gate** (Linux host networking):
 
 ```bash
-UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.gate.yml up -d
+UMBRA_TAG=0.1.3 docker compose -f deploy/compose.gate.yml up -d
 # open the console (default bind is 127.0.0.1:8080)
 # named volume umbra-tls → /var/lib/umbra holds certs, control.json, and traffic.
 # Do not mount only ca.crt.
@@ -238,7 +233,7 @@ The enroll dialog's Docker command writes the CA locally and runs `docker run --
 ```bash
 cp deploy/node.env.example node.env   # set UMBRA_SERVER / UMBRA_TOKEN
 # copy the gate's ca.crt into the current directory
-UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.node.yml up -d
+UMBRA_TAG=0.1.3 docker compose -f deploy/compose.node.yml up -d
 ```
 
 Hot-replace the gate binary without dropping tunnels:

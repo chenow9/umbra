@@ -207,22 +207,17 @@ umbra-visit --server gate.example.com:4400 \
 
 入口容器就是控制面：`-http` 同时提供网页和 API（默认 `127.0.0.1:8080`），节点走 `:4400` TLS。镜像构建时会把控制台打进 `umbrad`，第一次打开网页设定口令。不要再单独跑 `npm run dev`。
 
-推送符合 semver 的 tag（`v1.2.3`）会构建 **linux/amd64** 和 **linux/arm64** 镜像并推到 Docker Hub：
+Docker Hub 提供 **linux/amd64** 和 **linux/arm64** 镜像：
 
 - `chenow9/umbrad`（含 `umbrad` 与 `umbra-visit`）
 - `chenow9/umbra-node`
 
-标签：`1.2.3`、`1.2`；不含 `-` 的正式版才打 `latest`。预发布例如 `v0.0.1-beta` 只会推 `0.0.1-beta`。
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+生产环境建议固定使用当前正式版本 `0.1.3`，避免 `latest` 更新后意外改变运行版本。
 
 **入口**（Linux 宿主机，host 网络）：
 
 ```bash
-UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.gate.yml up -d
+UMBRA_TAG=0.1.3 docker compose -f deploy/compose.gate.yml up -d
 # 浏览器打开入口的控制台（默认只绑 127.0.0.1:8080）
 # named volume umbra-tls → /var/lib/umbra
 # 里面是证书、control.json、traffic。不要只挂 ca.crt。
@@ -237,7 +232,7 @@ UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.gate.yml up -d
 ```bash
 cp deploy/node.env.example node.env   # 填 UMBRA_SERVER / UMBRA_TOKEN
 # 把入口的 ca.crt 放到当前目录
-UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.node.yml up -d
+UMBRA_TAG=0.1.3 docker compose -f deploy/compose.node.yml up -d
 ```
 
 换入口程序本身不停机：

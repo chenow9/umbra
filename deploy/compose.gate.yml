@@ -6,8 +6,8 @@
 # -tls-dir /var/lib/umbra  证书、control.json（口令、登录会话、节点凭证、映射）、traffic（速率曲线）
 # 必须把整个 tls-dir 做成 volume。只挂 ca.crt / gate.crt 会在重建容器后变成「第一次设定口令」。
 #
-# 预发布 tag 不打 latest。当前 Hub 上的版本例如：
-#   UMBRA_TAG=0.0.1-beta docker compose -f deploy/compose.gate.yml up -d
+# 生产环境建议固定正式版本：
+#   UMBRA_TAG=0.1.3 docker compose -f deploy/compose.gate.yml up -d
 services:
   umbrad:
     image: chenow9/umbrad:${UMBRA_TAG:-latest}
