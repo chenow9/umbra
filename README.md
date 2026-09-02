@@ -212,12 +212,12 @@ Docker Hub 提供 **linux/amd64** 和 **linux/arm64** 镜像：
 - `chenow9/umbrad`（含 `umbrad` 与 `umbra-visit`）
 - `chenow9/umbra-node`
 
-生产环境建议固定使用当前正式版本 `0.1.3`，避免 `latest` 更新后意外改变运行版本。
+生产环境建议固定使用当前正式版本 `0.1.4`，避免 `latest` 更新后意外改变运行版本。
 
 **入口**（Linux 宿主机，host 网络）：
 
 ```bash
-UMBRA_TAG=0.1.3 docker compose -f deploy/compose.gate.yml up -d
+UMBRA_TAG=0.1.4 docker compose -f deploy/compose.gate.yml up -d
 # 浏览器打开入口的控制台（默认只绑 127.0.0.1:8080）
 # named volume umbra-tls → /var/lib/umbra
 # 里面是证书、control.json、traffic。不要只挂 ca.crt。
@@ -232,7 +232,7 @@ UMBRA_TAG=0.1.3 docker compose -f deploy/compose.gate.yml up -d
 ```bash
 cp deploy/node.env.example node.env   # 填 UMBRA_SERVER / UMBRA_TOKEN
 # 把入口的 ca.crt 放到当前目录
-UMBRA_TAG=0.1.3 docker compose -f deploy/compose.node.yml up -d
+UMBRA_TAG=0.1.4 docker compose -f deploy/compose.node.yml up -d
 ```
 
 换入口程序本身不停机：
@@ -323,7 +323,7 @@ UMBRA_UDP_READ_BUFFER=8388608 docker compose -f deploy/compose.gate.yml up -d
 
 ### UDP 丢包诊断
 
-入口的 `/health` 和映射 API 提供从业务端口、uplane 到客户端回写的分段累计计数。节点可设置 `UMBRA_UDP_STATS_INTERVAL` 输出对应的 JSON 统计日志：默认 `0`（关闭），设置为大于 `0` 的整数时表示输出间隔秒数，压测时建议 `10`。修改后需重启节点；统计日志不包含凭证、cookie 或密钥。
+入口公开的 `/health` 仅返回整体健康状态；登录后的 `/v1/health` 和映射 API 提供从业务端口、uplane 到客户端回写的分段累计计数。节点可设置 `UMBRA_UDP_STATS_INTERVAL` 输出对应的 JSON 统计日志：默认 `0`（关闭），设置为大于 `0` 的整数时表示输出间隔秒数，压测时建议 `10`。修改后需重启节点；统计日志不包含凭证、cookie 或密钥。
 
 ## 安全注意
 

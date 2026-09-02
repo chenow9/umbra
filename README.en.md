@@ -213,12 +213,12 @@ Docker Hub provides **linux/amd64** and **linux/arm64** images:
 - `chenow9/umbrad` (includes `umbrad` and `umbra-visit`)
 - `chenow9/umbra-node`
 
-Pin production deployments to the current stable version, `0.1.3`, so a future `latest` update cannot change the running version unexpectedly.
+Pin production deployments to the current stable version, `0.1.4`, so a future `latest` update cannot change the running version unexpectedly.
 
 **Gate** (Linux host networking):
 
 ```bash
-UMBRA_TAG=0.1.3 docker compose -f deploy/compose.gate.yml up -d
+UMBRA_TAG=0.1.4 docker compose -f deploy/compose.gate.yml up -d
 # open the console (default bind is 127.0.0.1:8080)
 # named volume umbra-tls → /var/lib/umbra holds certs, control.json, and traffic.
 # Do not mount only ca.crt.
@@ -233,7 +233,7 @@ The enroll dialog's Docker command writes the CA locally and runs `docker run --
 ```bash
 cp deploy/node.env.example node.env   # set UMBRA_SERVER / UMBRA_TOKEN
 # copy the gate's ca.crt into the current directory
-UMBRA_TAG=0.1.3 docker compose -f deploy/compose.node.yml up -d
+UMBRA_TAG=0.1.4 docker compose -f deploy/compose.node.yml up -d
 ```
 
 Hot-replace the gate binary without dropping tunnels:
@@ -324,7 +324,7 @@ A larger buffer absorbs bursts and scheduler stalls but does not replace suffici
 
 ### UDP loss diagnostics
 
-The gate `/health` and mapping APIs expose cumulative stage counters from the public socket through uplane and the client write-back. Set `UMBRA_UDP_STATS_INTERVAL` on a node to emit matching JSON statistics: `0` disables reporting (the default), while a positive integer is the reporting interval in seconds; `10` is recommended during a load test. Restart the node after changing it. Reports never include credentials, cookies, or keys.
+The public gate `/health` endpoint returns only the aggregate health state. Authenticated `/v1/health` and mapping APIs expose cumulative stage counters from the public socket through uplane and the client write-back. Set `UMBRA_UDP_STATS_INTERVAL` on a node to emit matching JSON statistics: `0` disables reporting (the default), while a positive integer is the reporting interval in seconds; `10` is recommended during a load test. Restart the node after changing it. Reports never include credentials, cookies, or keys.
 
 ## Security
 

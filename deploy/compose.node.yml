@@ -1,6 +1,6 @@
 # 内网节点。host 网络才能把映射目标写成宿主机的 127.0.0.1。
 # 先把入口的 ca.crt 放到本目录（或改 UMBRA_TLS_CA_FILE），再复制 node.env.example 为 node.env。
-# 生产环境建议固定正式版本：UMBRA_TAG=0.1.3 docker compose -f deploy/compose.node.yml up -d
+# 生产环境建议固定正式版本：UMBRA_TAG=0.1.4 docker compose -f deploy/compose.node.yml up -d
 services:
   umbra-node:
     image: chenow9/umbra-node:${UMBRA_TAG:-latest}

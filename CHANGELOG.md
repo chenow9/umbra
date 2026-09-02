@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.4
+
+健康检查收敛、流量时间窗口修复与发布完善。
+
+- 公网 `/health` 仅返回整体 `ok` 状态并保留 `200/503` 探针语义，不再暴露连接数、流量、丢包和限流配置
+- 新增登录后可访问的 `/v1/health` 详细诊断接口，健康响应禁止缓存，并补充认证与字段回归测试
+- 修复实时流量序列被 2500 点截断的问题，1 小时、24 小时和 7 天窗口现在保留并裁剪各自范围的数据
+- 流量图改用固定所选窗口的 ECharts 时间轴与显示抽稀，避免 24 小时和 7 天视图退化为相同的短时段
+- Docker 部署文档和 compose 示例固定到当前正式版本，避免生产环境跟随 `latest` 意外升级
+- 项目许可由私有保留权利声明改为 Apache License 2.0
+
+Health-check hardening, correct traffic windows, and release cleanup.
+
+- Keep the public `/health` response to the aggregate `ok` state while preserving `200/503` probe semantics; connection, traffic, drop, and admission details are no longer exposed
+- Add authenticated `/v1/health` diagnostics, disable health-response caching, and cover public, unauthorized, and authenticated behavior with regression tests
+- Stop truncating live traffic series to 2,500 points so the 1-hour, 24-hour, and 7-day views retain and trim data to their actual windows
+- Move traffic charts to ECharts time axes locked to the selected range with display downsampling, preventing the 24-hour and 7-day views from collapsing to the same short interval
+- Pin Docker deployment documentation and compose examples to the current stable release instead of allowing production deployments to drift with `latest`
+- Replace the private all-rights-reserved notice with the Apache License 2.0
+
 ## 0.1.3
 
 跨平台发布、节点系统服务与控制台部署流程。

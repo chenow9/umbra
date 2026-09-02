@@ -30,6 +30,7 @@ var uiFS embed.FS
 func (c *Console) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", c.getHealth)
+	mux.HandleFunc("GET /v1/health", c.need(c.getHealthDetails))
 	mux.HandleFunc("GET /v1/auth", c.getAuth)
 	mux.HandleFunc("POST /v1/setup", c.postSetup)
 	mux.HandleFunc("POST /v1/login", c.postLogin)
@@ -270,7 +271,7 @@ func (c *Console) deleteTicket(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-func (c *Console) getHealth(w http.ResponseWriter, _ *http.Request) {
+func (c *Console) healthState() (gate.PlaneHealth, bool, bool) {
 	ph := c.Gate.PlaneHealth()
 	persistOK := true
 	if c.Persist != "" {
@@ -284,11 +285,31 @@ func (c *Console) getHealth(w http.ResponseWriter, _ *http.Request) {
 	if ph.UDP == "required" && !ph.UPlane {
 		ok = false
 	}
-	status := http.StatusOK
+	return ph, persistOK, ok
+}
+
+func healthHTTPStatus(ok bool) int {
 	if !ok {
-		status = http.StatusServiceUnavailable
+		return http.StatusServiceUnavailable
 	}
+	return http.StatusOK
+}
+
+func (c *Console) getHealth(w http.ResponseWriter, _ *http.Request) {
+	_, _, ok := c.healthState()
+	w.Header().Set("cache-control", "no-store")
+	w.Header().Set("content-type", "application/json")
+	w.WriteHeader(healthHTTPStatus(ok))
+	_ = json.NewEncoder(w).Encode(struct {
+		OK bool `json:"ok"`
+	}{OK: ok})
+}
+
+func (c *Console) getHealthDetails(w http.ResponseWriter, _ *http.Request) {
+	ph, persistOK, ok := c.healthState()
+	status := healthHTTPStatus(ok)
 	st := c.Gate.Status()
+	w.Header().Set("cache-control", "no-store")
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(struct {

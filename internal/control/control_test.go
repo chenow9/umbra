@@ -991,9 +991,71 @@ func TestOwnerSessionExpires(t *testing.T) {
 	readBody(t, res)
 }
 
-func TestHealthAndMappingsExposeUDPAdmit(t *testing.T) {
-	_, srv, _ := newTestConsole(t)
+func TestPublicHealthIsMinimalAndDetailsRequireAuth(t *testing.T) {
+	c, srv, _ := newTestConsole(t)
+	c.SkipAuth = false
+
 	res := doJSON(t, srv, "GET", "/health", nil, nil)
+	var public map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&public); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("public health %d %v", res.StatusCode, public)
+	}
+	ok, exists := public["ok"].(bool)
+	if len(public) != 1 || !exists || ok != (res.StatusCode == http.StatusOK) {
+		t.Fatalf("public health must only expose ok: %v", public)
+	}
+	if res.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("public health cache-control %q", res.Header.Get("Cache-Control"))
+	}
+
+	res = doJSON(t, srv, "GET", "/v1/health", nil, nil)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated detailed health %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+
+	cli := cookieClient(t)
+	req, err := http.NewRequest("POST", srv.URL+"/v1/setup", strings.NewReader(`{"password":"abcdefgh"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("content-type", "application/json")
+	res, err = cli.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("setup %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+
+	res, err = cli.Get(srv.URL + "/v1/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var details map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&details); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("authenticated detailed health %d %v", res.StatusCode, details)
+	}
+	if _, ok := details["active"]; !ok {
+		t.Fatalf("detailed health missing active: %v", details)
+	}
+	if res.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("detailed health cache-control %q", res.Header.Get("Cache-Control"))
+	}
+}
+
+func TestDetailedHealthAndMappingsExposeUDPAdmit(t *testing.T) {
+	_, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "GET", "/v1/health", nil, nil)
 	var health map[string]any
 	if err := json.NewDecoder(res.Body).Decode(&health); err != nil {
 		t.Fatal(err)
