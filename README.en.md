@@ -1,53 +1,125 @@
-# umbra
+# Umbra
 
-[中文 README](README.md)
+<p align="center">
+  <img src="public/og.jpg" alt="Umbra" width="900">
+</p>
 
-Self-hosted **L4 (TCP / UDP)** stealth intranet-penetration gateway.
+<p align="center"><strong>A self-hosted gateway for private TCP and UDP services</strong></p>
 
-Nodes only keep the gate address and a credential. Mappings, modes and ACL live on the server, are pushed to online nodes, and take effect without touching client files, restarting the gate, or dropping existing connections.
+<p align="center">
+  <a href="https://github.com/chenow9/umbra/actions/workflows/ci.yml"><img src="https://github.com/chenow9/umbra/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/chenow9/umbra/releases/latest"><img src="https://img.shields.io/github/v/release/chenow9/umbra" alt="Release"></a>
+  <a href="https://hub.docker.com/r/chenow9/umbrad"><img src="https://img.shields.io/docker/pulls/chenow9/umbrad?label=Docker%20Pulls" alt="Docker Pulls"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/chenow9/umbra" alt="License"></a>
+</p>
 
-## What it does
+<p align="center">
+  <a href="https://umbrad.grok.me">Website</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#security-model-and-limitations">Security</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="README.md">简体中文</a>
+</p>
 
-Expose TCP / UDP services behind NAT through a self-hosted gate, with business ports hidden from scanners by default.
+Umbra connects TCP and UDP services behind NAT or firewalls to a public gateway you control. Mappings, access modes, and CIDR rules are centrally managed on the server and pushed to online nodes. A node only stores the gateway address, its credential, and the trusted CA—not a local mapping file.
 
-1. L4 only — TCP and UDP. No user-traffic L7 reverse proxy.
-2. **Server is the only config truth.** A node keeps the gate address and a credential. Mappings, modes and ACL are edited in the console and pushed live; you do not log into the node to edit files.
-3. The gate binds and releases ports at runtime; in-flight connections on other mappings stay up. Replace the gate binary with USR2; existing tunnels stay in the old process until they end.
-4. Three mapping modes: `public` (open; default for new mappings), `spa` (knock), `visitor` (no business listener on the gate; a ticket opens a local L4 port on the accessing machine).
-5. Per-node and per-mapping live rate plus cumulative traffic. The console and API share one HTTP port; first visit sets a local password.
+## Why Umbra
 
-## Pieces
+- **Centralized management** — Manage nodes, mappings, access modes, ACLs, and credentials from one web console.
+- **TCP and UDP forwarding** — Carry SSH, RDP, databases, game traffic, and custom protocols without requiring an L7 proxy.
+- **Three access modes** — Select `public`, `spa`, or `visitor` independently for each mapping.
+- **Live configuration** — Create, edit, enable, disable, or remove mappings without restarting the gateway or logging into every node.
+- **Built-in visibility** — Inspect node status, mapping reachability, real-time throughput, cumulative traffic, drop counters, and audit events.
+- **Graceful replacement** — On Unix, `SIGUSR2` hands new connections to a new gateway process while the old process drains established tunnels.
 
-| Binary | Role |
-|---|---|
-| `umbrad` | Public gate. TLS 1.3 control channel, business listeners, `spa` nftables DROP, hot upgrade, console |
-| `umbra-node` | Node behind NAT. Dials local targets from server-pushed mappings |
-| `umbra-visit` | Visitor client. A server-issued ticket opens a local L4 (TCP/UDP) port; the gate does not listen on a business port |
-| Console | Overview / nodes / mappings / traffic / audit / deploy. Same HTTP port as the API; set a password on first open |
+Umbra fits home labs, remote development, private services, game UDP, and temporary third-party access. It does not provide HTTP routing, a WAF, or a global edge network; pair it with a dedicated L7 proxy such as nginx or Caddy when those capabilities are required.
 
-## Mapping modes
+## Choose an access mode
 
-The console and API use these identifiers (hints in the UI):
+| Mode      | Public exposure                                                                                              | Authorization                                                                                                         | Best suited for                                                                 |
+| --------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `public`  | The gateway listens on a service port visible to scanners                                                    | Clients connect directly; an optional CIDR allow-list can restrict sources                                            | Public services, game UDP, or applications with their own strong authentication |
+| `spa`     | The gateway listens on a service port; on Linux with nftables, unauthorized traffic is dropped in the kernel | An authenticated action temporarily authorizes a source IP; the default 60-second window affects new connections only | SSH, RDP, and administrative services where reduced scan exposure is useful     |
+| `visitor` | No public service port is opened for the mapping                                                             | A server-issued ticket (24 hours by default) lets `umbra-visit` open a local port on the client machine               | Private services that should not expose a public service port                   |
 
-| Mode | Business listener on the gate | How you connect |
-|---|---|---|
-| `spa` (knock) | Yes. Unauthorized sources are dropped in-kernel on Linux (`CAP_NET_ADMIN`). Without that capability the process closes the socket in user space. Console **Knock** grants the source IP; default window 60s, new connections only. | Knock, then connect to the entry port |
-| `visitor` (encrypted tunnel) | No. The gate does not listen on a business port. | Issue a ticket (`umbra_vis_…`, 24 hours), run `umbra-visit` on the accessing machine |
-| `public` (open) | Yes. Visible to scanners; anyone can connect (optional CIDR allow-list). | Connect to the entry port, e.g. game UDP |
+> New mappings default to `public`. Choose `spa` for temporary source-IP authorization, or `visitor` for ticket-based access without a public service listener.
 
-New mappings default to `public`. Choose `spa` when the port should stay hidden.
+## How it works
+
+```text
+Public / SPA client ── TCP/UDP service port ──┐
+                                              │
+umbra-visit ── ticketed tunnel ─────────────┼──▶ umbrad ══ TLS 1.3 / Yamux ══ umbra-node ──▶ private service
+                                              │
+Console / API ── config and policy ───────────┘
+```
+
+The node initiates a long-lived TLS 1.3 connection to `umbrad`. Yamux multiplexes the control stream and concurrent TCP service streams over that connection. The server is the source of truth: it sends `MappingSync` updates to online nodes, nodes reply with `MappingAck`, and a reconnect delivers a complete mapping snapshot.
+
+UDP prefers a separate data plane when available and can fall back to Yamux, depending on configuration. A mapping acknowledgement confirms configuration delivery; **Probe** sends data through Gateway → Node → local target to check reachability.
+
+## Components
+
+| Component     | Role                                                                                                           |
+| ------------- | -------------------------------------------------------------------------------------------------------------- |
+| `umbrad`      | Public gateway: TLS 1.3 tunnels, service listeners, `spa` kernel drops, graceful upgrade, web console, and API |
+| `umbra-node`  | Node behind NAT: connects outward to the gateway and dials local targets from server-provided mappings         |
+| `umbra-visit` | Visitor client: uses a ticket to establish a tunnel and opens a local TCP or UDP port                          |
+| Web console   | Manages nodes, mappings, credentials, traffic, audit events, and deployment commands                           |
 
 ## Quick start
 
-**Build**
+The recommended gateway deployment uses Docker Compose on a public Linux host. Allow nodes to reach `4400/TCP`; also allow `4400/UDP` when using the separate UDP data plane. Open mapping-specific service ports as required.
+
+**1. Start the public gateway**
+
+```bash
+git clone https://github.com/chenow9/umbra.git
+cd umbra
+
+# Replace gate.example.com:4400 in deploy/compose.gate.yml
+# with the domain or public IP that nodes can actually reach.
+UMBRA_TAG=0.1.4 docker compose -f deploy/compose.gate.yml up -d
+docker logs -f umbrad
+```
+
+The gateway container uses host networking and stores certificates, credentials, mappings, and traffic data in the `umbra-tls` volume. Pin a release version in production instead of following `latest`.
+
+**2. Open the console**
+
+The management endpoint listens on `127.0.0.1:8080` by default. Forward it securely from your workstation:
+
+```bash
+ssh -L 8080:127.0.0.1:8080 user@gate.example.com
+```
+
+Open `http://127.0.0.1:8080` and create the initial administrator password. For domain access, use an HTTPS reverse proxy or configure management TLS in `umbrad`. Never expose the plaintext management endpoint to the Internet.
+
+**3. Enroll a node**
+
+Open **Nodes → Enroll**, select the target platform, and run the generated installation command. The `umbra_boot_…` credential is displayed only once; the command includes the gateway CA and native service configuration.
+
+**4. Create and verify a mapping**
+
+On **Mappings**, select an online node and configure the protocol, public entry port, and a `LocalHost:LocalPort` reachable by that node.
+
+- **Mapping acknowledged** means the node received the latest configuration.
+- **Probe** sends a real request through Gateway → Node → local target to help verify reachability.
+- Connect directly to a `public` service port. Use **Knock** first for `spa`, or issue a ticket first for `visitor`.
+
+> Probe sends a small payload to the real target. It checks path and response behavior; it is not an application-level health check.
+
+### Binary deployment
+
+Prebuilt binaries are available from [Releases](https://github.com/chenow9/umbra/releases/latest). To build from source:
 
 ```bash
 # go.mod: Go 1.25 (toolchain 1.25.14)
 ./scripts/build-binaries.sh
-# dist/: linux / darwin / windows × amd64 / arm64
+# dist/: Linux / macOS / Windows × amd64 / arm64
 ```
 
-**Gate**
+Start the gateway manually:
 
 ```bash
 sudo ./dist/umbrad_linux_amd64 \
@@ -58,20 +130,14 @@ sudo ./dist/umbrad_linux_amd64 \
   -tls-dir /var/lib/umbra
 ```
 
-First start writes `ca.crt`, `gate.crt`, `gate.key` under `-tls-dir`.  
-`-advertise` is the address nodes and visitors actually dial; it only fills generated install/visit commands and does not change the listen address.
+`-advertise` is the external address used in generated node and visitor commands; it does not change the listen address. The TLS directory contains:
 
-`-tls-dir` also accumulates:
-
-- `control.json` — owner password, sessions, node tokens, mappings (including cumulative bytes)
+- `ca.crt` / `gate.crt` / `gate.key` — gateway CA and certificates
+- `control.json` — administrator password, sessions, node credentials, mappings, and cumulative traffic
 - `traffic` — rate-curve samples (written about every 10 seconds)
 - `state.json` — hot-upgrade restore state
 
-**Node** (token is issued once in the console)
-
-Console **Nodes → Enroll** issues `umbra_boot_…` (shown once). The dialog includes a host install command and a Docker command with the gate CA already embedded, so you do not have to scp `ca.crt` separately.
-
-Manual equivalent:
+Start a node manually:
 
 ```bash
 ./umbra-node \
@@ -82,7 +148,8 @@ Manual equivalent:
 
 Node tokens default to 90 days, or never expire per node. Rotate before expiry, or revoke at any time. After rotate, the old token stays valid for about 90 seconds.
 
-### Managing the node system service
+<details>
+<summary><strong>Node system-service commands</strong></summary>
 
 The binary install command generated by the console registers `umbra-node` as a system service. You can close the terminal after installation; the node keeps running and starts automatically with the host.
 
@@ -181,17 +248,9 @@ sc.exe delete UmbraNode
 
 Removing the system service keeps the CA and local configuration by default so the node can be reinstalled. When permanently retiring a node, revoke its credential in the console first, then remove `/etc/umbra`, `/usr/local/etc/umbra`, or `C:\ProgramData\Umbra` if desired. Removing local files does not remove the node record from the console.
 
-**Console**
+</details>
 
-`umbrad -http` serves the API and the static UI on one port (default `127.0.0.1:8080`). First visit sets a local password.
-
-In development Vite reverse-proxies `/v1` to the gate. In production put the built UI in `-ui`, or put nginx in front of the same port.
-
-Add or edit mappings in the console. Do not edit files on the node. systemd / launchd / Windows service / Docker snippets are on the Deploy page.
-
-The console binds loopback by default. A non-loopback `-http` address requires `-http-tls-cert`/`-http-tls-key` (or `-http-tls` to reuse the gate certs). Plain HTTP on a public address is refused at startup.
-
-**Visitor** (`visitor` mode only)
+### Visitor client
 
 Install `umbra-visit` on the machine that should reach the intranet service. In **Mappings**, issue a ticket for a `visitor` mapping, then run the command shown once:
 
@@ -202,11 +261,11 @@ umbra-visit --server gate.example.com:4400 \
   --local 127.0.0.1:2222
 ```
 
-Then point the business client at `127.0.0.1:2222`. `umbra-visit` is an on-demand process on the accessing side — not on the gate or the intranet node. Stopping it closes the local port. Platform snippets are on **Deploy → umbra-visit**. The `chenow9/umbrad` image already contains `umbra-visit`.
+Then point the service client at `127.0.0.1:2222`. `umbra-visit` is an on-demand process on the client side—not on the gateway or the private node. Stopping it closes the local port. Platform snippets are available under **Deploy → umbra-visit**. The `chenow9/umbrad` image already contains `umbra-visit`.
 
 ## Docker (public gate + private node)
 
-The gate container is the control plane: `-http` serves the UI and API on one port (default `127.0.0.1:8080`). Nodes use `:4400` TLS. The console is compiled into `umbrad` at image build time; first visit sets a password. Do not run a separate `npm run dev` in production.
+The gateway container carries both control and forwarding traffic. `-http` serves the UI and API (default `127.0.0.1:8080`), while nodes connect over TLS on `:4400`. The console is embedded in `umbrad`; no separate frontend development server is needed in production.
 
 Docker Hub provides **linux/amd64** and **linux/arm64** images:
 
@@ -244,14 +303,24 @@ kill -USR2 $(pidof umbrad)   # or: systemctl reload umbrad
 
 Existing splices stay in the old process until they end; new accepts go to the new process.
 
+## Network and ports
+
+| Purpose                            | Default address            | Public exposure                                                              |
+| ---------------------------------- | -------------------------- | ---------------------------------------------------------------------------- |
+| Node / Visitor control and tunnels | `4400/TCP`                 | Required for sources that need to connect                                    |
+| Separate UDP data plane            | `4400/UDP`                 | Used by `-udp auto/required`; `auto` can fall back to Yamux when unavailable |
+| Web console and API                | `127.0.0.1:8080`           | Keep private; access through SSH forwarding or an HTTPS reverse proxy        |
+| `public` / `spa` mappings          | User-defined               | Open the selected TCP or UDP ports as required                               |
+| `visitor` mappings                 | No public service listener | Not required                                                                 |
+
 ## Platforms
 
-| | amd64 | arm64 |
-|---|---|---|
-| Linux | ✓ | ✓ |
-| macOS | ✓ | ✓ |
-| Windows | ✓ | ✓ |
-| Docker (linux, host network) | ✓ | ✓ |
+|                              | amd64 | arm64 |
+| ---------------------------- | ----- | ----- |
+| Linux                        | ✓     | ✓     |
+| macOS                        | ✓     | ✓     |
+| Windows                      | ✓     | ✓     |
+| Docker (linux, host network) | ✓     | ✓     |
 
 Kernel DROP for `spa` is Linux-only. macOS / Windows gates still close in user space. Docker gate needs real host networking on a Linux host.
 
@@ -270,15 +339,15 @@ deploy/             gate / node Compose files
 
 Common `umbrad` flags (`umbrad -h`):
 
-| Flag | Default | Role |
-|---|---|---|
-| `-listen` | `:4400` | node control channel |
-| `-advertise` | empty (same as listen) | address written into install/visit commands |
-| `-http` | `127.0.0.1:8080` | console and API |
-| `-bind` | `127.0.0.1` | business-port bind; use `0.0.0.0` on a public gate |
-| `-tls-dir` | `/var/lib/umbra` | certs, state, `control.json`, `traffic` |
-| `-stealth` | `auto` | `nft` / `off` / `auto` |
-| `-udp` | `auto` | UDP data plane: `auto` / `required` / `yamux` |
+| Flag         | Default                | Role                                               |
+| ------------ | ---------------------- | -------------------------------------------------- |
+| `-listen`    | `:4400`                | node control channel                               |
+| `-advertise` | empty (same as listen) | address written into install/visit commands        |
+| `-http`      | `127.0.0.1:8080`       | console and API                                    |
+| `-bind`      | `127.0.0.1`            | business-port bind; use `0.0.0.0` on a public gate |
+| `-tls-dir`   | `/var/lib/umbra`       | certs, state, `control.json`, `traffic`            |
+| `-stealth`   | `auto`                 | `nft` / `off` / `auto`                             |
+| `-udp`       | `auto`                 | UDP data plane: `auto` / `required` / `yamux`      |
 
 Node: `--server`, `--token`, `--tls-ca`. Visitor also needs `--ticket` and `--local`.
 
@@ -286,12 +355,12 @@ Node: `--server`, `--token`, `--tls-ca`. Visitor also needs `--ticket` and `--lo
 
 `umbrad` reads these variables at startup, so restart or recreate the gate container after changing them. They define gate-wide defaults; each mapping's own `maxConns` limit still applies independently.
 
-| Environment variable | Default | Meaning |
-|---|---:|---|
-| `UMBRA_MAX_SPLICES` | `8192` | Maximum number of active TCP forwarding connections (splices) across the entire gate, shared by all TCP mappings and visitor forwarding. Effective concurrency is also limited by each mapping's `maxConns`. Only positive integers are accepted. Reaching the limit rejects new TCP forwarding without interrupting existing connections. |
-| `UMBRA_UDP_MAX_FLOWS_PER_IP` | `256` | Maximum active UDP flows from one source IPv4 address within each mapping; IPv6 sources are grouped by `/64`. A UDP flow is identified by its source address and port and remains active until the UDP idle timeout. `0` disables this limit. |
-| `UMBRA_UDP_NEW_FLOWS_PER_SEC` | `256` | Maximum new UDP flows per second from one source IPv4 address within each mapping; IPv6 sources are grouped by `/64`. A token bucket permits bounded bursts. `0` disables this limit. This does not limit packet rate (pps) on established flows. |
-| `UMBRA_UDP_NEW_FLOWS_PER_MAP` | `1024` | Maximum aggregate new UDP flows per second for one mapping across all source addresses. A token bucket permits bounded bursts. `0` disables this limit. This does not limit packet rate (pps) on established flows. |
+| Environment variable          | Default | Meaning                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------- | ------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `UMBRA_MAX_SPLICES`           |  `8192` | Maximum number of active TCP forwarding connections (splices) across the entire gate, shared by all TCP mappings and visitor forwarding. Effective concurrency is also limited by each mapping's `maxConns`. Only positive integers are accepted. Reaching the limit rejects new TCP forwarding without interrupting existing connections. |
+| `UMBRA_UDP_MAX_FLOWS_PER_IP`  |   `256` | Maximum active UDP flows from one source IPv4 address within each mapping; IPv6 sources are grouped by `/64`. A UDP flow is identified by its source address and port and remains active until the UDP idle timeout. `0` disables this limit.                                                                                              |
+| `UMBRA_UDP_NEW_FLOWS_PER_SEC` |   `256` | Maximum new UDP flows per second from one source IPv4 address within each mapping; IPv6 sources are grouped by `/64`. A token bucket permits bounded bursts. `0` disables this limit. This does not limit packet rate (pps) on established flows.                                                                                          |
+| `UMBRA_UDP_NEW_FLOWS_PER_MAP` |  `1024` | Maximum aggregate new UDP flows per second for one mapping across all source addresses. A token bucket permits bounded bursts. `0` disables this limit. This does not limit packet rate (pps) on established flows.                                                                                                                        |
 
 The total number of active UDP flows is still capped by the mapping's `maxConns`. A new flow must satisfy `maxConns`, the per-source active-flow limit, the per-source creation rate, and the per-mapping creation rate. Reaching any limit rejects that new flow without affecting established flows.
 
@@ -309,8 +378,8 @@ Before raising the TCP limit, verify file-descriptor limits and available memory
 
 `umbrad`, `umbra-node`, and UDP visitors read the following variable when they start or create a UDP flow:
 
-| Environment variable | Default | Meaning |
-|---|---:|---|
+| Environment variable    |  Default | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------------- | -------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `UMBRA_UDP_READ_BUFFER` | `524288` | Requested receive-buffer size in bytes for every UDP socket, including the gate's shared uplane and mapping sockets and node/visitor uplane and local-target sockets. Only positive integers are accepted; an unset or invalid value uses 512 KiB. On Linux, the effective size is capped by the host's `net.core.rmem_max`. Restart the affected process or recreate its container after changing the value. The 512 KiB default is conservative for small 2-vCPU/2-GiB hosts and large UDP flow counts; explicitly raise it only after load testing burst requirements. |
 
 Raise the Linux host limit to at least the requested size before increasing the variable, for example:
@@ -326,14 +395,24 @@ A larger buffer absorbs bursts and scheduler stalls but does not replace suffici
 
 The public gate `/health` endpoint returns only the aggregate health state. Authenticated `/v1/health` and mapping APIs expose cumulative stage counters from the public socket through uplane and the client write-back. Set `UMBRA_UDP_STATS_INTERVAL` on a node to emit matching JSON statistics: `0` disables reporting (the default), while a positive integer is the reporting interval in seconds; `10` is recommended during a load test. Restart the node after changing it. Reports never include credentials, cookies, or keys.
 
-## Security
+## Security model and limitations
 
-- Control channel is TLS 1.3; nodes require `--tls-ca`. Newly issued CAs use subject `umbra CA` (an existing tls-dir is not rewritten).
-- Release images are built with Go 1.25.14 (digest-pinned). A `v*` tag runs vet, `-race` tests, and govulncheck before any push.
-- Console defaults to `127.0.0.1`; non-loopback binds require TLS.
-- Node tokens default to 90 days or never expire. Visitor tickets last 24 hours. Tokens are shown once; revoke them in the console.
-- For nmap `filtered` on `spa` mappings, run the gate with `CAP_NET_ADMIN`.
-- Mapping targets default to loopback or RFC1918 only.
+- Gateway ↔ Node control and tunnel traffic uses TLS 1.3 by default, and nodes must trust the gateway CA. Umbra does not automatically encrypt the client-facing protocol for `public` or `spa`; use SSH, HTTPS, or application-level encryption where required.
+- `spa` temporarily authorizes a source IP after an authenticated action. It is not device or user identity. Other devices sharing the same public NAT address may establish new connections during the authorization window.
+- An expired `spa` grant blocks new connections; it does not terminate established TCP connections or UDP flows that are still active. SPA does not replace authentication in SSH, TLS, or the application itself.
+- Kernel-level drops require Linux, nftables, and `CAP_NET_ADMIN`, and currently protect IPv4. Otherwise Umbra falls back to rejecting traffic in user space, where a service port may remain detectable. Kernel drops should be understood as scan resistance, not guaranteed invisibility.
+- Visitor tickets are bearer credentials. Anyone holding a valid ticket can use it until it expires or is revoked, so transmit and store tickets securely.
+- The management endpoint defaults to `127.0.0.1`. Non-loopback binds require TLS. When using a reverse proxy, configure `-http-trust-proxy` only for trusted proxy CIDRs.
+- Protect and back up the entire `-tls-dir`. It contains the CA private key, gateway certificate, administrator state, node credentials, mappings, and traffic history. Never commit or share it with an untrusted party.
+- New mappings default to `public`. Before Internet exposure, review the access mode, CIDR rules, target address, and the service's own authentication.
+
+## Project and releases
+
+- [Website](https://umbrad.grok.me)
+- [GitHub Releases](https://github.com/chenow9/umbra/releases/latest)
+- [Changelog](CHANGELOG.md)
+- [Issue tracker](https://github.com/chenow9/umbra/issues)
+- Docker Hub: [`chenow9/umbrad`](https://hub.docker.com/r/chenow9/umbrad) · [`chenow9/umbra-node`](https://hub.docker.com/r/chenow9/umbra-node)
 
 ## License
 

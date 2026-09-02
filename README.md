@@ -1,52 +1,125 @@
-# umbra
+# Umbra
 
-[English](README.en.md)
+<p align="center">
+  <img src="public/og.jpg" alt="Umbra" width="900">
+</p>
 
-自托管 **L4（TCP / UDP）** 隐匿内网穿透网关。  
-节点只带入口地址和凭证；映射、模式、ACL 全部在服务端改，热下发，不改客户端文件、不重启入口、不断已有连接。
+<p align="center"><strong>自托管的 TCP / UDP 内网服务访问网关</strong></p>
 
-## 它解决什么
+<p align="center">
+  <a href="https://github.com/chenow9/umbra/actions/workflows/ci.yml"><img src="https://github.com/chenow9/umbra/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/chenow9/umbra/releases/latest"><img src="https://img.shields.io/github/v/release/chenow9/umbra" alt="Release"></a>
+  <a href="https://hub.docker.com/r/chenow9/umbrad"><img src="https://img.shields.io/docker/pulls/chenow9/umbrad?label=Docker%20Pulls" alt="Docker Pulls"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/chenow9/umbra" alt="License"></a>
+</p>
 
-把内网里的 TCP / UDP 服务，经一台自托管入口暴露出去，同时让扫描默认看不见业务口。
+<p align="center">
+  <a href="https://umbrad.grok.me">项目主页</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#安全模型与边界">安全边界</a> ·
+  <a href="CHANGELOG.md">更新日志</a> ·
+  <a href="README.en.md">English</a>
+</p>
 
-1. 只做 L4：TCP、UDP，不做用户流量的 L7 反代。
-2. **配置唯一真相在服务端。** 节点只带入口地址和凭证；映射、模式、ACL 在控制台改完即热下发，不必再登录节点改文件。
-3. 入口运行时绑定 / 释放端口，其它映射的在途连接不受影响。换入口程序发 USR2，已有隧道留在旧进程直到结束。
-4. 三种映射模式：`public`（公开访问，新建默认）、`spa`（敲门访问）、`visitor`（入口不监听业务口，访问侧用票据开本机 L4）。
-5. 按节点、按映射看实时速率和累计流量；控制台与 API 共用一个 HTTP 口，第一次打开设定口令。
+Umbra 将 NAT 或防火墙后的 TCP / UDP 服务连接到由你掌控的公网入口。映射、访问模式和 CIDR 规则都在服务端集中管理并动态下发；Node 只需保存入口地址、凭证和 CA，无需反复修改本地映射文件。
+
+## 为什么选择 Umbra
+
+- **服务端集中管理**：节点、映射、访问模式、ACL 和凭证统一在 Web 控制台管理。
+- **TCP / UDP 都能转发**：工作在 L4，不绑定 HTTP，可承载 SSH、RDP、数据库、游戏和自定义协议。
+- **三种访问模式**：每条映射可独立选择 `public`、`spa` 或 `visitor`。
+- **配置动态生效**：创建、修改、启停映射无需重启入口或逐台登录 Node。
+- **隧道与访问可观测**：查看节点状态、映射可达性、实时速率、累计流量、丢弃计数和审计记录。
+- **平滑更新**：Unix 入口可用 `SIGUSR2` 切换新进程，已建立隧道由旧进程继续服务直到结束。
+
+Umbra 适合家庭实验室、远程开发、私有服务、游戏 UDP 和临时第三方访问。它不提供 HTTP 路由、WAF 或全球边缘网络；如果需要 L7 能力，应与 nginx、Caddy 等专用工具配合。
+
+## 选择访问模式
+
+| 模式      | 公网暴露                                                      | 授权方式                                                                | 适合场景                                 |
+| --------- | ------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------- |
+| `public`  | 入口监听服务端口，可被扫描发现                                | 客户端直接连接，可选 CIDR 白名单                                        | 公开服务、游戏 UDP，或业务自身已有强认证 |
+| `spa`     | 入口监听服务端口；Linux nftables 模式下，未授权流量在内核丢弃 | 认证后临时放行来源 IP，默认 60 秒，只影响新连接                         | 希望减少扫描暴露的 SSH、RDP 等管理服务   |
+| `visitor` | 该映射不在入口监听公网服务端口                                | 访问方持服务端签发的票据（默认 24 小时），由 `umbra-visit` 在本机开端口 | 不希望入口暴露业务端口的私有服务         |
+
+> 新建映射默认使用 `public`。需要来源 IP 临时放行时选择 `spa`；需要凭证化访问且不希望监听公网业务口时选择 `visitor`。
+
+## 工作原理
+
+```text
+Public / SPA 客户端 ── TCP/UDP 服务端口 ──┐
+                                              │
+umbra-visit ── 票据隧道 ──────────────┼──▶ umbrad ══ TLS 1.3 / Yamux ══ umbra-node ──▶ 内网服务
+                                              │
+Console / API ── 配置与策略 ───────────────┘
+```
+
+Node 主动建立到 `umbrad` 的长期 TLS 1.3 连接，Yamux 在其中复用控制 Stream 和多条 TCP 业务 Stream。服务端是配置的唯一权威源：在线时通过控制 Stream 推送 `MappingSync`，Node 用 `MappingAck` 确认；离线修改会在 Node 重连后用完整快照对齐。
+
+UDP 在可用时优先使用独立数据面，不可用时可按配置回退到 Yamux。控制台中的映射确认表示配置已送达；“探测”会实际经过 Server → Node → 本地目标的链路，用于验证目标可达性。
 
 ## 组成
 
-| 程序 | 作用 |
-|---|---|
-| `umbrad` | 公网入口。TLS 1.3 控制通道、业务口 Listen、`spa` 内核丢弃、热升级、控制台 |
-| `umbra-node` | NAT 后节点。只连入口，按服务端下发的映射去拨本地目标 |
-| `umbra-visit` | 访问端。用服务端签发的票据在本机开一个 L4 口（TCP/UDP），入口不暴露业务端口 |
-| 控制台 | 总览 / 节点 / 映射 / 流量 / 审计 / 部署。与 API 共用一个 HTTP 口，第一次打开时设定口令 |
-
-## 映射模式
-
-控制台和 API 用这三个标识（括号里是界面上的说明）：
-
-| 模式 | 入口业务口 | 访问方式 |
-|---|---|---|
-| `spa`（敲门访问） | 有。未敲门的来源在 Linux 入口用 nftables 丢掉（需 `CAP_NET_ADMIN`）；没有权限时退回用户态断开。控制台「敲门」按来源 IP 放行，默认窗口 60 秒，只限制新建。 | 先敲门，再连入口端口 |
-| `visitor`（加密隧道访问） | 无。入口不监听业务口。 | 签发票据（`umbra_vis_…`，24 小时）后，在访问侧跑 `umbra-visit`，本机开 L4 |
-| `public`（公开访问） | 有。对扫描可见，任何人（可再加 CIDR 白名单）可连。 | 直接连入口端口，例如游戏 UDP |
-
-新建映射默认 `public`。需要隐蔽时再选 `spa`。
+| 程序          | 作用                                                                                |
+| ------------- | ----------------------------------------------------------------------------------- |
+| `umbrad`      | 公网入口：提供 TLS 1.3 隧道、服务端口监听、`spa` 内核丢弃、热升级、Web 控制台和 API |
+| `umbra-node`  | NAT 后节点：主动连接入口，按下发的映射连接本地目标                                  |
+| `umbra-visit` | 访问端：持票据建立隧道，在访问方本机开启 TCP / UDP 端口                             |
+| Web 控制台    | 管理节点、映射、凭证、流量、审计和部署命令                                          |
 
 ## 快速开始
 
-**1. 编入口、节点、访问端**
+推荐在 Linux 公网主机上使用 Docker Compose 部署入口。宿主机需允许 Node 访问 `4400/TCP`；使用独立 UDP 数据面时还应允许 `4400/UDP`。业务映射端口按需开放。
+
+**1. 启动公网入口**
+
+```bash
+git clone https://github.com/chenow9/umbra.git
+cd umbra
+
+# 先将 deploy/compose.gate.yml 中的 gate.example.com:4400
+# 改成 Node 真正能访问的域名或公网 IP
+UMBRA_TAG=0.1.4 docker compose -f deploy/compose.gate.yml up -d
+docker logs -f umbrad
+```
+
+入口容器使用 host 网络，并将证书、凭证、映射和流量数据保存到 `umbra-tls` volume。生产环境请固定版本，不要直接跟随 `latest`。
+
+**2. 打开控制台**
+
+管理口默认仅监听 `127.0.0.1:8080`。可以在本机建立 SSH 转发：
+
+```bash
+ssh -L 8080:127.0.0.1:8080 user@gate.example.com
+```
+
+然后打开 `http://127.0.0.1:8080`，首次访问时创建管理员口令。如果要通过域名访问，请使用 HTTPS 反向代理，或为 `umbrad` 配置管理口 TLS；不要把明文管理口暴露到公网。
+
+**3. 登记 Node**
+
+在控制台选择「节点 → 登记节点」，选择目标平台后执行生成的安装命令。`umbra_boot_…` 凭证只显示一次，生成的命令已包含入口 CA 和系统服务配置。
+
+**4. 创建并验证映射**
+
+在「映射」页选择已上线的 Node，填写协议、入口端口以及 Node 可访问的 `LocalHost:LocalPort`。保存后：
+
+- “映射确认”表示 Node 已收到最新配置。
+- “探测”会经过 Server → Node → 本地目标发起一次真实请求，用于辅助判断链路是否可达。
+- 对于 `public` 映射，直接连接入口业务端口即可验证。`spa` 需先敲门，`visitor` 需先签发票据。
+
+> 探测会向真实目标发送少量探测数据，它验证的是链路与响应，不等同于应用层健康检查。
+
+### 二进制部署
+
+也可以从 [Releases](https://github.com/chenow9/umbra/releases/latest) 下载对应平台的二进制。如需从源码构建：
 
 ```bash
 # go.mod：Go 1.25（toolchain 1.25.14）
 ./scripts/build-binaries.sh
-# 产物在 dist/：linux / darwin / windows × amd64 / arm64
+# dist/：Linux / macOS / Windows × amd64 / arm64
 ```
 
-**2. 跑入口**
+手动启动入口：
 
 ```bash
 sudo ./dist/umbrad_linux_amd64 \
@@ -57,20 +130,14 @@ sudo ./dist/umbrad_linux_amd64 \
   -tls-dir /var/lib/umbra
 ```
 
-首次启动会在 `-tls-dir` 写出 `ca.crt` / `gate.crt` / `gate.key`。  
-`-advertise` 填节点和访客实际能连接的入口地址；它只用于生成部署与访客命令，不改变监听地址。
+`-advertise` 是 Node 和 Visitor 实际连接的对外地址，只用于生成部署命令，不改变监听地址。`-tls-dir` 中包含：
 
-`-tls-dir` 还会陆续写入：
-
-- `control.json`：口令、登录会话、节点凭证、映射（含累计字节）
+- `ca.crt` / `gate.crt` / `gate.key`：入口 CA 与证书
+- `control.json`：管理员口令、登录会话、节点凭证、映射与累计流量
 - `traffic`：速率曲线采样（约每 10 秒写一次）
 - `state.json`：热升级时的恢复状态
 
-**3. 登记节点**
-
-在控制台「节点 → 登记节点」签发凭证（`umbra_boot_…`，只显示一次）。弹窗里有本机安装命令和 Docker 命令，入口 CA 已写进命令，不必再单独 scp `ca.crt`。
-
-手动等价：
+手动启动 Node：
 
 ```bash
 ./umbra-node \
@@ -79,11 +146,12 @@ sudo ./dist/umbrad_linux_amd64 \
   --token umbra_boot_…
 ```
 
-节点凭证默认 90 天，也可按节点设为永不过期；过期前轮换，或随时吊销。轮换后旧凭证大约 90 秒内仍可用。
+节点凭证默认 90 天，也可设为永不过期；过期前轮换，或随时吊销。轮换后旧凭证大约 90 秒内仍可用。
 
-### 节点系统服务管理
+<details>
+<summary><strong>展开查看 Node 系统服务管理命令</strong></summary>
 
-控制台生成的二进制安装命令会把 `umbra-node` 注册为系统服务。命令执行完成后可以关闭终端；节点会继续运行，并随系统启动自动上线。
+控制台生成的二进制安装命令会把 `umbra-node` 注册为系统服务。命令执行完成后可以关闭终端；Node 会继续运行，并随系统启动自动上线。
 
 **Linux（systemd）**
 
@@ -180,17 +248,9 @@ sc.exe delete UmbraNode
 
 卸载系统服务默认保留 CA 和本地配置，方便重新安装。确认不再使用该节点时，先在控制台吊销节点凭证，再按需删除 `/etc/umbra`、`/usr/local/etc/umbra` 或 `C:\ProgramData\Umbra`；删除本地文件不会自动删除控制台中的节点记录。
 
-**4. 控制台**
+</details>
 
-`umbrad -http` 同时提供 API 和静态页面，默认 `127.0.0.1:8080`。第一次打开设定口令。
-
-开发时 Vite 只是把 `/v1` 反代到入口进程。生产把前端构建产物放到 `-ui`，或用 nginx 反代同一个口。
-
-在控制台增删映射即可，不必登录节点改任何文件。Linux systemd、macOS launchd、Windows 服务、Docker 示例见控制台「部署」页。
-
-管理口默认只绑回环。绑到非回环地址必须加 `-http-tls-cert` / `-http-tls-key`（或 `-http-tls` 复用 tls-dir 证书），否则拒绝启动。不要裸 HTTP 上公网。
-
-**5. 访问端（仅 `visitor`）**
+### Visitor 访问端
 
 在需要访问内网服务的电脑上安装对应平台的 `umbra-visit`。在控制台「映射」中对 `visitor` 映射选择「签发」，然后执行只显示一次的命令：
 
@@ -205,7 +265,7 @@ umbra-visit --server gate.example.com:4400 \
 
 ## Docker（公网入口 + 内网节点）
 
-入口容器就是控制面：`-http` 同时提供网页和 API（默认 `127.0.0.1:8080`），节点走 `:4400` TLS。镜像构建时会把控制台打进 `umbrad`，第一次打开网页设定口令。不要再单独跑 `npm run dev`。
+入口容器同时承载控制面和数据转发：`-http` 提供网页与 API（默认 `127.0.0.1:8080`），Node 通过 `:4400` TLS 连接。控制台已内置在 `umbrad` 镜像中，生产环境无需另行运行前端开发服务器。
 
 Docker Hub 提供 **linux/amd64** 和 **linux/arm64** 镜像：
 
@@ -243,14 +303,24 @@ kill -USR2 $(pidof umbrad)   # 或 systemctl reload umbrad
 
 已有隧道留在旧进程直到结束；新连接由新进程接管。
 
+## 网络与端口
+
+| 用途                      | 默认地址         | 是否需要公网开放                                        |
+| ------------------------- | ---------------- | ------------------------------------------------------- |
+| Node / Visitor 控制与隧道 | `4400/TCP`       | 是，仅需对需要连接的来源开放                            |
+| UDP 独立数据面            | `4400/UDP`       | `-udp auto/required` 使用；不可用时 `auto` 可回退 Yamux |
+| Web 控制台与 API          | `127.0.0.1:8080` | 否；建议保持回环监听，通过 SSH 或 HTTPS 反代访问        |
+| `public` / `spa` 映射     | 用户指定         | 是，按映射需求开放 TCP 或 UDP                           |
+| `visitor` 映射            | 无公网业务端口   | 否                                                      |
+
 ## 平台
 
-| | amd64 | arm64 |
-|---|---|---|
-| Linux | ✓ | ✓ |
-| macOS | ✓ | ✓ |
-| Windows | ✓ | ✓ |
-| Docker（linux，host 网络） | ✓ | ✓ |
+|                            | amd64 | arm64 |
+| -------------------------- | ----- | ----- |
+| Linux                      | ✓     | ✓     |
+| macOS                      | ✓     | ✓     |
+| Windows                    | ✓     | ✓     |
+| Docker（linux，host 网络） | ✓     | ✓     |
 
 `spa` 的内核丢弃仅 Linux。macOS / Windows 入口仍是用户态断开。Docker 入口需要 Linux 宿主机的 host 网络。
 
@@ -269,15 +339,15 @@ deploy/             入口 / 节点 Docker Compose
 
 常用入口参数（`umbrad -h`）：
 
-| 参数 | 默认 | 作用 |
-|---|---|---|
-| `-listen` | `:4400` | 节点控制通道 |
-| `-advertise` | 空（沿用 listen） | 写进部署/访客命令的对外地址 |
-| `-http` | `127.0.0.1:8080` | 控制台与 API |
-| `-bind` | `127.0.0.1` | 业务口监听地址；公网入口用 `0.0.0.0` |
-| `-tls-dir` | `/var/lib/umbra` | 证书、状态、`control.json`、`traffic` |
-| `-stealth` | `auto` | `nft` / `off` / `auto` |
-| `-udp` | `auto` | UDP 数据面：`auto` / `required` / `yamux` |
+| 参数         | 默认              | 作用                                      |
+| ------------ | ----------------- | ----------------------------------------- |
+| `-listen`    | `:4400`           | 节点控制通道                              |
+| `-advertise` | 空（沿用 listen） | 写进部署/访客命令的对外地址               |
+| `-http`      | `127.0.0.1:8080`  | 控制台与 API                              |
+| `-bind`      | `127.0.0.1`       | 业务口监听地址；公网入口用 `0.0.0.0`      |
+| `-tls-dir`   | `/var/lib/umbra`  | 证书、状态、`control.json`、`traffic`     |
+| `-stealth`   | `auto`            | `nft` / `off` / `auto`                    |
+| `-udp`       | `auto`            | UDP 数据面：`auto` / `required` / `yamux` |
 
 节点：`--server`、`--token`、`--tls-ca`。访问端另加 `--ticket`、`--local`。
 
@@ -285,12 +355,12 @@ deploy/             入口 / 节点 Docker Compose
 
 这些变量由 `umbrad` 在启动时读取，修改后需要重启或重建入口容器。它们是入口级默认策略；映射自身的 `maxConns` 仍会独立生效。
 
-| 环境变量 | 默认值 | 含义 |
-|---|---:|---|
-| `UMBRA_MAX_SPLICES` | `8192` | 整个入口允许同时存在的 TCP 转发连接（splice）总数，所有 TCP 映射和访客转发共享。实际可用并发还受各映射 `maxConns` 限制；只接受大于 `0` 的整数。达到上限后拒绝新的 TCP 转发，不中断已有连接。 |
-| `UMBRA_UDP_MAX_FLOWS_PER_IP` | `256` | 每个映射内，同一来源 IPv4（IPv6 按 `/64` 聚合）允许同时存在的 UDP flow 数。UDP flow 由来源地址和端口标识，并保持到 UDP 空闲超时；`0` 表示关闭此限制。 |
-| `UMBRA_UDP_NEW_FLOWS_PER_SEC` | `256` | 每个映射内，每个来源 IPv4（IPv6 按 `/64` 聚合）每秒允许新建的 UDP flow 数，采用令牌桶限制突发建流；`0` 表示关闭此限制。它不限制已有 flow 的 UDP 包速率（pps）。 |
-| `UMBRA_UDP_NEW_FLOWS_PER_MAP` | `1024` | 单个映射每秒允许新建的 UDP flow 总数，所有来源地址合计，采用令牌桶限制突发建流；`0` 表示关闭此限制。它不限制已有 flow 的 UDP 包速率（pps）。 |
+| 环境变量                      | 默认值 | 含义                                                                                                                                                                                         |
+| ----------------------------- | -----: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UMBRA_MAX_SPLICES`           | `8192` | 整个入口允许同时存在的 TCP 转发连接（splice）总数，所有 TCP 映射和访客转发共享。实际可用并发还受各映射 `maxConns` 限制；只接受大于 `0` 的整数。达到上限后拒绝新的 TCP 转发，不中断已有连接。 |
+| `UMBRA_UDP_MAX_FLOWS_PER_IP`  |  `256` | 每个映射内，同一来源 IPv4（IPv6 按 `/64` 聚合）允许同时存在的 UDP flow 数。UDP flow 由来源地址和端口标识，并保持到 UDP 空闲超时；`0` 表示关闭此限制。                                        |
+| `UMBRA_UDP_NEW_FLOWS_PER_SEC` |  `256` | 每个映射内，每个来源 IPv4（IPv6 按 `/64` 聚合）每秒允许新建的 UDP flow 数，采用令牌桶限制突发建流；`0` 表示关闭此限制。它不限制已有 flow 的 UDP 包速率（pps）。                              |
+| `UMBRA_UDP_NEW_FLOWS_PER_MAP` | `1024` | 单个映射每秒允许新建的 UDP flow 总数，所有来源地址合计，采用令牌桶限制突发建流；`0` 表示关闭此限制。它不限制已有 flow 的 UDP 包速率（pps）。                                                 |
 
 UDP 的活动 flow 总数仍受映射 `maxConns` 限制。新 flow 必须同时满足 `maxConns`、单来源活动 flow 上限、单来源建流速率和单映射建流速率；任何一项达到上限都会拒绝该新 flow，已有 flow 不受影响。
 
@@ -308,8 +378,8 @@ docker compose -f deploy/compose.gate.yml up -d
 
 `umbrad`、`umbra-node` 和 UDP visitor 都会在启动或创建 UDP flow 时读取以下变量：
 
-| 环境变量 | 默认值 | 含义 |
-|---|---:|---|
+| 环境变量                |   默认值 | 含义                                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------------- | -------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `UMBRA_UDP_READ_BUFFER` | `524288` | 每个 UDP socket 请求的接收缓冲区字节数，覆盖 gate 的共享 uplane socket、业务映射 socket、node/visitor 的 uplane socket 及其本地目标 socket。只接受大于 `0` 的整数；未设置或无效时使用 512 KiB。Linux 实际值受宿主机 `net.core.rmem_max` 限制，修改后需要重启相应进程或重建容器。512 KiB 是兼顾 2C2G 小型服务器和大量 UDP flow 的保守默认值；高突发场景应在压测后显式调大。 |
 
 在 Linux 上提高该值前，需先把宿主机的 `net.core.rmem_max` 调整到不低于请求值，例如：
@@ -325,14 +395,24 @@ UMBRA_UDP_READ_BUFFER=8388608 docker compose -f deploy/compose.gate.yml up -d
 
 入口公开的 `/health` 仅返回整体健康状态；登录后的 `/v1/health` 和映射 API 提供从业务端口、uplane 到客户端回写的分段累计计数。节点可设置 `UMBRA_UDP_STATS_INTERVAL` 输出对应的 JSON 统计日志：默认 `0`（关闭），设置为大于 `0` 的整数时表示输出间隔秒数，压测时建议 `10`。修改后需重启节点；统计日志不包含凭证、cookie 或密钥。
 
-## 安全注意
+## 安全模型与边界
 
-- 控制通道默认 TLS 1.3，节点必须带 `--tls-ca`。新签发的 CA 主题是 `umbra CA`（已有 tls-dir 不会改写）。
-- 发布镜像用 Go 1.25.14（digest 钉死）。推 `v*` tag 会先跑 vet、`-race` 测试和 govulncheck，失败不推镜像。
-- 管理面默认 `127.0.0.1`；非回环必须 TLS。
-- 节点凭证默认 90 天，可永不过期；访客票据 24 小时。凭证只显示一次，吊销在控制台操作。
-- `spa` 要对 nmap 显示 filtered，入口进程需要 `CAP_NET_ADMIN`。
-- 映射目标默认仅本机或 RFC1918。
+- Gate ↔ Node 的控制与隧道连接默认使用 TLS 1.3，Node 需配置可信 CA。`public` / `spa` 客户端到入口的业务协议是否加密，仍由 SSH、HTTPS 或其它业务协议决定。
+- `spa` 实际是认证后的来源 IP 临时放行，不是设备或用户身份认证。共用同一公网 NAT IP 的其它设备在放行窗口内也可能建立新连接。
+- `spa` 窗口过期只阻止新连接，不中断已经建立的 TCP 连接或未过期 UDP flow。它不替代 SSH、TLS 或应用自身的认证。
+- `spa` 的内核丢弃需要 Linux、nftables 和 `CAP_NET_ADMIN`，当前针对 IPv4。不满足条件时会回退为用户态拒绝，端口可能仍被扫描识别；即使使用内核丢弃，也不应理解为“绝对不可发现”。
+- Visitor 票据是持有者凭证：任何持有有效票据的人都能在过期或吊销前使用它，请安全传输与保管。
+- 管理面默认绑定 `127.0.0.1`；绑定非回环地址时，`umbrad` 要求配置 TLS。使用反向代理时，仅对可信代理 CIDR 配置 `-http-trust-proxy`。
+- 保护并备份整个 `-tls-dir`：其中包含 CA 私钥、入口证书、管理状态、Node 凭证、映射和流量历史。不要将该目录上传到仓库或传给不可信第三方。
+- 新建映射默认为 `public`。公网上线前，请确认访问模式、CIDR 规则、目标地址和业务自身的认证配置。
+
+## 项目与发布
+
+- [项目主页](https://umbrad.grok.me)
+- [GitHub Releases](https://github.com/chenow9/umbra/releases/latest)
+- [更新日志](CHANGELOG.md)
+- [问题反馈](https://github.com/chenow9/umbra/issues)
+- Docker Hub：[`chenow9/umbrad`](https://hub.docker.com/r/chenow9/umbrad) · [`chenow9/umbra-node`](https://hub.docker.com/r/chenow9/umbra-node)
 
 ## 许可
 
