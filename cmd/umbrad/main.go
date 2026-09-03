@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"flag"
@@ -41,10 +42,34 @@ func main() {
 	udpMode := flag.String("udp", envOr("UMBRA_UDP", "auto"), "UDP 数据面: auto | required | yamux")
 	stateFile := flag.String("state", "", "热升级恢复的状态文件")
 	pprofAddr := flag.String("pprof", envOr("UMBRA_PPROF", "off"), "pprof 监听，默认关闭；只允许回环或 Unix")
+	reset2FA := flag.Bool("reset-2fa", false, "离线重置控制台 2FA（须先停止守护进程）")
 	flag.Parse()
 	obs.Init()
 
 	if err := os.MkdirAll(*tlsDir, 0o700); err != nil {
+		log.Fatal(err)
+	}
+	if *reset2FA {
+		path := filepath.Join(*tlsDir, "control.json")
+		if err := control.ResetTwoFactor(path); err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("已重置 2FA。下次登录需口令与迁移码。迁移码文件：%s", control.BootstrapPath(path))
+		return
+	}
+	require2FA, err := control.ParseTwoFactorEnv(os.Getenv("UMBRA_2FA"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	skipAuth := control.AuthDisabledFromEnv()
+	if skipAuth {
+		log.Printf("WARNING: 控制台认证已关闭（UMBRA_LOGIN / GROK_AGENT / GROK_PROJECT_ID）。不要用于生产入口。")
+	} else if !require2FA {
+		log.Printf("WARNING: UMBRA_2FA=off，控制台只验证管理员口令。")
+	}
+	persistPath := filepath.Join(*tlsDir, "control.json")
+	lock, err := control.OpenControlLock(persistPath)
+	if err != nil {
 		log.Fatal(err)
 	}
 	bundle, err := tlscfg.Ensure(*tlsDir)
@@ -125,10 +150,11 @@ func main() {
 	if strings.HasPrefix(nodeAddr, ":") {
 		nodeAddr = "127.0.0.1" + nodeAddr
 	}
-	con, err := control.New(s, filepath.Join(*tlsDir, "control.json"))
+	con, err := control.New(s, persistPath)
 	if err != nil {
 		log.Fatal(err)
 	}
+	con.AttachLock(lock)
 	con.Listen = nodeAddr
 	con.CAFile = bundle.CAFile
 	con.NodeBin = envOr("UMBRA_NODE_BIN", "/usr/local/bin/umbra-node")
@@ -137,8 +163,12 @@ func main() {
 	if con.UIUpstream == "" && os.Getenv("GROK_AGENT") != "" {
 		con.UIUpstream = "http://127.0.0.1:8080"
 	}
-	con.SkipAuth = os.Getenv("UMBRA_LOGIN") == "off" || os.Getenv("GROK_AGENT") != "" || os.Getenv("GROK_PROJECT_ID") != ""
+	con.SkipAuth = skipAuth
 	con.TrustProxy = *httpTrust
+	if err := con.SetTwoFactorRequired(require2FA); err != nil {
+		log.Fatal(err)
+	}
+	con.Start()
 
 	mode := "tls1.3"
 	if *plain {
@@ -161,18 +191,18 @@ func main() {
 			log.Printf("control: %v", err)
 		}
 	}()
+	httpSrv := control.NewHTTPServer(con.Handler())
 	go func() {
-		srv := control.NewHTTPServer(con.Handler())
 		var err error
 		if hasHTTPTLS {
-			if srv.TLSConfig == nil {
-				srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13}
+			if httpSrv.TLSConfig == nil {
+				httpSrv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13}
 			}
-			err = srv.ServeTLS(aln, certFile, keyFile)
+			err = httpSrv.ServeTLS(aln, certFile, keyFile)
 		} else {
-			err = srv.Serve(aln)
+			err = httpSrv.Serve(aln)
 		}
-		if err != nil {
+		if err != nil && err != http.ErrServerClosed {
 			log.Printf("http: %v", err)
 		}
 	}()
@@ -186,10 +216,29 @@ func main() {
 	signal.Notify(ch, watchSignals()...)
 	for sig := range ch {
 		if isUpgrade(sig) {
-			log.Printf("upgrade: releasing listeners then spawning replacement")
+			log.Printf("upgrade: draining HTTP before spawning replacement")
+			if !con.DrainHTTP(3 * time.Second) {
+				log.Printf("upgrade aborted: HTTP handlers still active")
+				continue
+			}
+			s.StopAccept()
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_ = httpSrv.Shutdown(ctx)
+			cancel()
+			_ = httpSrv.Close()
+			s.WaitIdle(3 * time.Second)
+			con.StopBackground()
+			con.FlushTraffic()
+			if err := con.PersistNow(); err != nil {
+				log.Printf("upgrade persist: %v", err)
+			}
 			raw, _ := json.Marshal(s.Snapshot())
 			_ = os.WriteFile(*stateFile, raw, 0o600)
-			s.StopAccept()
+			nonce := fmt.Sprintf("%d", time.Now().UnixNano())
+			if err := control.WriteLockHandoff(persistPath, nonce); err != nil {
+				log.Printf("upgrade handoff file: %v", err)
+				os.Exit(1)
+			}
 			cmd := exec.Command(os.Args[0], os.Args[1:]...)
 			logf, err := os.OpenFile(filepath.Join(*tlsDir, "upgrade.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 			if err == nil {
@@ -199,19 +248,35 @@ func main() {
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
 			}
-			nonce := fmt.Sprintf("%d", time.Now().UnixNano())
-			cmd.Env = append(os.Environ(), "UMBRA_UPGRADED=1", "UMBRA_UPGRADE_NONCE="+nonce)
+			cmd.Env = append(os.Environ(), "UMBRA_UPGRADED=1", "UMBRA_UPGRADE_NONCE="+nonce, "UMBRA_LOCK_HANDOFF="+nonce)
+			attachInheritedLock(cmd, con.LockFile())
 			if err := cmd.Start(); err != nil {
+				control.ClearLockHandoff(persistPath)
 				log.Printf("upgrade spawn: %v", err)
 				os.Exit(1)
 			}
-			s.WaitIdle(3 * time.Second)
-			con.FlushTraffic()
+			if lockHandoffNeedsRelease() {
+				con.ReleaseLock()
+				if err := control.WaitLockHandoffCleared(persistPath, 10*time.Second); err != nil {
+					control.ClearLockHandoff(persistPath)
+					log.Printf("upgrade lock handoff failed: %v", err)
+					os.Exit(1)
+				}
+			} else {
+				control.ClearLockHandoff(persistPath)
+			}
 			log.Printf("upgrade: old pid %d exiting, replacement pid %d", os.Getpid(), cmd.Process.Pid)
 			os.Exit(0)
 		}
+		con.BeginDrain()
 		s.StopAccept()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = httpSrv.Shutdown(ctx)
+		cancel()
+		_ = httpSrv.Close()
+		con.WaitHTTP(3 * time.Second)
 		s.WaitIdle(3 * time.Second)
+		con.StopBackground()
 		con.FlushTraffic()
 		st.Clear()
 		return

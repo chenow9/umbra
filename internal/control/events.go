@@ -36,7 +36,12 @@ func (c *Console) getEvents(w http.ResponseWriter, r *http.Request) {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	for {
+		if c.draining.Load() {
+			return
+		}
 		select {
+		case <-c.drainCh:
+			return
 		case <-r.Context().Done():
 			return
 		case <-tick.C:

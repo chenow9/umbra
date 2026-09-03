@@ -118,4 +118,10 @@ export const actionLabel: Record<string, string> = {
   "mapping.enable": "启用映射",
   "mapping.disable": "停用映射",
   "demo.run": "连通性探测",
+  "auth.password.changed": "修改口令",
+  "auth.2fa.enrolled": "绑定双因素",
+  "auth.2fa.replaced": "更换双因素",
+  "auth.2fa.recovery_used": "使用恢复码",
+  "auth.2fa.recovery_regenerated": "重生恢复码",
+  "auth.2fa.local_reset": "本机重置双因素",
 };

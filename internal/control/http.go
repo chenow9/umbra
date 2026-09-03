@@ -37,6 +37,10 @@ func (c *Console) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/logout", c.postLogout)
 	mux.HandleFunc("POST /v1/logout-all", c.need(c.postLogoutAll))
 	mux.HandleFunc("POST /v1/password", c.need(c.postPassword))
+	mux.HandleFunc("GET /v1/2fa/enrollment", c.getTwoFactorEnrollment)
+	mux.HandleFunc("POST /v1/2fa/enrollment/confirm", c.postTwoFactorConfirm)
+	mux.HandleFunc("POST /v1/2fa/replace", c.need(c.postTwoFactorReplace))
+	mux.HandleFunc("POST /v1/2fa/recovery/regenerate", c.need(c.postTwoFactorRecoveryRegen))
 
 	mux.HandleFunc("GET /v1/overview", c.need(c.getOverview))
 	mux.HandleFunc("GET /v1/nodes", c.need(c.getNodes))
@@ -77,6 +81,27 @@ func (c *Console) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/knock/{id}", c.need(c.postKnockRaw))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		c.httpWG.Add(1)
+		if c.draining.Load() {
+			c.httpWG.Done()
+			if r.URL.Path == "/health" || strings.HasPrefix(r.URL.Path, "/v1/") {
+				writeErr(w, http.StatusServiceUnavailable, "服务即将升级")
+				return
+			}
+		} else {
+			c.httpActive.Add(1)
+			defer func() {
+				c.httpActive.Add(-1)
+				c.httpWG.Done()
+			}()
+			if v := c.httpStall.Load(); v != nil {
+				if stall, ok := v.(func()); ok {
+					stall()
+				}
+			}
+		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			if origin := r.Header.Get("Origin"); origin != "" {
 				if !originOK(origin, r.Host) {
@@ -145,7 +170,7 @@ func (c *Console) need(h http.HandlerFunc) http.HandlerFunc {
 			h(w, r)
 			return
 		}
-		ck, _ := r.Cookie("umbra_owner")
+		ck, _ := r.Cookie(ownerCookie)
 		raw := ""
 		if ck != nil {
 			raw = ck.Value
@@ -171,15 +196,67 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func writeNoStoreJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	writeJSON(w, v)
+}
+
 func writeErr(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
+func writeNoStoreErr(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	writeErr(w, status, msg)
+}
+
+func writeAuthErr(w http.ResponseWriter, err error) {
+	if err == nil {
+		return
+	}
+	if ra := retryAfterHeader(err); ra != "" {
+		w.Header().Set("Retry-After", ra)
+		writeNoStoreErr(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
+	if errors.Is(err, errPersist) {
+		persistFail(w)
+		return
+	}
+	if errors.Is(err, errForbidden2FA) {
+		writeNoStoreErr(w, http.StatusForbidden, err.Error())
+		return
+	}
+	if errors.Is(err, errBothFactors) || errors.Is(err, errAlreadyBound) || errors.Is(err, errNotSetup) {
+		writeNoStoreErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, errPendingExpire) || errors.Is(err, errNeedPending) {
+		writeNoStoreErr(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	msg := err.Error()
+	if errors.Is(err, errBadCreds) {
+		msg = errBadCreds.Error()
+	}
+	if strings.Contains(msg, "口令至少") {
+		writeNoStoreErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	writeNoStoreErr(w, http.StatusUnauthorized, msg)
+}
+
 func readJSON(r *http.Request, v any) error {
+	return readJSONMax(r, v, jsonBodyLimit)
+}
+
+func readJSONMax(r *http.Request, v any, limit int64) error {
 	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(nil, r.Body, jsonBodyLimit)
+	r.Body = http.MaxBytesReader(nil, r.Body, limit)
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(v); err != nil {
 		return err
@@ -194,7 +271,15 @@ func readJSON(r *http.Request, v any) error {
 }
 
 func jsonBody(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := readJSON(r, v); err != nil {
+	return jsonBodyMax(w, r, v, jsonBodyLimit)
+}
+
+func jsonBodyAuth(w http.ResponseWriter, r *http.Request, v any) bool {
+	return jsonBodyMax(w, r, v, authJSONLimit)
+}
+
+func jsonBodyMax(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
+	if err := readJSONMax(r, v, limit); err != nil {
 		var mb *http.MaxBytesError
 		if errors.As(err, &mb) {
 			writeErr(w, http.StatusRequestEntityTooLarge, "请求过大")
@@ -208,6 +293,10 @@ func jsonBody(w http.ResponseWriter, r *http.Request, v any) bool {
 
 func persistFail(w http.ResponseWriter) {
 	writeErr(w, http.StatusInternalServerError, "状态未能落盘")
+}
+
+func writeRandFail(w http.ResponseWriter) {
+	writeErr(w, http.StatusInternalServerError, "无法生成凭证")
 }
 
 func (c *Console) getCA(w http.ResponseWriter, _ *http.Request) {
@@ -380,19 +469,14 @@ func (c *Console) getHealthDetails(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (c *Console) getAuth(w http.ResponseWriter, r *http.Request) {
-	ck, _ := r.Cookie("umbra_owner")
-	raw := ""
-	if ck != nil {
-		raw = ck.Value
-	}
-	writeJSON(w, c.authStatus(raw))
+	writeNoStoreJSON(w, c.AuthView(readOwnerCookie(r), readPreAuthCookie(r)))
 }
 
 func (c *Console) postSetup(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Password string `json:"password"`
 	}
-	if !jsonBody(w, r, &b) {
+	if !jsonBodyAuth(w, r, &b) {
 		return
 	}
 	if err := c.setup(b.Password); err != nil {
@@ -400,31 +484,62 @@ func (c *Console) postSetup(w http.ResponseWriter, r *http.Request) {
 			persistFail(w)
 			return
 		}
-		writeErr(w, 400, err.Error())
+		writeNoStoreErr(w, 400, err.Error())
 		return
 	}
-	c.setCookie(w, r)
-	writeJSON(w, map[string]any{"ok": true})
+	if !c.RequireTwoFactor {
+		if err := c.setCookie(w, r, false); err != nil {
+			persistFail(w)
+			return
+		}
+		writeNoStoreJSON(w, map[string]any{"ok": true, "next": "authenticated"})
+		return
+	}
+	c.mu.Lock()
+	tok, err := c.issuePendingLocked("enroll", "")
+	c.mu.Unlock()
+	if err != nil {
+		writeAuthErr(w, err)
+		return
+	}
+	c.writePreAuthCookie(w, r, tok)
+	writeNoStoreJSON(w, map[string]any{"ok": true, "next": "enroll_2fa"})
 }
 
 func (c *Console) postLogin(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		Password string `json:"password"`
+		Password      string `json:"password"`
+		TOTP          string `json:"totp"`
+		RecoveryCode  string `json:"recoveryCode"`
+		MigrationCode string `json:"migrationCode"`
 	}
-	if !jsonBody(w, r, &b) {
+	if !jsonBodyAuth(w, r, &b) {
 		return
 	}
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	if err := c.login(b.Password, ip); err != nil {
-		writeErr(w, 400, err.Error())
+	res, err := c.loginFactors(loginInput{
+		Password:  b.Password,
+		TOTP:      b.TOTP,
+		Recovery:  b.RecoveryCode,
+		Migration: b.MigrationCode,
+		IP:        c.requestIP(r),
+	})
+	if err != nil {
+		writeAuthErr(w, err)
 		return
 	}
-	c.setCookie(w, r)
-	writeJSON(w, map[string]any{"ok": true})
+	if res.SessionID != "" {
+		c.clearPreAuthCookie(w, r)
+		c.writeOwnerCookie(w, r, res.SessionID)
+	}
+	if res.PreAuth != "" {
+		c.writePreAuthCookie(w, r, res.PreAuth)
+	}
+	writeNoStoreJSON(w, map[string]any{"ok": true, "next": res.Next})
 }
 
 func (c *Console) postLogout(w http.ResponseWriter, r *http.Request) {
 	sid := readOwnerCookie(r)
+	pre := readPreAuthCookie(r)
 	c.mu.Lock()
 	h := ""
 	if sid != "" {
@@ -432,6 +547,7 @@ func (c *Console) postLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	prev := c.sessions[h]
 	c.dropSessionLocked(sid)
+	c.dropPendingLocked(pre)
 	if err := c.save(); err != nil {
 		if h != "" && prev != nil {
 			c.sessions[h] = prev
@@ -441,92 +557,173 @@ func (c *Console) postLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.mu.Unlock()
-	clearOwnerCookie(w)
-	writeJSON(w, map[string]any{"ok": true})
+	c.clearOwnerCookie(w, r)
+	c.clearPreAuthCookie(w, r)
+	writeNoStoreJSON(w, map[string]any{"ok": true})
 }
 
-func (c *Console) postLogoutAll(w http.ResponseWriter, _ *http.Request) {
+func (c *Console) postLogoutAll(w http.ResponseWriter, r *http.Request) {
 	c.mu.Lock()
 	prev := c.sessions
-	c.dropAllSessionsLocked()
+	prevEpoch := c.authEpoch
+	prevPending := c.pending
+	prevSecret := c.twoFactor.PendingSecret
+	c.revokeAuthLocked()
 	if err := c.save(); err != nil {
-		c.sessions = prev
+		if !persistTombCommitted(err) {
+			c.sessions = prev
+			c.authEpoch = prevEpoch
+			c.pending = prevPending
+			c.twoFactor.PendingSecret = prevSecret
+		}
 		c.mu.Unlock()
 		persistFail(w)
 		return
 	}
 	c.mu.Unlock()
-	clearOwnerCookie(w)
-	writeJSON(w, map[string]any{"ok": true})
+	c.clearOwnerCookie(w, r)
+	c.clearPreAuthCookie(w, r)
+	writeNoStoreJSON(w, map[string]any{"ok": true})
 }
 
 func (c *Console) postPassword(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		Current string `json:"current"`
-		New     string `json:"new"`
+		Current      string `json:"current"`
+		New          string `json:"new"`
+		TOTP         string `json:"totp"`
+		RecoveryCode string `json:"recoveryCode"`
 	}
-	if !jsonBody(w, r, &b) {
+	if !jsonBodyAuth(w, r, &b) {
 		return
 	}
-	c.mu.Lock()
-	stored := c.ownerHash
-	c.mu.Unlock()
-	if stored == "" || !checkPassword(b.Current, stored) {
-		writeErr(w, 400, "口令不对")
-		return
-	}
-	if len(b.New) < 8 || len(b.New) > 128 {
-		writeErr(w, 400, "口令至少 8 位")
-		return
-	}
-	h, err := hashPassword(b.New)
+	sid, err := c.changePassword(readOwnerCookie(r), b.Current, b.New, b.TOTP, b.RecoveryCode, c.requestIP(r))
 	if err != nil {
-		writeErr(w, 400, err.Error())
+		writeAuthErr(w, err)
 		return
 	}
-	c.mu.Lock()
-	prevHash, prevEpoch := c.ownerHash, c.ownerEpoch
-	prevSess := c.sessions
-	c.ownerHash = h
-	c.ownerEpoch++
-	c.dropAllSessionsLocked()
-	sid := c.issueSessionLocked()
-	if err := c.save(); err != nil {
-		c.ownerHash, c.ownerEpoch, c.sessions = prevHash, prevEpoch, prevSess
-		c.mu.Unlock()
-		persistFail(w)
-		return
-	}
-	c.mu.Unlock()
 	c.writeOwnerCookie(w, r, sid)
-	writeJSON(w, map[string]any{"ok": true})
+	writeNoStoreJSON(w, map[string]any{"ok": true})
+}
+
+func (c *Console) getTwoFactorEnrollment(w http.ResponseWriter, r *http.Request) {
+	view, err := c.enrollmentFor(readPreAuthCookie(r), r.Host)
+	if err != nil {
+		writeAuthErr(w, err)
+		return
+	}
+	writeNoStoreJSON(w, view)
+}
+
+func (c *Console) postTwoFactorConfirm(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Code string `json:"code"`
+	}
+	if !jsonBodyAuth(w, r, &b) {
+		return
+	}
+	res, err := c.confirmEnrollment(readPreAuthCookie(r), b.Code, c.requestIP(r))
+	if err != nil {
+		writeAuthErr(w, err)
+		return
+	}
+	c.clearPreAuthCookie(w, r)
+	c.writeOwnerCookie(w, r, res.SessionID)
+	writeNoStoreJSON(w, map[string]any{
+		"ok":            true,
+		"next":          "save_recovery_codes",
+		"recoveryCodes": res.RecoveryCodes,
+	})
+}
+
+func (c *Console) postTwoFactorReplace(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Password     string `json:"password"`
+		TOTP         string `json:"totp"`
+		RecoveryCode string `json:"recoveryCode"`
+	}
+	if !jsonBodyAuth(w, r, &b) {
+		return
+	}
+	tok, err := c.startReplace(readOwnerCookie(r), b.Password, b.TOTP, b.RecoveryCode, c.requestIP(r))
+	if err != nil {
+		writeAuthErr(w, err)
+		return
+	}
+	c.writePreAuthCookie(w, r, tok)
+	writeNoStoreJSON(w, map[string]any{"ok": true, "next": "enroll_2fa"})
+}
+
+func (c *Console) postTwoFactorRecoveryRegen(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Password     string `json:"password"`
+		TOTP         string `json:"totp"`
+		RecoveryCode string `json:"recoveryCode"`
+	}
+	if !jsonBodyAuth(w, r, &b) {
+		return
+	}
+	codes, sid, err := c.regenerateRecovery(readOwnerCookie(r), b.Password, b.TOTP, b.RecoveryCode, c.requestIP(r))
+	if err != nil {
+		writeAuthErr(w, err)
+		return
+	}
+	c.writeOwnerCookie(w, r, sid)
+	writeNoStoreJSON(w, map[string]any{"ok": true, "recoveryCodes": codes})
 }
 
 func readOwnerCookie(r *http.Request) string {
-	ck, _ := r.Cookie("umbra_owner")
+	ck, _ := r.Cookie(ownerCookie)
 	if ck == nil {
 		return ""
 	}
 	return ck.Value
 }
 
-func clearOwnerCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{Name: "umbra_owner", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+func readPreAuthCookie(r *http.Request) string {
+	ck, _ := r.Cookie(preAuthCookie)
+	if ck == nil {
+		return ""
+	}
+	return ck.Value
+}
+
+func (c *Console) clearOwnerCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name: ownerCookie, Path: "/", MaxAge: -1, HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, Secure: c.cookieSecure(r),
+	})
+}
+
+func (c *Console) clearPreAuthCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name: preAuthCookie, Path: "/v1", MaxAge: -1, HttpOnly: true,
+		SameSite: http.SameSiteStrictMode, Secure: c.cookieSecure(r),
+	})
 }
 
 func (c *Console) writeOwnerCookie(w http.ResponseWriter, r *http.Request, sid string) {
 	http.SetCookie(w, &http.Cookie{
-		Name: "umbra_owner", Value: sid, Path: "/", HttpOnly: true,
+		Name: ownerCookie, Value: sid, Path: "/", HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, MaxAge: int(sessionTTL.Seconds()), Secure: c.cookieSecure(r),
 	})
 }
 
-func (c *Console) setCookie(w http.ResponseWriter, r *http.Request) {
+func (c *Console) writePreAuthCookie(w http.ResponseWriter, r *http.Request, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name: preAuthCookie, Value: token, Path: "/v1", HttpOnly: true,
+		SameSite: http.SameSiteStrictMode, MaxAge: int(pendingTTL.Seconds()), Secure: c.cookieSecure(r),
+	})
+}
+
+func (c *Console) setCookie(w http.ResponseWriter, r *http.Request, mfa bool) error {
 	c.mu.Lock()
-	sid := c.issueSessionLocked()
-	_ = c.save()
+	sid, err := c.commitSessionLocked(mfa)
 	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
 	c.writeOwnerCookie(w, r, sid)
+	return nil
 }
 
 func (c *Console) live() map[string]gateNode {
@@ -568,8 +765,16 @@ func (c *Console) postNode(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "需要名称")
 		return
 	}
-	id := newID("nde")
-	plain, hash := newNodeToken()
+	id, err := newID("nde")
+	if err != nil {
+		writeRandFail(w)
+		return
+	}
+	plain, hash, err := newNodeToken()
+	if err != nil {
+		writeRandFail(w)
+		return
+	}
 	until := lifetimeUntil(b.NeverExpire)
 	c.mu.Lock()
 	rec := &nodeRec{
@@ -619,7 +824,12 @@ func (c *Console) postRotate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "节点不存在")
 		return
 	}
-	plain, hash := newNodeToken()
+	plain, hash, err := newNodeToken()
+	if err != nil {
+		c.mu.Unlock()
+		writeRandFail(w)
+		return
+	}
 	old := a.TokenHash
 	oldUntil := a.TokenUntil
 	oldPrev, oldPrevUntil := a.PrevHash, a.PrevUntil
@@ -887,7 +1097,11 @@ func (c *Console) postMapping(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	id := newID("map")
+	id, err := newID("map")
+	if err != nil {
+		writeRandFail(w)
+		return
+	}
 	max := policy.MaxConns(b.MaxConns)
 	idle := 0
 	if b.IdleTimeoutSec != nil {
@@ -1136,8 +1350,19 @@ func (c *Console) postVisitor(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "只有访问端映射能签发")
 		return
 	}
-	id := newID("vis")
-	ticket := "umbra_vis_" + newID("k")[2:]
+	id, err := newID("vis")
+	if err != nil {
+		c.mu.Unlock()
+		writeRandFail(w)
+		return
+	}
+	kid, err := newID("k")
+	if err != nil || len(kid) < 3 {
+		c.mu.Unlock()
+		writeRandFail(w)
+		return
+	}
+	ticket := "umbra_vis_" + kid[2:]
 	exp := time.Now().Add(24 * time.Hour)
 	rec := &ticketRec{
 		ID: id, MappingID: mapID, Hash: gate.TicketHash(ticket),
@@ -1427,8 +1652,18 @@ func (c *Console) postDemo(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	if demo == nil {
-		id := newID("nde")
-		plain, hash := newNodeToken()
+		id, err := newID("nde")
+		if err != nil {
+			c.mu.Unlock()
+			writeRandFail(w)
+			return
+		}
+		plain, hash, err := newNodeToken()
+		if err != nil {
+			c.mu.Unlock()
+			writeRandFail(w)
+			return
+		}
 		until := time.Now().Add(gate.TokenTTL)
 		demo = &nodeRec{ID: id, Name: "演示节点", Comment: "本机演示", OS: "linux", Arch: "amd64", TokenHash: hash, TokenUntil: until, Status: "offline", Enabled: true, Created: time.Now(), revealed: plain}
 		c.nodes[id] = demo
@@ -1436,7 +1671,12 @@ func (c *Console) postDemo(w http.ResponseWriter, _ *http.Request) {
 		_ = c.save()
 	}
 	if demo.revealed == "" {
-		plain, hash := newNodeToken()
+		plain, hash, err := newNodeToken()
+		if err != nil {
+			c.mu.Unlock()
+			writeRandFail(w)
+			return
+		}
 		old := demo.TokenHash
 		oldUntil := demo.TokenUntil
 		until := time.Now().Add(gate.TokenTTL)

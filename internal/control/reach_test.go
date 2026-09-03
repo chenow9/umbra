@@ -4,11 +4,11 @@ import "testing"
 
 func TestMappingReach(t *testing.T) {
 	cases := []struct {
-		en                                bool
-		mode, listen, push, node, err     string
-		granted                           bool
-		active, max                       int
-		want                              string
+		en                            bool
+		mode, listen, push, node, err string
+		granted                       bool
+		active, max                   int
+		want                          string
 	}{
 		{false, "public", "listening", "acked", "online", "", true, 0, 8, "disabled"},
 		{true, "public", "error", "error", "online", "bind", true, 0, 8, "error"},

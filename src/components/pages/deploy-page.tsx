@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AuthPanel } from "@/components/pages/auth-panel";
 import {
   ARCHS,
   binaryName,
@@ -108,6 +109,8 @@ export function DeployPage() {
             to="/mappings"
           />
         </section>
+
+        <AuthPanel />
 
         <aside className="rounded-xl bg-paper-2 px-4 py-3 shadow-border">
           <h2 className="text-sm font-medium text-ink">上线前确认</h2>

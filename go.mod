@@ -7,6 +7,7 @@ toolchain go1.25.14
 require (
 	github.com/google/nftables v0.3.0
 	github.com/hashicorp/yamux v0.1.2
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.41.0
 	golang.org/x/sys v0.35.0
 )

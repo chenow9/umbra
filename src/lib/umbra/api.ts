@@ -37,20 +37,86 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
+export type OwnerAuthNext = "setup_password" | "enroll_2fa" | "login" | "authenticated" | "save_recovery_codes";
+
+export type OwnerStatus = {
+  required: boolean;
+  configured: boolean;
+  signedIn: boolean;
+  twoFactorRequired: boolean;
+  twoFactorConfigured: boolean;
+  next: OwnerAuthNext;
+  migrationProofRequired: boolean;
+  recoveryRemaining?: number;
+};
+
+export type TwoFactorEnrollment = {
+  issuer: string;
+  account: string;
+  secret: string;
+  otpauthUri: string;
+  qrPng?: string;
+};
+
 export function getOwnerStatus() {
-  return api<{ required: boolean; configured: boolean; signedIn: boolean }>("/v1/auth");
+  return api<OwnerStatus>("/v1/auth");
 }
 
 export function setupOwnerPassword({ data }: { data: { password: string } }) {
-  return api<{ ok: true }>("/v1/setup", { method: "POST", body: JSON.stringify(data) });
+  return api<{ ok: true; next: OwnerAuthNext }>("/v1/setup", { method: "POST", body: JSON.stringify(data) });
 }
 
-export function loginOwnerPassword({ data }: { data: { password: string } }) {
-  return api<{ ok: true }>("/v1/login", { method: "POST", body: JSON.stringify(data) });
+export function loginOwnerPassword({
+  data,
+}: {
+  data: { password: string; totp?: string; recoveryCode?: string; migrationCode?: string };
+}) {
+  return api<{ ok: true; next: OwnerAuthNext }>("/v1/login", { method: "POST", body: JSON.stringify(data) });
 }
 
 export function logoutOwnerSession() {
   return api<{ ok: true }>("/v1/logout", { method: "POST" });
+}
+
+export function getTwoFactorEnrollment() {
+  return api<TwoFactorEnrollment>("/v1/2fa/enrollment");
+}
+
+export function confirmTwoFactorEnrollment({ data }: { data: { code: string } }) {
+  return api<{ ok: true; next: OwnerAuthNext; recoveryCodes: string[] }>("/v1/2fa/enrollment/confirm", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function replaceTwoFactor({
+  data,
+}: {
+  data: { password: string; totp?: string; recoveryCode?: string };
+}) {
+  return api<{ ok: true; next: OwnerAuthNext }>("/v1/2fa/replace", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function regenerateRecoveryCodes({
+  data,
+}: {
+  data: { password: string; totp?: string; recoveryCode?: string };
+}) {
+  return api<{ ok: true; recoveryCodes: string[] }>("/v1/2fa/recovery/regenerate", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function changeOwnerPassword({
+  data,
+}: {
+  data: { current: string; new: string; totp?: string; recoveryCode?: string };
+}) {
+  return api<{ ok: true }>("/v1/password", { method: "POST", body: JSON.stringify(data) });
 }
 
 export function listNodes() {

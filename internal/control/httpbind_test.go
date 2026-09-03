@@ -118,6 +118,7 @@ func TestHTTPPublicServeRequiresTLS(t *testing.T) {
 func TestCookieIgnoresUntrustedForwardedProto(t *testing.T) {
 	c, srv, _ := newTestConsole(t)
 	c.SkipAuth = false
+	c.RequireTwoFactor = false
 	req := httptest.NewRequest("POST", "http://127.0.0.1/v1/setup", strings.NewReader(`{"password":"abcdefgh"}`))
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("X-Forwarded-Proto", "https")

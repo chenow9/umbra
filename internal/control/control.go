@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -23,37 +24,57 @@ import (
 	"umbra/internal/wire"
 )
 
-const persistSchema = 1
+const persistSchema = 2
+const persistSchemaV1 = 1
 
 var errPersist = errors.New("状态未能落盘")
+var errTombCommitted = errors.New("tomb已更新")
 
 var sessionTTL = 12 * time.Hour
+var sessionAbsoluteTTL = 24 * time.Hour
+var nowFn = time.Now
 
 type Console struct {
-	Gate       *gate.Server
-	Listen     string
-	CAFile     string
-	NodeBin    string
-	UIDir      string
-	UIUpstream string
-	SkipAuth   bool
-	Persist    string
-	TrustProxy string
+	Gate             *gate.Server
+	Listen           string
+	CAFile           string
+	NodeBin          string
+	UIDir            string
+	UIUpstream       string
+	SkipAuth         bool
+	RequireTwoFactor bool
+	Persist          string
+	TrustProxy       string
 
-	mu          sync.Mutex
-	ownerHash   string
-	ownerSecret string
-	ownerEpoch  int64
-	revoked     map[string]struct{}
-	nodes       map[string]*nodeRec
-	maps        map[string]*mapRec
-	tickets     map[string]*ticketRec
-	sessions    map[string]*ownerSess
-	audit       []auditRec
-	frames      []frameRec
-	samples     []sampleRec
-	hits        map[string]hit
-	seq         int64
+	mu             sync.Mutex
+	ownerHash      string
+	ownerSecret    string
+	ownerEpoch     int64
+	authEpoch      int64
+	twoFactor      persistTwoFactor
+	migrationHash  string
+	migratedFromV1 bool
+	pending        map[string]*pendingAuth
+	authRate       *authRate
+	lockFile       *os.File
+	started        bool
+	stopped        bool
+	stopCh         chan struct{}
+	bgWG           sync.WaitGroup
+	draining       atomic.Bool
+	drainCh        chan struct{}
+	httpWG         sync.WaitGroup
+	httpActive     atomic.Int32
+	httpStall      atomic.Value
+	revoked        map[string]struct{}
+	nodes          map[string]*nodeRec
+	maps           map[string]*mapRec
+	tickets        map[string]*ticketRec
+	sessions       map[string]*ownerSess
+	audit          []auditRec
+	frames         []frameRec
+	samples        []sampleRec
+	seq            int64
 
 	rateIn, rateOut int64
 	rateTs          time.Time
@@ -63,8 +84,11 @@ type Console struct {
 }
 
 type ownerSess struct {
-	Exp  time.Time
-	Last time.Time
+	Exp       time.Time
+	Last      time.Time
+	Issued    time.Time
+	AuthEpoch int64
+	MFA       bool
 }
 
 type nodeRec struct {
@@ -165,20 +189,44 @@ type hit struct {
 }
 
 type persistSess struct {
+	Hash      string `json:"hash"`
+	Exp       int64  `json:"exp"`
+	Issued    int64  `json:"issued,omitempty"`
+	AuthEpoch int64  `json:"auth_epoch"`
+	MFA       bool   `json:"mfa"`
+}
+
+type persistTwoFactor struct {
+	Secret        string            `json:"secret,omitempty"`
+	PendingSecret string            `json:"pending_secret,omitempty"`
+	Confirmed     bool              `json:"confirmed"`
+	LastCounter   int64             `json:"last_counter,omitempty"`
+	Generation    int64             `json:"generation"`
+	RecoveryCodes []persistRecovery `json:"recovery_codes,omitempty"`
+}
+
+type persistRecovery struct {
+	Salt string `json:"salt"`
 	Hash string `json:"hash"`
-	Exp  int64  `json:"exp"`
+}
+
+type persistMigration struct {
+	Hash string `json:"hash,omitempty"`
 }
 
 type persistFile struct {
-	OwnerEpoch  int64         `json:"owner_epoch,omitempty"`
-	OwnerHash   string        `json:"owner_hash"`
-	OwnerSecret string        `json:"owner_secret"`
-	Nodes       []*nodeRec    `json:"nodes"`
-	LegacyNodes []*nodeRec    `json:"agents,omitempty"`
-	Maps        []*mapRec     `json:"maps"`
-	Tickets     []*ticketRec  `json:"tickets"`
-	Sessions    []persistSess `json:"sessions,omitempty"`
-	Audit       []auditRec    `json:"audit"`
+	OwnerEpoch  int64            `json:"owner_epoch,omitempty"`
+	AuthEpoch   int64            `json:"auth_epoch,omitempty"`
+	OwnerHash   string           `json:"owner_hash"`
+	OwnerSecret string           `json:"owner_secret"`
+	TwoFactor   persistTwoFactor `json:"two_factor"`
+	Migration   persistMigration `json:"migration,omitempty"`
+	Nodes       []*nodeRec       `json:"nodes"`
+	LegacyNodes []*nodeRec       `json:"agents,omitempty"`
+	Maps        []*mapRec        `json:"maps"`
+	Tickets     []*ticketRec     `json:"tickets"`
+	Sessions    []persistSess    `json:"sessions,omitempty"`
+	Audit       []auditRec       `json:"audit"`
 }
 
 type persistBox struct {
@@ -188,31 +236,36 @@ type persistBox struct {
 }
 
 type persistTomb struct {
-	OwnerEpoch  int64    `json:"owner_epoch"`
-	OwnerHash   string   `json:"owner_hash"`
-	OwnerSecret string   `json:"owner_secret"`
-	Revoked     []string `json:"revoked"`
+	OwnerEpoch    int64            `json:"owner_epoch"`
+	AuthEpoch     int64            `json:"auth_epoch,omitempty"`
+	OwnerHash     string           `json:"owner_hash"`
+	OwnerSecret   string           `json:"owner_secret"`
+	TwoFactor     persistTwoFactor `json:"two_factor"`
+	MigrationHash string           `json:"migration_hash,omitempty"`
+	Revoked       []string         `json:"revoked"`
 }
 
 func New(g *gate.Server, persist string) (*Console, error) {
 	c := &Console{
-		Gate:     g,
-		Persist:  persist,
-		nodes:    map[string]*nodeRec{},
-		maps:     map[string]*mapRec{},
-		tickets:  map[string]*ticketRec{},
-		sessions: map[string]*ownerSess{},
-		hits:     map[string]hit{},
-		revoked:  map[string]struct{}{},
-		rateBy:   map[string][2]int64{},
-		bpsBy:    map[string][2]float64{},
+		Gate:             g,
+		Persist:          persist,
+		nodes:            map[string]*nodeRec{},
+		maps:             map[string]*mapRec{},
+		tickets:          map[string]*ticketRec{},
+		sessions:         map[string]*ownerSess{},
+		pending:          map[string]*pendingAuth{},
+		authRate:         newAuthRate(),
+		drainCh:          make(chan struct{}),
+		RequireTwoFactor: true,
+		revoked:          map[string]struct{}{},
+		rateBy:           map[string][2]int64{},
+		bpsBy:            map[string][2]float64{},
 	}
 	if err := c.load(); err != nil {
 		return nil, err
 	}
 	c.loadTraffic()
 	g.SetObserver(c)
-	go c.sampleLoop()
 	return c, nil
 }
 
@@ -239,7 +292,12 @@ func (c *Console) sampleLoop() {
 	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
 	n := 0
-	for range t.C {
+	for {
+		select {
+		case <-c.stopCh:
+			return
+		case <-t.C:
+		}
 		live := c.live()
 		st := c.Gate.MappingStats()
 		now := time.Now()
@@ -285,31 +343,36 @@ func compactJSON(raw []byte) []byte {
 }
 
 func decodePersist(raw []byte) (persistFile, error) {
+	p, _, err := decodePersistSchema(raw)
+	return p, err
+}
+
+func decodePersistSchema(raw []byte) (persistFile, int, error) {
 	var p persistFile
 	if len(raw) == 0 {
-		return p, fmt.Errorf("control.json 损坏，拒绝以空配置启动: empty")
+		return p, 0, fmt.Errorf("control.json 损坏，拒绝以空配置启动: empty")
 	}
 	var box persistBox
 	if err := json.Unmarshal(raw, &box); err != nil {
-		return p, fmt.Errorf("control.json 损坏，拒绝以空配置启动: %w", err)
+		return p, 0, fmt.Errorf("control.json 损坏，拒绝以空配置启动: %w", err)
 	}
 	if box.Schema == 0 && len(box.Payload) == 0 && box.Checksum == "" {
 		if err := json.Unmarshal(raw, &p); err != nil {
-			return p, fmt.Errorf("control.json 损坏，拒绝以空配置启动: %w", err)
+			return p, 0, fmt.Errorf("control.json 损坏，拒绝以空配置启动: %w", err)
 		}
-		return p, nil
+		return p, 0, nil
 	}
-	if box.Schema != persistSchema {
-		return p, fmt.Errorf("control.json schema %d 无法识别，拒绝启动", box.Schema)
+	if box.Schema != persistSchema && box.Schema != persistSchemaV1 {
+		return p, box.Schema, fmt.Errorf("control.json schema %d 无法识别，拒绝启动", box.Schema)
 	}
 	payload := compactJSON(box.Payload)
 	if box.Checksum == "" || persistChecksum(payload) != box.Checksum {
-		return p, fmt.Errorf("control.json 校验和错误，拒绝以空配置启动")
+		return p, box.Schema, fmt.Errorf("control.json 校验和错误，拒绝以空配置启动")
 	}
 	if err := json.Unmarshal(box.Payload, &p); err != nil {
-		return p, fmt.Errorf("control.json 损坏，拒绝以空配置启动: %w", err)
+		return p, box.Schema, fmt.Errorf("control.json 损坏，拒绝以空配置启动: %w", err)
 	}
-	return p, nil
+	return p, box.Schema, nil
 }
 
 func (c *Console) tombPath() string { return c.Persist + ".tomb" }
@@ -353,6 +416,9 @@ func (c *Console) loadTomb() error {
 		return err
 	}
 	c.ownerEpoch = t.OwnerEpoch
+	c.authEpoch = t.AuthEpoch
+	c.twoFactor = t.TwoFactor
+	c.migrationHash = t.MigrationHash
 	if t.OwnerHash != "" {
 		c.ownerHash = t.OwnerHash
 		c.ownerSecret = t.OwnerSecret
@@ -380,7 +446,7 @@ func decodePersistPayload(raw []byte) (json.RawMessage, error) {
 	if err := json.Unmarshal(raw, &box); err != nil {
 		return nil, err
 	}
-	if box.Schema != persistSchema || box.Checksum == "" {
+	if (box.Schema != persistSchema && box.Schema != persistSchemaV1) || box.Checksum == "" {
 		return nil, fmt.Errorf("schema/checksum")
 	}
 	payload := compactJSON(box.Payload)
@@ -398,7 +464,9 @@ func (c *Console) saveTomb() error {
 		}
 	}
 	t := persistTomb{
-		OwnerEpoch: c.ownerEpoch, OwnerHash: c.ownerHash, OwnerSecret: c.ownerSecret,
+		OwnerEpoch: c.ownerEpoch, AuthEpoch: c.authEpoch,
+		OwnerHash: c.ownerHash, OwnerSecret: c.ownerSecret,
+		TwoFactor: c.twoFactor, MigrationHash: c.migrationHash,
 		Revoked: revoked,
 	}
 	payload, err := json.Marshal(t)
@@ -425,13 +493,13 @@ func (c *Console) load() error {
 		return err
 	}
 	fromPrev := false
-	p, err := decodePersist(raw)
+	p, schema, err := decodePersistSchema(raw)
 	if err != nil {
 		prev, perr := os.ReadFile(c.Persist + ".prev")
 		if perr != nil {
 			return err
 		}
-		p, perr = decodePersist(prev)
+		p, schema, perr = decodePersistSchema(prev)
 		if perr != nil {
 			return fmt.Errorf("%v; 上一代备份也不可用: %w", err, perr)
 		}
@@ -446,6 +514,7 @@ func (c *Console) load() error {
 			c.ownerEpoch = p.OwnerEpoch
 		}
 	}
+	c.mergeTwoFactorFromPersist(p, schema)
 	legacy := p.Nodes
 	if len(legacy) == 0 {
 		legacy = p.LegacyNodes
@@ -539,19 +608,37 @@ func (c *Console) load() error {
 			c.Gate.SetTicket(t.Hash, t.MappingID, t.Expires)
 		}
 		for _, s := range p.Sessions {
-			if s.Hash == "" {
+			if s.Hash == "" || schema < persistSchema {
 				continue
 			}
 			exp := time.Unix(s.Exp, 0)
 			if now.After(exp) {
 				continue
 			}
-			c.sessions[s.Hash] = &ownerSess{Exp: exp, Last: now}
+			issued := now.Add(-sessionTTL)
+			if s.Issued > 0 {
+				issued = time.Unix(s.Issued, 0)
+			}
+			c.sessions[s.Hash] = &ownerSess{
+				Exp: exp, Last: now, Issued: issued,
+				AuthEpoch: s.AuthEpoch, MFA: s.MFA,
+			}
 		}
 	}
-	if migratedTTL || fromPrev {
+	needMigrate := schema < persistSchema
+	if needMigrate {
+		c.dropAllSessionsLocked()
+		c.authEpoch++
+		if c.ownerHash != "" && !c.twoFactor.Confirmed {
+			c.migratedFromV1 = true
+			if err := c.ensureMigrationCodeLocked(); err != nil {
+				return err
+			}
+		}
+	}
+	if migratedTTL || fromPrev || needMigrate {
 		if err := c.save(); err != nil {
-			if fromPrev {
+			if fromPrev && !needMigrate {
 				log.Printf("control.json prev restore persisted without credentials: %v", err)
 			} else {
 				return err
@@ -559,6 +646,50 @@ func (c *Console) load() error {
 		}
 	}
 	return nil
+}
+
+func (c *Console) mergeTwoFactorFromPersist(p persistFile, schema int) {
+	if schema < persistSchema {
+		return
+	}
+	if twoFactorTombNewer(c.authEpoch, c.twoFactor, p.AuthEpoch, p.TwoFactor) {
+		if p.AuthEpoch > c.authEpoch {
+			c.authEpoch = p.AuthEpoch
+		}
+		return
+	}
+	c.twoFactor = p.TwoFactor
+	if p.AuthEpoch > c.authEpoch {
+		c.authEpoch = p.AuthEpoch
+	}
+	if p.Migration.Hash != "" {
+		c.migrationHash = p.Migration.Hash
+	}
+}
+
+func twoFactorTombNewer(tombEpoch int64, tomb persistTwoFactor, persistEpoch int64, persist persistTwoFactor) bool {
+	if tombEpoch > persistEpoch {
+		return true
+	}
+	if tombEpoch < persistEpoch {
+		return false
+	}
+	if tomb.Generation > persist.Generation {
+		return true
+	}
+	if tomb.Generation < persist.Generation {
+		return false
+	}
+	if tomb.LastCounter > persist.LastCounter {
+		return true
+	}
+	if tomb.Confirmed && !persist.Confirmed {
+		return true
+	}
+	if len(tomb.RecoveryCodes) < len(persist.RecoveryCodes) && tomb.Generation == persist.Generation && tomb.Confirmed {
+		return true
+	}
+	return false
 }
 
 func lifetimeUntil(noExpiry bool) time.Time {
@@ -582,12 +713,34 @@ func (c *Console) installToken(hash, nodeID string, until time.Time) time.Time {
 	return until
 }
 
+func persistTombCommitted(err error) bool {
+	return errors.Is(err, errTombCommitted)
+}
+
 func (c *Console) save() error {
 	if err := c.saveTomb(); err != nil {
 		log.Printf("persist tomb: %v", err)
 		return fmt.Errorf("%w: %v", errPersist, err)
 	}
-	p := persistFile{OwnerEpoch: c.ownerEpoch, OwnerHash: c.ownerHash, OwnerSecret: c.ownerSecret}
+	if hook := afterTombHook; hook != nil {
+		if err := hook(); err != nil {
+			return fmt.Errorf("%w: %w", errPersist, errTombCommitted)
+		}
+	}
+	if err := c.saveMain(); err != nil {
+		return fmt.Errorf("%w: %w", errPersist, errTombCommitted)
+	}
+	return nil
+}
+
+var afterTombHook func() error
+
+func (c *Console) saveMain() error {
+	p := persistFile{
+		OwnerEpoch: c.ownerEpoch, AuthEpoch: c.authEpoch,
+		OwnerHash: c.ownerHash, OwnerSecret: c.ownerSecret,
+		TwoFactor: c.twoFactor, Migration: persistMigration{Hash: c.migrationHash},
+	}
 	for _, a := range c.nodes {
 		cp := *a
 		cp.Token = ""
@@ -608,7 +761,14 @@ func (c *Console) save() error {
 			delete(c.sessions, h)
 			continue
 		}
-		p.Sessions = append(p.Sessions, persistSess{Hash: h, Exp: s.Exp.Unix()})
+		issued := s.Issued.Unix()
+		if s.Issued.IsZero() {
+			issued = 0
+		}
+		p.Sessions = append(p.Sessions, persistSess{
+			Hash: h, Exp: s.Exp.Unix(), Issued: issued,
+			AuthEpoch: s.AuthEpoch, MFA: s.MFA,
+		})
 	}
 	p.Audit = c.audit
 	if len(p.Audit) > 200 {
@@ -698,10 +858,14 @@ func fsyncDir(dir string) error {
 	return nil
 }
 
-func newID(prefix string) string {
+var randRead = rand.Read
+
+func newID(prefix string) (string, error) {
 	var b [16]byte
-	_, _ = rand.Read(b[:])
-	return fmt.Sprintf("%s_%s", prefix, hex.EncodeToString(b[:]))
+	if _, err := randRead(b[:]); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s_%s", prefix, hex.EncodeToString(b[:])), nil
 }
 
 func (c *Console) next() int64 {
@@ -792,12 +956,17 @@ func (c *Console) setup(pw string) error {
 	if taken {
 		return fmt.Errorf("口令已经设过")
 	}
+	release, err := acquirePasswordHash()
+	if err != nil {
+		return err
+	}
 	h, err := hashPassword(pw)
+	release()
 	if err != nil {
 		return err
 	}
 	sec := make([]byte, 32)
-	if _, err := rand.Read(sec); err != nil {
+	if _, err := randRead(sec); err != nil {
 		return err
 	}
 	secret := hex.EncodeToString(sec)
@@ -810,63 +979,52 @@ func (c *Console) setup(pw string) error {
 	c.ownerSecret = secret
 	c.ownerEpoch++
 	if err := c.save(); err != nil {
-		c.ownerHash = ""
-		c.ownerSecret = ""
-		c.ownerEpoch--
+		if !persistTombCommitted(err) {
+			c.ownerHash = ""
+			c.ownerSecret = ""
+			c.ownerEpoch--
+		}
 		return err
 	}
 	return nil
 }
 
 func (c *Console) login(pw, ip string) error {
-	c.mu.Lock()
-	if c.ownerHash == "" {
-		c.mu.Unlock()
-		return fmt.Errorf("先设置口令")
-	}
-	now := time.Now()
-	h := c.hits[ip]
-	if now.Sub(h.t) > 15*time.Minute {
-		h = hit{}
-	}
-	if h.n >= 8 {
-		c.mu.Unlock()
-		return fmt.Errorf("试得太勤，过一会儿再来")
-	}
-	stored := c.ownerHash
-	c.mu.Unlock()
-	if !checkPassword(pw, stored) {
-		c.mu.Lock()
-		fail := c.hits[ip]
-		if time.Since(fail.t) > 15*time.Minute {
-			fail = hit{}
-		}
-		fail.n++
-		fail.t = time.Now()
-		c.hits[ip] = fail
-		c.mu.Unlock()
-		return fmt.Errorf("口令不对")
-	}
-	c.mu.Lock()
-	delete(c.hits, ip)
-	c.mu.Unlock()
-	return nil
+	_, err := c.loginFactors(loginInput{Password: pw, IP: ip})
+	return err
 }
 
-func newNodeToken() (plain, hash string) {
-	plain = "umbra_boot_" + newID("t")[2:]
+func newNodeToken() (plain, hash string, err error) {
+	id, err := newID("t")
+	if err != nil {
+		return "", "", err
+	}
+	if len(id) < 3 {
+		return "", "", errPersist
+	}
+	plain = "umbra_boot_" + id[2:]
 	hash = gate.TicketHash(plain)
-	return
+	return plain, hash, nil
 }
 
-func (c *Console) issueSessionLocked() string {
+func (c *Console) issueSessionLocked(mfa bool) (string, error) {
 	var b [16]byte
-	_, _ = rand.Read(b[:])
+	if _, err := randRead(b[:]); err != nil {
+		return "", fmt.Errorf("无法生成会话: %w", err)
+	}
 	sid := hex.EncodeToString(b[:])
-	now := time.Now()
-	c.sessions[gate.TicketHash(sid)] = &ownerSess{Exp: now.Add(sessionTTL), Last: now}
+	now := nowFn()
+	exp := now.Add(sessionTTL)
+	abs := now.Add(sessionAbsoluteTTL)
+	if exp.After(abs) {
+		exp = abs
+	}
+	c.sessions[gate.TicketHash(sid)] = &ownerSess{
+		Exp: exp, Last: now, Issued: now,
+		AuthEpoch: c.authEpoch, MFA: mfa,
+	}
 	c.pruneSessionsLocked(32)
-	return sid
+	return sid, nil
 }
 
 func (c *Console) pruneSessionsLocked(max int) {
@@ -900,21 +1058,46 @@ func (c *Console) dropAllSessionsLocked() {
 	c.sessions = map[string]*ownerSess{}
 }
 
+func (c *Console) sessionValidLocked(s *ownerSess, now time.Time) bool {
+	if s == nil || now.After(s.Exp) {
+		return false
+	}
+	if !s.Issued.IsZero() && now.After(s.Issued.Add(sessionAbsoluteTTL)) {
+		return false
+	}
+	if s.AuthEpoch != c.authEpoch {
+		return false
+	}
+	if c.RequireTwoFactor && !s.MFA {
+		return false
+	}
+	return true
+}
+
 func (c *Console) touchSessionLocked(sid string) bool {
 	if sid == "" {
 		return false
 	}
 	h := gate.TicketHash(sid)
 	s := c.sessions[h]
-	now := time.Now()
-	if s == nil || now.After(s.Exp) {
+	now := nowFn()
+	if !c.sessionValidLocked(s, now) {
 		delete(c.sessions, h)
 		return false
 	}
 	s.Last = now
-	if time.Until(s.Exp) < sessionTTL/2 {
-		s.Exp = now.Add(sessionTTL)
-		_ = c.save()
+	if s.Exp.Sub(now) < sessionTTL/2 {
+		exp := now.Add(sessionTTL)
+		if !s.Issued.IsZero() {
+			abs := s.Issued.Add(sessionAbsoluteTTL)
+			if exp.After(abs) {
+				exp = abs
+			}
+		}
+		if exp.After(s.Exp) {
+			s.Exp = exp
+			_ = c.save()
+		}
 	}
 	return true
 }
@@ -926,13 +1109,8 @@ func (c *Console) validCookie(raw string) bool {
 }
 
 func (c *Console) authStatus(cookie string) map[string]bool {
-	if c.SkipAuth {
-		return map[string]bool{"required": false, "configured": true, "signedIn": true}
-	}
-	c.mu.Lock()
-	cfg := c.ownerHash != ""
-	c.mu.Unlock()
-	return map[string]bool{"required": true, "configured": cfg, "signedIn": cfg && c.validCookie(cookie)}
+	v := c.AuthView(cookie, "")
+	return map[string]bool{"required": v.Required, "configured": v.Configured, "signedIn": v.SignedIn}
 }
 
 func (c *Console) spawnNode(token string) {

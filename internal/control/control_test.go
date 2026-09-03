@@ -398,6 +398,7 @@ func cookieClient(t *testing.T) *http.Client {
 func TestOwnerSessionLogoutRevokesCopy(t *testing.T) {
 	c, srv, _ := newTestConsole(t)
 	c.SkipAuth = false
+	c.RequireTwoFactor = false
 	cli := cookieClient(t)
 	setupReq, _ := http.NewRequest("POST", srv.URL+"/v1/setup", strings.NewReader(`{"password":"abcdefgh"}`))
 	setupReq.Header.Set("content-type", "application/json")
@@ -455,6 +456,7 @@ func TestOwnerSessionLogoutRevokesCopy(t *testing.T) {
 func TestPasswordChangeRevokesAllSessions(t *testing.T) {
 	c, srv, _ := newTestConsole(t)
 	c.SkipAuth = false
+	c.RequireTwoFactor = false
 	a := cookieClient(t)
 	bcli := cookieClient(t)
 	req, _ := http.NewRequest("POST", srv.URL+"/v1/setup", strings.NewReader(`{"password":"abcdefgh"}`))
@@ -507,6 +509,7 @@ func TestPasswordChangeRevokesAllSessions(t *testing.T) {
 func TestLoginRateLimitCountsFailuresOnly(t *testing.T) {
 	c, _, _ := newTestConsole(t)
 	c.SkipAuth = false
+	c.RequireTwoFactor = false
 	if err := c.setup("abcdefgh"); err != nil {
 		t.Fatal(err)
 	}
@@ -515,19 +518,23 @@ func TestLoginRateLimitCountsFailuresOnly(t *testing.T) {
 			t.Fatalf("good password %d: %v", i, err)
 		}
 	}
-	for i := 0; i < 8; i++ {
+	for i := 0; i < 5; i++ {
 		err := c.login("wrongpass", "1.2.3.4")
-		if err == nil || !strings.Contains(err.Error(), "口令不对") {
+		if err == nil || !strings.Contains(err.Error(), "认证凭证不正确") {
 			t.Fatalf("wrong password %d: %v", i, err)
 		}
 	}
-	err := c.login("abcdefgh", "1.2.3.4")
+	err := c.login("wrongpass", "1.2.3.4")
+	if err == nil || !strings.Contains(err.Error(), "认证凭证不正确") {
+		t.Fatalf("sixth failure should still authenticate, got %v", err)
+	}
+	err = c.login("abcdefgh", "1.2.3.4")
 	if err == nil || !strings.Contains(err.Error(), "试得太勤") {
-		t.Fatalf("want lockout after 8 failures, got %v", err)
+		t.Fatalf("want global backoff after 6 failures, got %v", err)
 	}
 	err = c.login("wrongpass", "9.9.9.9")
-	if err == nil || !strings.Contains(err.Error(), "口令不对") {
-		t.Fatalf("other IP should still try, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "试得太勤") {
+		t.Fatalf("global backoff must apply across IPs, got %v", err)
 	}
 }
 
@@ -936,6 +943,7 @@ func TestPrevRestoreDoesNotReviveRevokedToken(t *testing.T) {
 func TestPrevRestoreDoesNotReviveOwnerSession(t *testing.T) {
 	c, srv, _ := newTestConsole(t)
 	c.SkipAuth = false
+	c.RequireTwoFactor = false
 	cli := cookieClient(t)
 	req, _ := http.NewRequest("POST", srv.URL+"/v1/setup", strings.NewReader(`{"password":"abcdefgh"}`))
 	req.Header.Set("content-type", "application/json")
@@ -969,6 +977,7 @@ func TestPrevRestoreDoesNotReviveOwnerSession(t *testing.T) {
 func TestOwnerSessionExpires(t *testing.T) {
 	c, srv, _ := newTestConsole(t)
 	c.SkipAuth = false
+	c.RequireTwoFactor = false
 	old := sessionTTL
 	sessionTTL = 40 * time.Millisecond
 	t.Cleanup(func() { sessionTTL = old })
@@ -994,6 +1003,7 @@ func TestOwnerSessionExpires(t *testing.T) {
 func TestPublicHealthIsMinimalAndDetailsRequireAuth(t *testing.T) {
 	c, srv, _ := newTestConsole(t)
 	c.SkipAuth = false
+	c.RequireTwoFactor = false
 
 	res := doJSON(t, srv, "GET", "/health", nil, nil)
 	var public map[string]any
