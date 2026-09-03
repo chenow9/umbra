@@ -16,6 +16,7 @@
 <p align="center">
   <a href="https://umbrad.grok.me">项目主页</a> ·
   <a href="#快速开始">快速开始</a> ·
+  <a href="#控制台双因素认证">2FA</a> ·
   <a href="#安全模型与边界">安全边界</a> ·
   <a href="CHANGELOG.md">更新日志</a> ·
   <a href="README.en.md">English</a>
@@ -93,7 +94,11 @@ docker logs -f umbrad
 ssh -L 8080:127.0.0.1:8080 user@gate.example.com
 ```
 
-然后打开 `http://127.0.0.1:8080`，首次访问时创建管理员口令。如果要通过域名访问，请使用 HTTPS 反向代理，或为 `umbrad` 配置管理口 TLS；不要把明文管理口暴露到公网。
+然后打开 `http://127.0.0.1:8080`。首次访问会依次设定管理员口令、绑定 Authenticator，并展示只出现一次的恢复码；保存恢复码后才算完成初始化。
+
+如果要通过域名访问，请使用 HTTPS 反向代理，或为 `umbrad` 配置管理口 TLS；不要把明文管理口暴露到公网。2FA 的升级迁移、恢复和配置方法见[控制台双因素认证](#控制台双因素认证)。
+
+不要把 `UMBRA_LOGIN=off`、`GROK_AGENT` 或 `GROK_PROJECT_ID` 用在生产入口上，它们会跳过整个控制台认证。
 
 **3. 登记 Node**
 
@@ -108,6 +113,59 @@ ssh -L 8080:127.0.0.1:8080 user@gate.example.com
 - 对于 `public` 映射，直接连接入口业务端口即可验证。`spa` 需先敲门，`visitor` 需先签发票据。
 
 > 探测会向真实目标发送少量探测数据，它验证的是链路与响应，不等同于应用层健康检查。
+
+## 控制台双因素认证
+
+控制台默认启用 TOTP 2FA。支持 1Password、Google Authenticator、Microsoft Authenticator 等能够生成六位 TOTP 验证码的应用。服务器和手机时间必须保持同步。
+
+| 场景 | 需要的凭证 | 处理方式 |
+| ---- | ---------- | -------- |
+| 首次安装 | 新管理员口令 | 扫描二维码、提交六位验证码并保存 10 个一次性恢复码 |
+| 日常登录 | 口令 + TOTP | 也可以使用口令 + 一个未使用的恢复码 |
+| 旧版本升级 | 原口令 + 本机迁移码 | 旧会话会失效；读取 `2fa-bootstrap` 后重新绑定 Authenticator |
+| 丢失手机 | 口令 + 恢复码 | 登录后在「部署 → 控制台认证」更换绑定并生成新恢复码 |
+| 手机和恢复码都丢失 | 服务器本机权限 + 原口令 | 停止守护进程，执行离线 `-reset-2fa`，再用迁移码绑定 |
+
+从不支持 2FA 的版本升级后，在入口服务器读取一次性迁移码：
+
+```bash
+# Docker Compose
+docker exec umbrad cat /var/lib/umbra/2fa-bootstrap
+
+# 二进制部署
+sudo cat /var/lib/umbra/2fa-bootstrap
+```
+
+迁移码不会写入日志，绑定成功后文件会被删除。不要把迁移码、TOTP 密钥、二维码或恢复码发送到聊天、工单或日志中。
+
+手机和恢复码都丢失时，先停止正在运行的入口，再离线重置：
+
+```bash
+# 二进制/系统服务部署
+sudo systemctl stop umbrad
+sudo umbrad -reset-2fa -tls-dir /var/lib/umbra
+sudo systemctl start umbrad
+
+# Docker Compose 部署
+docker compose -f deploy/compose.gate.yml stop umbrad
+docker compose -f deploy/compose.gate.yml run --rm umbrad \
+  -reset-2fa -tls-dir /var/lib/umbra
+docker compose -f deploy/compose.gate.yml up -d umbrad
+```
+
+重置保留管理员口令，但会删除原 TOTP 绑定和恢复码、撤销全部管理会话，并生成新的 `2fa-bootstrap`。入口启动后使用原口令和新迁移码重新绑定。
+
+`UMBRA_2FA` 在进程启动时读取：
+
+| 值 | 行为 |
+| -- | ---- |
+| 未设置或 `on` | 默认行为；要求口令 + TOTP/恢复码 |
+| `off` | 只要求口令，但保留已有 TOTP 绑定；重新开启后，关闭期间签发的会话立即失效 |
+| 其他值 | 拒绝启动，避免拼写错误导致意外降级 |
+
+关闭 2FA 时不能远程更换绑定或重新生成恢复码。若已有绑定，修改管理员口令仍要求当前第二因素。生产环境不建议关闭 2FA。
+
+更完整的运维和故障恢复说明见 [docs/2fa.md](docs/2fa.md)。
 
 ### 二进制部署
 
@@ -133,7 +191,8 @@ sudo ./dist/umbrad_linux_amd64 \
 `-advertise` 是 Node 和 Visitor 实际连接的对外地址，只用于生成部署命令，不改变监听地址。`-tls-dir` 中包含：
 
 - `ca.crt` / `gate.crt` / `gate.key`：入口 CA 与证书
-- `control.json`：管理员口令、登录会话、节点凭证、映射与累计流量
+- `control.json`：管理员口令、TOTP 绑定、登录会话、节点凭证、映射与累计流量
+- `2fa-bootstrap`：旧版本升级或本机重置 2FA 后的一次性迁移码，绑定成功后删除
 - `traffic`：速率曲线采样（约每 10 秒写一次）
 - `state.json`：热升级时的恢复状态
 
@@ -346,17 +405,19 @@ deploy/             入口 / 节点 Docker Compose
 | `-http`      | `127.0.0.1:8080`  | 控制台与 API                              |
 | `-bind`      | `127.0.0.1`       | 业务口监听地址；公网入口用 `0.0.0.0`      |
 | `-tls-dir`   | `/var/lib/umbra`  | 证书、状态、`control.json`、`traffic`     |
+| `-reset-2fa` | 关                | 离线重置控制台 2FA（须先停止守护进程）    |
 | `-stealth`   | `auto`            | `nft` / `off` / `auto`                    |
 | `-udp`       | `auto`            | UDP 数据面：`auto` / `required` / `yamux` |
 
 节点：`--server`、`--token`、`--tls-ca`。访问端另加 `--ticket`、`--local`。
 
-### 入口容量与 UDP 准入环境变量
+### 入口认证、容量与 UDP 准入环境变量
 
 这些变量由 `umbrad` 在启动时读取，修改后需要重启或重建入口容器。它们是入口级默认策略；映射自身的 `maxConns` 仍会独立生效。
 
 | 环境变量                      | 默认值 | 含义                                                                                                                                                                                         |
 | ----------------------------- | -----: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UMBRA_2FA`                   |   `on` | 控制台是否强制 TOTP。未设置或 `on` 为开启，`off` 为关闭；其他值拒绝启动。关闭时不删除已有绑定。`UMBRA_LOGIN=off` / `GROK_AGENT` / `GROK_PROJECT_ID` 会跳过整个登录（含 2FA），仅用于预览。   |
 | `UMBRA_MAX_SPLICES`           | `8192` | 整个入口允许同时存在的 TCP 转发连接（splice）总数，所有 TCP 映射和访客转发共享。实际可用并发还受各映射 `maxConns` 限制；只接受大于 `0` 的整数。达到上限后拒绝新的 TCP 转发，不中断已有连接。 |
 | `UMBRA_UDP_MAX_FLOWS_PER_IP`  |  `256` | 每个映射内，同一来源 IPv4（IPv6 按 `/64` 聚合）允许同时存在的 UDP flow 数。UDP flow 由来源地址和端口标识，并保持到 UDP 空闲超时；`0` 表示关闭此限制。                                        |
 | `UMBRA_UDP_NEW_FLOWS_PER_SEC` |  `256` | 每个映射内，每个来源 IPv4（IPv6 按 `/64` 聚合）每秒允许新建的 UDP flow 数，采用令牌桶限制突发建流；`0` 表示关闭此限制。它不限制已有 flow 的 UDP 包速率（pps）。                              |
@@ -403,7 +464,8 @@ UMBRA_UDP_READ_BUFFER=8388608 docker compose -f deploy/compose.gate.yml up -d
 - `spa` 的内核丢弃需要 Linux、nftables 和 `CAP_NET_ADMIN`，当前针对 IPv4。不满足条件时会回退为用户态拒绝，端口可能仍被扫描识别；即使使用内核丢弃，也不应理解为“绝对不可发现”。
 - Visitor 票据是持有者凭证：任何持有有效票据的人都能在过期或吊销前使用它，请安全传输与保管。
 - 管理面默认绑定 `127.0.0.1`；绑定非回环地址时，`umbrad` 要求配置 TLS。使用反向代理时，仅对可信代理 CIDR 配置 `-http-trust-proxy`。
-- 保护并备份整个 `-tls-dir`：其中包含 CA 私钥、入口证书、管理状态、Node 凭证、映射和流量历史。不要将该目录上传到仓库或传给不可信第三方。
+- 保护并备份整个 `-tls-dir`：其中包含 CA 私钥、入口证书、管理员口令哈希、TOTP 密钥、Node 凭证、映射和流量历史。泄露备份等同于泄露 TOTP 密钥，并允许离线猜测管理员口令；不要将该目录上传到仓库或传给不可信第三方。
+- TOTP 能显著降低口令泄露、撞库和普通暴力破解风险，但不能抵御实时钓鱼代理；输入验证码前仍需确认控制台域名和 TLS。
 - 新建映射默认为 `public`。公网上线前，请确认访问模式、CIDR 规则、目标地址和业务自身的认证配置。
 
 ## 项目与发布

@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+控制台强制 TOTP 双因素认证。
+
+- 新安装在获得正式会话前必须绑定 Authenticator，并保存一次性恢复码
+- 从 schema 1 升级时撤销旧管理会话，并要求服务器本地 `{tls-dir}/2fa-bootstrap` 迁移码后才能绑定
+- 日常登录同时验证口令与 TOTP 或恢复码；关闭 2FA 期间的 password-only 会话在重新开启后失效
+- 关闭 2FA 不能远程改绑定；解绑只能使用 `umbrad -reset-2fa`
+- `UMBRA_2FA` 默认 `on`，非法值拒绝启动；`GROK_AGENT` / `GROK_PROJECT_ID` / `UMBRA_LOGIN=off` 仍会跳过整个认证并打警告
+- 密码与 TOTP 校验限制并发和尝试频率；口令、绑定或恢复状态变化会撤销旧会话与 pending 凭证
+- 认证状态通过 tomb 防止备份回滚；`tls-dir` 在读取状态前加锁，热升级会先排空 HTTP/SSE 再交接锁
+
+Console authentication now requires TOTP by default.
+
+- New installs must enroll an authenticator and save one-time recovery codes before a console session is issued
+- Schema 1 upgrades revoke previous admin sessions and require the local `{tls-dir}/2fa-bootstrap` migration code before enrollment
+- Daily login checks the password plus TOTP or a recovery code; password-only sessions minted while 2FA is off stop working when it is turned back on
+- Remote rebinding is denied while 2FA is off; unbinding is only available via `umbrad -reset-2fa`
+- `UMBRA_2FA` defaults to `on` and refuses illegal values; `GROK_AGENT` / `GROK_PROJECT_ID` / `UMBRA_LOGIN=off` still skip all console auth and log a warning
+- Password and TOTP verification limit concurrency and attempt rates; password, binding, or recovery changes revoke old sessions and pending credentials
+- An authentication tomb prevents backup rollback; `tls-dir` is locked before loading state, and hot upgrades drain HTTP/SSE before handing off the lock
+
 ## 0.1.4
 
 健康检查收敛、流量时间窗口修复与发布完善。

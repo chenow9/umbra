@@ -16,6 +16,7 @@
 <p align="center">
   <a href="https://umbrad.grok.me">Website</a> ·
   <a href="#quick-start">Quick start</a> ·
+  <a href="#console-two-factor-authentication">2FA</a> ·
   <a href="#security-model-and-limitations">Security</a> ·
   <a href="CHANGELOG.md">Changelog</a> ·
   <a href="README.md">简体中文</a>
@@ -93,7 +94,11 @@ The management endpoint listens on `127.0.0.1:8080` by default. Forward it secur
 ssh -L 8080:127.0.0.1:8080 user@gate.example.com
 ```
 
-Open `http://127.0.0.1:8080` and create the initial administrator password. For domain access, use an HTTPS reverse proxy or configure management TLS in `umbrad`. Never expose the plaintext management endpoint to the Internet.
+Open `http://127.0.0.1:8080`. The first visit sets the administrator password, enrolls an authenticator, and displays one-time recovery codes. Initialization is complete only after you save those codes.
+
+For domain access, use an HTTPS reverse proxy or configure management TLS in `umbrad`. Never expose the plaintext management endpoint to the Internet. See [Console two-factor authentication](#console-two-factor-authentication) for upgrades, recovery, and configuration.
+
+Do not set `UMBRA_LOGIN=off`, `GROK_AGENT`, or `GROK_PROJECT_ID` on a production gateway; they disable console authentication entirely.
 
 **3. Enroll a node**
 
@@ -108,6 +113,59 @@ On **Mappings**, select an online node and configure the protocol, public entry 
 - Connect directly to a `public` service port. Use **Knock** first for `spa`, or issue a ticket first for `visitor`.
 
 > Probe sends a small payload to the real target. It checks path and response behavior; it is not an application-level health check.
+
+## Console two-factor authentication
+
+The console enables TOTP 2FA by default. It works with 1Password, Google Authenticator, Microsoft Authenticator, and other applications that generate six-digit TOTP codes. Keep the gateway and phone clocks synchronized.
+
+| Scenario | Required credentials | Procedure |
+| -------- | -------------------- | --------- |
+| New installation | New administrator password | Scan the QR code, submit a six-digit code, and save the 10 one-time recovery codes |
+| Normal login | Password + TOTP | Password + one unused recovery code also works |
+| Upgrade from an older release | Existing password + local migration code | Existing sessions are revoked; read `2fa-bootstrap` and enroll an authenticator |
+| Lost phone | Password + recovery code | Sign in, then use **Deploy → Console authentication** to replace the binding and generate new recovery codes |
+| Lost phone and recovery codes | Local server access + existing password | Stop the daemon, run offline `-reset-2fa`, then enroll with the migration code |
+
+After upgrading from a release without 2FA, read the one-time migration code on the gateway:
+
+```bash
+# Docker Compose
+docker exec umbrad cat /var/lib/umbra/2fa-bootstrap
+
+# Binary deployment
+sudo cat /var/lib/umbra/2fa-bootstrap
+```
+
+The code is never written to logs, and the file is deleted after enrollment. Never paste the migration code, TOTP secret, QR code, or recovery codes into chats, tickets, or logs.
+
+If both the phone and recovery codes are lost, stop the running gateway and reset 2FA offline:
+
+```bash
+# Binary/system-service deployment
+sudo systemctl stop umbrad
+sudo umbrad -reset-2fa -tls-dir /var/lib/umbra
+sudo systemctl start umbrad
+
+# Docker Compose deployment
+docker compose -f deploy/compose.gate.yml stop umbrad
+docker compose -f deploy/compose.gate.yml run --rm umbrad \
+  -reset-2fa -tls-dir /var/lib/umbra
+docker compose -f deploy/compose.gate.yml up -d umbrad
+```
+
+The reset preserves the administrator password, removes the existing TOTP binding and recovery codes, revokes every console session, and creates a new `2fa-bootstrap`. After the gateway starts, use the existing password and new migration code to enroll again.
+
+`UMBRA_2FA` is read when the process starts:
+
+| Value | Behavior |
+| ----- | -------- |
+| Unset or `on` | Default; requires password + TOTP/recovery code |
+| `off` | Requires only the password but retains an existing binding; sessions issued while off become invalid when 2FA is enabled again |
+| Any other value | Refuses to start, preventing a typo from silently weakening authentication |
+
+While 2FA is off, remote authenticator replacement and recovery-code regeneration are disabled. If a binding already exists, changing the administrator password still requires the current second factor. Disabling 2FA is not recommended in production.
+
+See [docs/2fa.en.md](docs/2fa.en.md) for the complete operations and recovery guide.
 
 ### Binary deployment
 
@@ -133,7 +191,8 @@ sudo ./dist/umbrad_linux_amd64 \
 `-advertise` is the external address used in generated node and visitor commands; it does not change the listen address. The TLS directory contains:
 
 - `ca.crt` / `gate.crt` / `gate.key` — gateway CA and certificates
-- `control.json` — administrator password, sessions, node credentials, mappings, and cumulative traffic
+- `control.json` — administrator password, TOTP binding, sessions, node credentials, mappings, and cumulative traffic
+- `2fa-bootstrap` — one-time migration code after an upgrade or local 2FA reset; deleted after enrollment
 - `traffic` — rate-curve samples (written about every 10 seconds)
 - `state.json` — hot-upgrade restore state
 
@@ -346,17 +405,19 @@ Common `umbrad` flags (`umbrad -h`):
 | `-http`      | `127.0.0.1:8080`       | console and API                                    |
 | `-bind`      | `127.0.0.1`            | business-port bind; use `0.0.0.0` on a public gate |
 | `-tls-dir`   | `/var/lib/umbra`       | certs, state, `control.json`, `traffic`            |
+| `-reset-2fa` | off                    | offline console 2FA reset (stop the daemon first)  |
 | `-stealth`   | `auto`                 | `nft` / `off` / `auto`                             |
 | `-udp`       | `auto`                 | UDP data plane: `auto` / `required` / `yamux`      |
 
 Node: `--server`, `--token`, `--tls-ca`. Visitor also needs `--ticket` and `--local`.
 
-### Gate capacity and UDP admission environment variables
+### Gate authentication, capacity, and UDP admission environment variables
 
 `umbrad` reads these variables at startup, so restart or recreate the gate container after changing them. They define gate-wide defaults; each mapping's own `maxConns` limit still applies independently.
 
 | Environment variable          | Default | Meaning                                                                                                                                                                                                                                                                                                                                    |
 | ----------------------------- | ------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `UMBRA_2FA`                   |    `on` | Whether the console requires TOTP. Unset or `on` enables it; `off` disables it without deleting an existing binding; any other value refuses to start. `UMBRA_LOGIN=off`, `GROK_AGENT`, and `GROK_PROJECT_ID` skip all console auth (including 2FA) and are for preview only.                                                              |
 | `UMBRA_MAX_SPLICES`           |  `8192` | Maximum number of active TCP forwarding connections (splices) across the entire gate, shared by all TCP mappings and visitor forwarding. Effective concurrency is also limited by each mapping's `maxConns`. Only positive integers are accepted. Reaching the limit rejects new TCP forwarding without interrupting existing connections. |
 | `UMBRA_UDP_MAX_FLOWS_PER_IP`  |   `256` | Maximum active UDP flows from one source IPv4 address within each mapping; IPv6 sources are grouped by `/64`. A UDP flow is identified by its source address and port and remains active until the UDP idle timeout. `0` disables this limit.                                                                                              |
 | `UMBRA_UDP_NEW_FLOWS_PER_SEC` |   `256` | Maximum new UDP flows per second from one source IPv4 address within each mapping; IPv6 sources are grouped by `/64`. A token bucket permits bounded bursts. `0` disables this limit. This does not limit packet rate (pps) on established flows.                                                                                          |
@@ -403,7 +464,8 @@ The public gate `/health` endpoint returns only the aggregate health state. Auth
 - Kernel-level drops require Linux, nftables, and `CAP_NET_ADMIN`, and currently protect IPv4. Otherwise Umbra falls back to rejecting traffic in user space, where a service port may remain detectable. Kernel drops should be understood as scan resistance, not guaranteed invisibility.
 - Visitor tickets are bearer credentials. Anyone holding a valid ticket can use it until it expires or is revoked, so transmit and store tickets securely.
 - The management endpoint defaults to `127.0.0.1`. Non-loopback binds require TLS. When using a reverse proxy, configure `-http-trust-proxy` only for trusted proxy CIDRs.
-- Protect and back up the entire `-tls-dir`. It contains the CA private key, gateway certificate, administrator state, node credentials, mappings, and traffic history. Never commit or share it with an untrusted party.
+- Protect and back up the entire `-tls-dir`. It contains the CA private key, gateway certificate, administrator password hash, TOTP secret, node credentials, mappings, and traffic history. A leaked backup exposes the TOTP secret and enables offline password guessing; never commit or share it with an untrusted party.
+- TOTP substantially reduces risk from password leaks, credential stuffing, and ordinary brute force, but it does not stop a real-time phishing proxy. Verify the console hostname and TLS before entering a code.
 - New mappings default to `public`. Before Internet exposure, review the access mode, CIDR rules, target address, and the service's own authentication.
 
 ## Project and releases
