@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.5
+
 控制台强制 TOTP 双因素认证。
 
 - 新安装在获得正式会话前必须绑定 Authenticator，并保存一次性恢复码

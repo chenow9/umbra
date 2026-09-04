@@ -1,6 +1,6 @@
 # Umbra console 2FA operations guide
 
-The Umbra web console requires an administrator password and TOTP two-factor authentication by default. This guide covers initial enrollment, upgrades, recovery codes, offline reset, and configuration.
+Starting with `v0.1.5`, the Umbra web console requires an administrator password and TOTP two-factor authentication by default. This guide covers initial enrollment, upgrades, recovery codes, offline reset, and configuration.
 
 ## Default behavior
 
@@ -22,7 +22,7 @@ Recovery codes are displayed once and each code can be used only once. If the pa
 
 ## Upgrading from a release without 2FA
 
-During the upgrade:
+When upgrading from `v0.1.4` or earlier to `v0.1.5` or later:
 
 - the existing administrator password is retained;
 - all existing console sessions are revoked;

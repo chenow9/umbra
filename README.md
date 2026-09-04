@@ -80,7 +80,7 @@ cd umbra
 
 # 先将 deploy/compose.gate.yml 中的 gate.example.com:4400
 # 改成 Node 真正能访问的域名或公网 IP
-UMBRA_TAG=0.1.4 docker compose -f deploy/compose.gate.yml up -d
+UMBRA_TAG=0.1.5 docker compose -f deploy/compose.gate.yml up -d
 docker logs -f umbrad
 ```
 
@@ -116,7 +116,7 @@ ssh -L 8080:127.0.0.1:8080 user@gate.example.com
 
 ## 控制台双因素认证
 
-控制台默认启用 TOTP 2FA。支持 1Password、Google Authenticator、Microsoft Authenticator 等能够生成六位 TOTP 验证码的应用。服务器和手机时间必须保持同步。
+从 `v0.1.5` 起，控制台默认启用 TOTP 2FA。支持 1Password、Google Authenticator、Microsoft Authenticator 等能够生成六位 TOTP 验证码的应用。服务器和手机时间必须保持同步。
 
 | 场景 | 需要的凭证 | 处理方式 |
 | ---- | ---------- | -------- |
@@ -331,12 +331,12 @@ Docker Hub 提供 **linux/amd64** 和 **linux/arm64** 镜像：
 - `chenow9/umbrad`（含 `umbrad` 与 `umbra-visit`）
 - `chenow9/umbra-node`
 
-生产环境建议固定使用当前正式版本 `0.1.4`，避免 `latest` 更新后意外改变运行版本。
+生产环境建议固定使用当前正式版本 `0.1.5`，避免 `latest` 更新后意外改变运行版本。
 
 **入口**（Linux 宿主机，host 网络）：
 
 ```bash
-UMBRA_TAG=0.1.4 docker compose -f deploy/compose.gate.yml up -d
+UMBRA_TAG=0.1.5 docker compose -f deploy/compose.gate.yml up -d
 # 浏览器打开入口的控制台（默认只绑 127.0.0.1:8080）
 # named volume umbra-tls → /var/lib/umbra
 # 里面是证书、control.json、traffic。不要只挂 ca.crt。
@@ -351,7 +351,7 @@ UMBRA_TAG=0.1.4 docker compose -f deploy/compose.gate.yml up -d
 ```bash
 cp deploy/node.env.example node.env   # 填 UMBRA_SERVER / UMBRA_TOKEN
 # 把入口的 ca.crt 放到当前目录
-UMBRA_TAG=0.1.4 docker compose -f deploy/compose.node.yml up -d
+UMBRA_TAG=0.1.5 docker compose -f deploy/compose.node.yml up -d
 ```
 
 换入口程序本身不停机：

@@ -80,7 +80,7 @@ cd umbra
 
 # Replace gate.example.com:4400 in deploy/compose.gate.yml
 # with the domain or public IP that nodes can actually reach.
-UMBRA_TAG=0.1.4 docker compose -f deploy/compose.gate.yml up -d
+UMBRA_TAG=0.1.5 docker compose -f deploy/compose.gate.yml up -d
 docker logs -f umbrad
 ```
 
@@ -116,7 +116,7 @@ On **Mappings**, select an online node and configure the protocol, public entry 
 
 ## Console two-factor authentication
 
-The console enables TOTP 2FA by default. It works with 1Password, Google Authenticator, Microsoft Authenticator, and other applications that generate six-digit TOTP codes. Keep the gateway and phone clocks synchronized.
+Starting with `v0.1.5`, the console enables TOTP 2FA by default. It works with 1Password, Google Authenticator, Microsoft Authenticator, and other applications that generate six-digit TOTP codes. Keep the gateway and phone clocks synchronized.
 
 | Scenario | Required credentials | Procedure |
 | -------- | -------------------- | --------- |
@@ -331,12 +331,12 @@ Docker Hub provides **linux/amd64** and **linux/arm64** images:
 - `chenow9/umbrad` (includes `umbrad` and `umbra-visit`)
 - `chenow9/umbra-node`
 
-Pin production deployments to the current stable version, `0.1.4`, so a future `latest` update cannot change the running version unexpectedly.
+Pin production deployments to the current stable version, `0.1.5`, so a future `latest` update cannot change the running version unexpectedly.
 
 **Gate** (Linux host networking):
 
 ```bash
-UMBRA_TAG=0.1.4 docker compose -f deploy/compose.gate.yml up -d
+UMBRA_TAG=0.1.5 docker compose -f deploy/compose.gate.yml up -d
 # open the console (default bind is 127.0.0.1:8080)
 # named volume umbra-tls → /var/lib/umbra holds certs, control.json, and traffic.
 # Do not mount only ca.crt.
@@ -351,7 +351,7 @@ The enroll dialog's Docker command writes the CA locally and runs `docker run --
 ```bash
 cp deploy/node.env.example node.env   # set UMBRA_SERVER / UMBRA_TOKEN
 # copy the gate's ca.crt into the current directory
-UMBRA_TAG=0.1.4 docker compose -f deploy/compose.node.yml up -d
+UMBRA_TAG=0.1.5 docker compose -f deploy/compose.node.yml up -d
 ```
 
 Hot-replace the gate binary without dropping tunnels:
