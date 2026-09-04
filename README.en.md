@@ -98,6 +98,8 @@ Open `http://127.0.0.1:8080`. The first visit sets the administrator password, e
 
 For domain access, use an HTTPS reverse proxy or configure management TLS in `umbrad`. Never expose the plaintext management endpoint to the Internet. See [Console two-factor authentication](#console-two-factor-authentication) for upgrades, recovery, and configuration.
 
+When the console is accessed through a reverse proxy, the client address must also be forwarded and trusted correctly. Otherwise an `spa` knock may authorize the proxy address instead of the actual client. See [Reverse proxies and client IP addresses](#reverse-proxies-and-client-ip-addresses).
+
 Do not set `UMBRA_LOGIN=off`, `GROK_AGENT`, or `GROK_PROJECT_ID` on a production gateway; they disable console authentication entirely.
 
 **3. Enroll a node**
@@ -113,6 +115,45 @@ On **Mappings**, select an online node and configure the protocol, public entry 
 - Connect directly to a `public` service port. Use **Knock** first for `spa`, or issue a ticket first for `visitor`.
 
 > Probe sends a small payload to the real target. It checks path and response behavior; it is not an application-level health check.
+
+### Reverse proxies and client IP addresses
+
+`UMBRA_HTTP_TRUST_PROXY` (or `-http-trust-proxy`) specifies which **reverse proxies directly connected to `umbrad`** may supply the real client address. Configure it with the proxy IP address or CIDR, not a visitor's public IP and not an access allowlist for mapped services.
+
+The resolution rules are:
+
+- If the HTTP request's direct peer is not trusted, `umbrad` ignores forwarding headers and uses the TCP peer address. Leave this setting empty when clients access the console directly without a reverse proxy.
+- If the direct peer belongs to a trusted proxy CIDR, `umbrad` uses the first address in `X-Forwarded-For`, then `X-Real-IP`, and finally falls back to the TCP peer address.
+- The resolved address is used for console login, audit events, and the source IP authorized by an `spa` knock. Client connections to `public` and `spa` service ports remain direct and do not need to pass through the HTTP reverse proxy.
+
+For example, when Nginx on the same host reaches `umbrad` over loopback:
+
+```yaml
+services:
+  umbrad:
+    environment:
+      # This is the proxy directly connected to umbrad, not the client's public IP.
+      UMBRA_HTTP_TRUST_PROXY: 127.0.0.0/8
+    command:
+      - -http
+      - 127.0.0.1:8080
+```
+
+When Nginx is the outermost proxy, overwrite any client-supplied `X-Forwarded-For` value instead of preserving or blindly appending it:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+If the proxy runs on a Docker bridge or another host, use the address from which it actually connects to `umbrad`. Prefer an exact `/32` or `/128` over a broad network whenever possible. In a multi-proxy chain, the outermost trusted edge must remove forged client forwarding headers, and downstream proxies must propagate the sanitized value correctly. Never trust `0.0.0.0/0` or `::/0`; doing so could let any directly connected client spoof its source address.
+
+After changing a Compose environment variable, run `docker compose up -d umbrad` so Compose recreates the service; `docker restart` alone does not add a new variable to an existing container. Once active, inspect `mapping.knock` on the Audit page. Its IP should match the egress IP of the client that opens the mapped service, rather than `127.0.0.1` or a Docker bridge address.
 
 ## Console two-factor authentication
 
@@ -463,7 +504,7 @@ The public gate `/health` endpoint returns only the aggregate health state. Auth
 - An expired `spa` grant blocks new connections; it does not terminate established TCP connections or UDP flows that are still active. SPA does not replace authentication in SSH, TLS, or the application itself.
 - Kernel-level drops require Linux, nftables, and `CAP_NET_ADMIN`, and currently protect IPv4. Otherwise Umbra falls back to rejecting traffic in user space, where a service port may remain detectable. Kernel drops should be understood as scan resistance, not guaranteed invisibility.
 - Visitor tickets are bearer credentials. Anyone holding a valid ticket can use it until it expires or is revoked, so transmit and store tickets securely.
-- The management endpoint defaults to `127.0.0.1`. Non-loopback binds require TLS. When using a reverse proxy, configure `-http-trust-proxy` only for trusted proxy CIDRs.
+- The management endpoint defaults to `127.0.0.1`. Non-loopback binds require TLS. When using a reverse proxy, trust only proxy addresses you control and configure `-http-trust-proxy` as described in [Reverse proxies and client IP addresses](#reverse-proxies-and-client-ip-addresses).
 - Protect and back up the entire `-tls-dir`. It contains the CA private key, gateway certificate, administrator password hash, TOTP secret, node credentials, mappings, and traffic history. A leaked backup exposes the TOTP secret and enables offline password guessing; never commit or share it with an untrusted party.
 - TOTP substantially reduces risk from password leaks, credential stuffing, and ordinary brute force, but it does not stop a real-time phishing proxy. Verify the console hostname and TLS before entering a code.
 - New mappings default to `public`. Before Internet exposure, review the access mode, CIDR rules, target address, and the service's own authentication.

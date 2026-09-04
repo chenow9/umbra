@@ -98,6 +98,8 @@ ssh -L 8080:127.0.0.1:8080 user@gate.example.com
 
 如果要通过域名访问，请使用 HTTPS 反向代理，或为 `umbrad` 配置管理口 TLS；不要把明文管理口暴露到公网。2FA 的升级迁移、恢复和配置方法见[控制台双因素认证](#控制台双因素认证)。
 
+控制台经反向代理访问时，还需要正确传递和信任客户端地址，否则 `spa` 敲门可能放行代理地址而不是实际客户端。详见[反向代理与客户端 IP](#反向代理与客户端-ip)。
+
 不要把 `UMBRA_LOGIN=off`、`GROK_AGENT` 或 `GROK_PROJECT_ID` 用在生产入口上，它们会跳过整个控制台认证。
 
 **3. 登记 Node**
@@ -113,6 +115,45 @@ ssh -L 8080:127.0.0.1:8080 user@gate.example.com
 - 对于 `public` 映射，直接连接入口业务端口即可验证。`spa` 需先敲门，`visitor` 需先签发票据。
 
 > 探测会向真实目标发送少量探测数据，它验证的是链路与响应，不等同于应用层健康检查。
+
+### 反向代理与客户端 IP
+
+`UMBRA_HTTP_TRUST_PROXY`（或 `-http-trust-proxy`）指定哪些**直接连接 umbrad 的反向代理**可以提供真实客户端地址。这里填的是反向代理的 IP 或 CIDR，不是访问者的公网 IP，也不是业务映射的访问白名单。
+
+处理规则如下：
+
+- 如果 HTTP 请求的直接来源不在信任列表中，`umbrad` 忽略转发头，使用 TCP 连接的来源地址。因此不经反向代理直接访问控制台时，保持该配置为空即可。
+- 如果直接来源属于信任的代理 CIDR，`umbrad` 依次使用 `X-Forwarded-For` 的第一个地址、`X-Real-IP`，最后才回退到 TCP 连接来源。
+- 该结果用于控制台登录、审计和 `spa` 敲门的来源 IP 识别。`public` / `spa` 的业务端口仍由客户端直接连接，不需要经过 HTTP 反向代理。
+
+例如，同机 Nginx 通过回环地址访问 `umbrad`：
+
+```yaml
+services:
+  umbrad:
+    environment:
+      # 填写直接连接 umbrad 的代理地址，不是客户端公网 IP。
+      UMBRA_HTTP_TRUST_PROXY: 127.0.0.0/8
+    command:
+      - -http
+      - 127.0.0.1:8080
+```
+
+当 Nginx 是最外层代理时，应覆盖客户端传入的 `X-Forwarded-For`，而不是盲目保留或追加：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+如果代理位于 Docker 网桥或另一台主机，请改为它实际连接 `umbrad` 时的地址；能使用精确的 `/32` 或 `/128` 时，不要信任整个宽泛网段。多层代理中，最外层可信入口必须清理客户端伪造的转发头，后续代理再正确传递它。不要配置 `0.0.0.0/0` 或 `::/0`，否则任意直连客户端都可能伪造来源地址。
+
+修改 Compose 中的环境变量后，需要执行 `docker compose up -d umbrad` 使 Compose 重建服务；仅执行 `docker restart` 不会把新环境变量写入现有容器。生效后可在审计页检查 `mapping.knock` 记录：其 IP 应与发起业务连接的客户端出口 IP 一致，而不是 `127.0.0.1` 或 Docker 网桥地址。
 
 ## 控制台双因素认证
 
@@ -463,7 +504,7 @@ UMBRA_UDP_READ_BUFFER=8388608 docker compose -f deploy/compose.gate.yml up -d
 - `spa` 窗口过期只阻止新连接，不中断已经建立的 TCP 连接或未过期 UDP flow。它不替代 SSH、TLS 或应用自身的认证。
 - `spa` 的内核丢弃需要 Linux、nftables 和 `CAP_NET_ADMIN`，当前针对 IPv4。不满足条件时会回退为用户态拒绝，端口可能仍被扫描识别；即使使用内核丢弃，也不应理解为“绝对不可发现”。
 - Visitor 票据是持有者凭证：任何持有有效票据的人都能在过期或吊销前使用它，请安全传输与保管。
-- 管理面默认绑定 `127.0.0.1`；绑定非回环地址时，`umbrad` 要求配置 TLS。使用反向代理时，仅对可信代理 CIDR 配置 `-http-trust-proxy`。
+- 管理面默认绑定 `127.0.0.1`；绑定非回环地址时，`umbrad` 要求配置 TLS。使用反向代理时，只信任实际由你控制的代理地址，并按[反向代理与客户端 IP](#反向代理与客户端-ip)配置 `-http-trust-proxy`。
 - 保护并备份整个 `-tls-dir`：其中包含 CA 私钥、入口证书、管理员口令哈希、TOTP 密钥、Node 凭证、映射和流量历史。泄露备份等同于泄露 TOTP 密钥，并允许离线猜测管理员口令；不要将该目录上传到仓库或传给不可信第三方。
 - TOTP 能显著降低口令泄露、撞库和普通暴力破解风险，但不能抵御实时钓鱼代理；输入验证码前仍需确认控制台域名和 TLS。
 - 新建映射默认为 `public`。公网上线前，请确认访问模式、CIDR 规则、目标地址和业务自身的认证配置。
