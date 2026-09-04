@@ -73,6 +73,17 @@ export function LoginPage() {
   const [state, dispatch] = useReducer(reduce, initial);
   const s = status.data;
 
+  const showEnrollment = async () => {
+    try {
+      const view = await getTwoFactorEnrollment();
+      dispatch({ type: "enroll", value: view });
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "绑定信息加载失败，请刷新页面重试");
+      return false;
+    }
+  };
+
   useEffect(() => {
     if (!s || s.next !== "enroll_2fa" || s.signedIn || state.recoveryCodes || state.enroll) return;
     let cancelled = false;
@@ -91,11 +102,15 @@ export function LoginPage() {
   const setup = useMutation({
     mutationFn: () => setupOwnerPassword({ data: { password: state.password } }),
     onSuccess: async (res) => {
-      await qc.invalidateQueries({ queryKey: ["umbra", "owner"] });
       if (res.next === "authenticated") {
+        await qc.invalidateQueries({ queryKey: ["umbra", "owner"] });
         await nav({ to: "/" });
         return;
       }
+      if (res.next === "enroll_2fa") {
+        if (!(await showEnrollment())) return;
+      }
+      void qc.invalidateQueries({ queryKey: ["umbra", "owner"] });
       toast.success("口令已设定，继续绑定 Authenticator");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -112,11 +127,19 @@ export function LoginPage() {
         },
       }),
     onSuccess: async (res) => {
-      await qc.invalidateQueries({ queryKey: ["umbra"] });
       if (res.next === "authenticated") {
+        await qc.invalidateQueries({ queryKey: ["umbra"] });
         await nav({ to: "/" });
         return;
       }
+      if (res.next === "enroll_2fa") {
+        // 迁移用户在登录前后看到的 /v1/auth 内容相同。React Query 会
+        // 结构共享同一个对象，因此依赖 status 变化的 effect 不会重跑。
+        // 预认证 cookie 已由 /v1/login 写入，直接读取 enrollment 才能
+        // 无需刷新就进入二维码步骤。
+        if (!(await showEnrollment())) return;
+      }
+      void qc.invalidateQueries({ queryKey: ["umbra"] });
       dispatch({ type: "resetCodes" });
     },
     onError: (e: Error) => toast.error(hintAuthError(e.message)),

@@ -11,6 +11,7 @@
 - `UMBRA_2FA` 默认 `on`，非法值拒绝启动；`GROK_AGENT` / `GROK_PROJECT_ID` / `UMBRA_LOGIN=off` 仍会跳过整个认证并打警告
 - 密码与 TOTP 校验限制并发和尝试频率；口令、绑定或恢复状态变化会撤销旧会话与 pending 凭证
 - 认证状态通过 tomb 防止备份回滚；`tls-dir` 在读取状态前加锁，热升级会先排空 HTTP/SSE 再交接锁
+- 修复旧用户升级后首次提交口令和迁移码时页面仍停在登录表单；现在无需刷新即可进入 Authenticator 绑定
 
 Console authentication now requires TOTP by default.
 
@@ -21,6 +22,7 @@ Console authentication now requires TOTP by default.
 - `UMBRA_2FA` defaults to `on` and refuses illegal values; `GROK_AGENT` / `GROK_PROJECT_ID` / `UMBRA_LOGIN=off` still skip all console auth and log a warning
 - Password and TOTP verification limit concurrency and attempt rates; password, binding, or recovery changes revoke old sessions and pending credentials
 - An authentication tomb prevents backup rollback; `tls-dir` is locked before loading state, and hot upgrades drain HTTP/SSE before handing off the lock
+- Fix upgraded users remaining on the login form after submitting their password and migration code; authenticator enrollment now opens without a refresh
 
 ## 0.1.4
 
