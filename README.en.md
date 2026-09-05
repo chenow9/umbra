@@ -517,6 +517,10 @@ The public gate `/health` endpoint returns only the aggregate health state. Auth
 - [Issue tracker](https://github.com/chenow9/umbra/issues)
 - Docker Hub: [`chenow9/umbrad`](https://hub.docker.com/r/chenow9/umbrad) · [`chenow9/umbra-node`](https://hub.docker.com/r/chenow9/umbra-node)
 
+## Related Projects
+
+- [MoonProxy](https://github.com/MoonProxyHQ/moonproxy-desktop) — A cross-platform desktop GUI client for frp, built for non-technical users, with visual configuration and connection management. Works with an frps server.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).

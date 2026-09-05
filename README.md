@@ -517,6 +517,10 @@ UMBRA_UDP_READ_BUFFER=8388608 docker compose -f deploy/compose.gate.yml up -d
 - [问题反馈](https://github.com/chenow9/umbra/issues)
 - Docker Hub：[`chenow9/umbrad`](https://hub.docker.com/r/chenow9/umbrad) · [`chenow9/umbra-node`](https://hub.docker.com/r/chenow9/umbra-node)
 
+## 相关项目
+
+- [MoonProxy](https://github.com/MoonProxyHQ/moonproxy-desktop) — 面向非技术用户的跨平台 frp 桌面图形客户端，支持可视化配置和连接管理，配合 frps 服务端使用。
+
 ## 许可
 
 Apache License 2.0。见 [LICENSE](LICENSE)。
