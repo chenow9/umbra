@@ -2,7 +2,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowRight, Plus, Search, Network, List } from "lucide-react";
+import { ArrowLeft, ArrowRight, Plus, Search, SlidersHorizontal, X } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { Pager } from "@/components/ui/pager";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ServiceList } from "@/components/services/service-list";
-import { NetworkBoard } from "@/components/services/network-board";
+import { NodeScopePicker } from "@/components/services/node-scope-picker";
 import { ServiceEditor } from "@/components/services/service-editor";
 import { ServiceConnect, ServiceConnectSession } from "@/components/services/service-connect";
 import { listNodes, listMappings, deleteMapping, setMappingEnabled } from "@/lib/umbra/api";
@@ -22,16 +22,28 @@ import { serviceState, serviceSummary, serviceMatches } from "@/lib/umbra/servic
 import type { Mapping } from "@/lib/umbra/types";
 import { cn } from "@/lib/utils";
 
+type ServiceSearch = { node?: string; service?: string; create?: boolean };
+
 type Editor = { mode: "create"; nodeId?: string } | { mode: "edit"; mapping: Mapping };
 
-export function MappingsPage() {
+export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
   const qc = useQueryClient();
-  const search = useSearch({ from: "/mappings" });
-  const navigate = useNavigate({ from: "/mappings" });
+  const rawSearch = useSearch({ strict: false }) as ServiceSearch;
+  const search = { ...rawSearch, node: nodeId };
+  const routeNavigate = useNavigate();
+  const navigate = ({ search: next, replace }: { search: ServiceSearch; replace?: boolean }) =>
+    next.node
+      ? routeNavigate({
+          to: "/nodes/$nodeId",
+          params: { nodeId: next.node },
+          search: { service: next.service, create: next.create },
+          replace,
+        })
+      : routeNavigate({ to: "/mappings", search: next, replace });
   const nodes = useQuery({ queryKey: ["umbra", "nodes"], queryFn: listNodes });
   const mappings = useQuery({ queryKey: ["umbra", "mappings"], queryFn: listMappings });
   const [desktop, setDesktop] = useState(false);
-  const [layout, setLayout] = useState<"list" | "nodes">("list");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 1200px)");
     const update = () => setDesktop(mq.matches);
@@ -47,8 +59,9 @@ export function MappingsPage() {
   const [pendingDelete, setPendingDelete] = useState<Mapping | null>(null);
   const all = mappings.data ?? [];
   const hasNode = nodes.data?.some((node) => node.status !== "revoked") ?? false;
-  const summary = serviceSummary(all);
-  const selected = all.find((mapping) => mapping.id === search.service);
+  const scoped = nodeId ? all.filter((m) => m.nodeId === nodeId) : all;
+  const summary = serviceSummary(scoped);
+  const selected = scoped.find((mapping) => mapping.id === search.service);
   const rows = all.filter(
     (m) =>
       (!search.node || m.nodeId === search.node) &&
@@ -68,10 +81,18 @@ export function MappingsPage() {
   }, [q, view, proto, search.node]);
   useEffect(() => {
     if (search.create && hasNode && !nodes.isPending) {
-      setEditor({ mode: "create", nodeId: search.node });
-      void navigate({ search: { node: search.node }, replace: true });
+      const target = nodes.data?.find((node) => node.id === nodeId);
+      if (!nodeId || (target && target.status !== "revoked")) {
+        setEditor({ mode: "create", nodeId });
+      }
+      void routeNavigate({
+        to: nodeId ? "/nodes/$nodeId" : "/mappings",
+        params: { nodeId: nodeId ?? "" },
+        search: { service: undefined, create: undefined },
+        replace: true,
+      });
     }
-  }, [search.create, search.node, hasNode, nodes.isPending, navigate]);
+  }, [search.create, search.node, hasNode, nodes.isPending, nodes.data, nodeId, routeNavigate]);
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["umbra"] });
   };
@@ -106,24 +127,40 @@ export function MappingsPage() {
       ]}
     />
   );
-  const nodeIssues = (nodes.data ?? [])
-    .filter((node) => node.status !== "online")
-    .map((node) => ({
-      node,
-      count: all.filter((m) => m.nodeId === node.id && m.enabled).length,
-    }))
-    .filter((issue) => issue.count > 0 && (!search.node || issue.node.id === search.node));
+  const scopedNode = nodes.data?.find((node) => node.id === search.node);
+  const affected = all.filter((m) => m.nodeId === search.node && m.enabled).length;
+  const filterCount = Number(view !== "all") + Number(proto !== "all");
+  const statusOptions = [
+    { value: "all", label: "全部状态" },
+    { value: "attention", label: "需要处理" },
+    { value: "pending", label: "等待确认" },
+    { value: "disabled", label: "已停用" },
+  ];
+  const clearFilters = () => {
+    setQ("");
+    setView("all");
+    setProto("all");
+    void navigate({ search: { node: nodeId, service: search.service } });
+  };
   const loading = nodes.isPending || mappings.isPending;
   const error = nodes.error || mappings.error;
 
   return (
     <AppShell
       workspace
-      title="服务"
-      description="连接你的内网服务，随时知道下一步。"
+      title={nodeId ? (scopedNode?.name ?? "节点服务") : "全部服务"}
+      description={
+        nodeId && scopedNode
+          ? `${scopedNode.status === "online" ? "在线" : scopedNode.status === "revoked" ? "已吊销" : "离线"} · ${scoped.length} 项服务`
+          : undefined
+      }
+      showTelemetry={false}
       action={
         hasNode ? (
-          <Button onClick={() => setEditor({ mode: "create", nodeId: search.node })}>
+          <Button
+            disabled={Boolean(nodeId && (!scopedNode || scopedNode.status === "revoked"))}
+            onClick={() => setEditor({ mode: "create", nodeId: search.node })}
+          >
             <Plus className="mr-1.5 size-4" />
             添加服务
           </Button>
@@ -136,6 +173,27 @@ export function MappingsPage() {
     >
       <div className={cn("topology-layout", search.service && "has-inspector")}>
         <div className="service-workspace space-y-5">
+          {nodeId ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+              <Link
+                to="/nodes"
+                className="inline-flex items-center gap-2 text-stone hover:text-ink"
+              >
+                <ArrowLeft className="size-4" />
+                返回节点
+              </Link>
+              {scopedNode ? (
+                <div className="flex items-center gap-5">
+                  <Link to="/traffic" search={{ node: nodeId }} className="text-pine">
+                    查看流量
+                  </Link>
+                  <Link to="/nodes" search={{ edit: nodeId }} className="text-stone hover:text-ink">
+                    节点设置
+                  </Link>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {error ? (
             <div role="alert" className="rounded-lg border border-rose/30 p-4 text-sm">
               <p>无法更新服务数据：{error.message}</p>
@@ -155,7 +213,11 @@ export function MappingsPage() {
             <p role="status" className="py-12 text-sm text-stone">
               正在读取节点与服务…
             </p>
-          ) : !hasNode && !error ? (
+          ) : nodeId && !scopedNode && !nodes.error ? (
+            <p role="status" className="rounded-xl border border-line p-6">
+              该节点已不存在，请返回节点列表。
+            </p>
+          ) : !nodes.data?.length && !all.length && !error ? (
             <section className="rounded-xl border border-line bg-card p-6 sm:p-8">
               <h3 className="text-xl font-semibold">从一台内网节点开始</h3>
               <ol className="my-6 grid gap-5 text-sm sm:grid-cols-3">
@@ -183,160 +245,168 @@ export function MappingsPage() {
             </section>
           ) : !error || all.length ? (
             <>
-              <div className="workspace-view-row">
-                <div role="group" aria-label="服务视图" className="service-view-tabs">
-                  {[
-                    { value: "all", label: "全部服务", count: summary.total },
-                    { value: "attention", label: "需要处理", count: summary.attention },
-                    { value: "pending", label: "等待确认", count: summary.pending },
-                    { value: "disabled", label: "已停用", count: summary.disabled },
-                  ].map((item) => (
-                    <button
-                      key={item.value}
-                      type="button"
-                      aria-pressed={view === item.value}
-                      onClick={() => setView(item.value)}
-                      className={cn("service-view-tab", view === item.value && "is-active")}
-                    >
-                      <span>{item.label}</span>
-                      <span
-                        className={cn(
-                          "service-tab-count",
-                          item.value === "attention" && item.count > 0 && "text-rose",
-                        )}
-                      >
-                        {item.count}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                <div className="board-view-switch" role="group" aria-label="服务查看方式">
-                  <button aria-pressed={layout === "list"} onClick={() => setLayout("list")}>
-                    <List className="size-4" />
-                    服务列表
-                  </button>
-                  <button aria-pressed={layout === "nodes"} onClick={() => setLayout("nodes")}>
-                    <Network className="size-4" />
-                    按节点排查
-                  </button>
-                </div>
-              </div>
-              <div className="service-filter-bar">
-                <div className="relative min-w-48 flex-1">
+              <div className="flex items-center gap-3">
+                <div className="relative min-w-0 flex-1">
                   <Search className="pointer-events-none absolute left-3 top-3.5 size-4 text-stone" />
                   <Input
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
                     aria-label="搜索服务"
-                    placeholder="搜索服务、节点或端口"
-                    className="pl-9 bg-card"
+                    placeholder={nodeId ? "搜索此节点的服务或端口" : "搜索服务、节点或端口"}
+                    className="bg-card pl-9"
                   />
                 </div>
-                <Select
-                  aria-label="筛选节点"
-                  value={search.node ?? "all"}
-                  onValueChange={(value) =>
-                    void navigate({ search: { node: value === "all" ? undefined : value } })
-                  }
-                  triggerClassName="w-40"
-                  options={[
-                    { value: "all", label: "全部节点" },
-                    ...(nodes.data ?? []).map((n) => ({ value: n.id, label: n.name })),
-                  ]}
-                />
-                <Select
-                  aria-label="筛选协议"
-                  value={proto}
-                  onValueChange={setProto}
-                  triggerClassName="w-28"
-                  options={[
-                    { value: "all", label: "全部协议" },
-                    { value: "tcp", label: "TCP" },
-                    { value: "udp", label: "UDP" },
-                  ]}
-                />
+                <Button
+                  variant={filtersOpen ? "secondary" : "outline"}
+                  aria-expanded={filtersOpen}
+                  aria-controls="service-filters"
+                  onClick={() => setFiltersOpen(!filtersOpen)}
+                >
+                  <SlidersHorizontal className="size-4" />
+                  筛选{filterCount ? ` · ${filterCount}` : ""}
+                </Button>
               </div>
-              {search.node || q || proto !== "all" || view !== "all" ? (
-                <div className="flex items-center justify-between text-xs text-stone">
-                  <span>
-                    筛选结果 {rows.length} 项 / 全部 {all.length} 项
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setQ("");
-                      setProto("all");
-                      setView("all");
-                      void navigate({ search: {} });
-                    }}
-                  >
-                    清除所有筛选
-                  </Button>
+              {filtersOpen ? (
+                <div
+                  id="service-filters"
+                  className={cn("service-refine-panel", nodeId && "is-node-scoped")}
+                >
+                  {!nodeId ? (
+                    <div>
+                      <span className="service-refine-label">节点</span>
+                      <NodeScopePicker
+                        nodes={nodes.data ?? []}
+                        mappings={all}
+                        nodeId={search.node}
+                        onSelect={(node) => void navigate({ search: { node } })}
+                      />
+                    </div>
+                  ) : null}
+                  <div>
+                    <span className="service-refine-label">状态</span>
+                    <Select
+                      aria-label="筛选状态"
+                      value={view}
+                      onValueChange={setView}
+                      options={statusOptions}
+                    />
+                  </div>
+                  <div>
+                    <span className="service-refine-label">协议</span>
+                    <Select
+                      aria-label="筛选协议"
+                      value={proto}
+                      onValueChange={setProto}
+                      options={[
+                        { value: "all", label: "全部协议" },
+                        { value: "tcp", label: "TCP" },
+                        { value: "udp", label: "UDP" },
+                      ]}
+                    />
+                  </div>
                 </div>
               ) : null}
-              {nodeIssues.length &&
-              !q &&
-              proto === "all" &&
-              (view === "all" || view === "attention") ? (
-                <div className="service-node-issues" aria-label="节点故障影响">
-                  {nodeIssues.map(({ node, count }) => (
-                    <button
-                      key={node.id}
-                      onClick={() => {
-                        setLayout("nodes");
-                        setView("attention");
-                        setPage(1);
-                        void navigate({ search: { node: node.id } });
-                      }}
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-stone">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>
+                    {q || filterCount
+                      ? `${rows.length} / ${scoped.length} 项服务`
+                      : `${scoped.length} 项服务`}
+                  </span>
+                  {view !== "all" ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      aria-label="清除状态筛选"
+                      onClick={() => setView("all")}
                     >
-                      <span>
-                        <strong>{node.name}</strong> {node.status === "revoked" ? "已吊销" : "离线"}{" "}
-                        · 影响 {count} 项服务
-                      </span>
-                      <span>
-                        按节点排查 <ArrowRight className="size-3.5" />
-                      </span>
-                    </button>
-                  ))}
+                      {statusOptions.find((option) => option.value === view)?.label}
+                      <X className="size-3" />
+                    </Button>
+                  ) : null}
+                  {proto !== "all" ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      aria-label="清除协议筛选"
+                      onClick={() => setProto("all")}
+                    >
+                      {proto.toUpperCase()}
+                      <X className="size-3" />
+                    </Button>
+                  ) : null}
+                </div>
+                {q || filterCount ? (
+                  <Button size="sm" variant="ghost" onClick={clearFilters}>
+                    清除筛选
+                  </Button>
+                ) : summary.attention > 0 ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-rose"
+                    onClick={() => setView("attention")}
+                  >
+                    {summary.attention} 项需处理
+                    <ArrowRight className="size-3.5" />
+                  </Button>
+                ) : null}
+              </div>
+              {scopedNode && scopedNode.status !== "online" && affected > 0 ? (
+                <div
+                  className="rounded-xl border border-rose/25 px-4 py-3 text-sm"
+                  aria-label="节点故障影响"
+                >
+                  <p>
+                    {scopedNode.name} {scopedNode.status === "revoked" ? "已吊销" : "离线"}，影响{" "}
+                    {affected} 项已启用服务。
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-stone">
+                    <span>
+                      {scopedNode.status === "revoked"
+                        ? "请为服务选择有效节点。"
+                        : "先检查节点连接，无需逐个修改服务。"}
+                    </span>
+                    <Link
+                      to="/nodes"
+                      search={{ edit: nodeId }}
+                      className="text-pine underline underline-offset-4"
+                    >
+                      查看节点
+                    </Link>
+                  </div>
                 </div>
               ) : null}
               {!rows.length ? (
                 <section className="rounded-lg border border-dashed border-line px-5 py-10 text-center">
                   <h3 className="font-medium">
-                    {all.length ? "没有匹配的服务" : "节点准备好了，添加第一个服务"}
+                    {q || filterCount
+                      ? "没有匹配的服务"
+                      : scopedNode?.status === "revoked"
+                        ? "此节点没有服务"
+                        : "添加你的第一个服务"}
                   </h3>
                   <p className="mt-2 text-sm text-stone">
-                    {all.length
-                      ? "调整筛选条件，或清除筛选查看全部服务。"
-                      : "无需在节点上编写映射配置。填写目标地址和端口即可。"}
+                    {q || filterCount
+                      ? "调整搜索或筛选条件，查看其他服务。"
+                      : scopedNode?.status === "revoked"
+                        ? "该节点已吊销，请返回并选择有效节点。"
+                        : "填写目标地址和端口，即可开始连接。"}
                   </p>
-                  {!all.length ? (
-                    <Button
-                      className="mt-5"
-                      onClick={() => setEditor({ mode: "create", nodeId: search.node })}
-                    >
-                      添加服务
+                  {q || filterCount ? (
+                    <Button variant="outline" className="mt-5" onClick={clearFilters}>
+                      清除筛选
                     </Button>
                   ) : null}
                 </section>
-              ) : layout === "list" ? (
+              ) : (
                 <ServiceList
                   mappings={pageData.items}
                   selectedId={search.service}
                   onSelect={openService}
                   renderMenu={renderMenu}
                 />
-              ) : (
-                <NetworkBoard
-                  mappings={pageData.items}
-                  selectedId={search.service}
-                  onSelect={openService}
-                  onAdd={(nodeId) => setEditor({ mode: "create", nodeId })}
-                  renderMenu={renderMenu}
-                />
               )}
-
               {rows.length > PAGE_SIZE ? (
                 <Pager
                   page={pageData.page}
@@ -345,9 +415,6 @@ export function MappingsPage() {
                   onPage={setPage}
                 />
               ) : null}
-              <p className="text-xs leading-relaxed text-stone">
-                “配置就绪”表示节点已确认配置。实际连接还取决于访问授权、网络路径和目标服务。
-              </p>
             </>
           ) : null}
         </div>
@@ -397,7 +464,7 @@ export function MappingsPage() {
                   ]);
                 setEditor(null);
                 refresh();
-                openService(m.id);
+                void navigate({ search: { node: nodeId ? m.nodeId : undefined, service: m.id } });
               }}
             />
           ) : null}

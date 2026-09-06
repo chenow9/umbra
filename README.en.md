@@ -26,7 +26,7 @@ Umbra connects TCP and UDP services behind NAT or firewalls to a public gateway 
 
 ## Service workspace
 
-The console opens on **Services** across all nodes. Add a service by choosing its target and access policy; advanced limits are optional. New services in the UI default to `visitor` (credential access). The API retains `public` when `mode` is omitted for compatibility with existing clients. Saving opens the service connection panel, where you can get an address or visitor command, manage that service’s tickets, and explicitly probe its target. Configuration readiness is not proof of target health or external reachability. A probe that receives no data reports an unverified response instead of success.
+The console opens on **Nodes**. Open a node to view its services; adding a service there preselects that node. **All services** and quick search support cross-node access. Choose the target and access policy; advanced limits are optional. New services in the UI default to `visitor` (credential access). The API retains `public` when `mode` is omitted for compatibility with existing clients. Saving opens the service connection panel, where you can get an address or visitor command, manage that service’s tickets, and explicitly probe its target. Configuration readiness is not proof of target health or external reachability. A probe that receives no data reports an unverified response instead of success.
 
 Navigation is organized into Services, Nodes, Observability (traffic and audit), and System (security and appearance). Services open as a searchable list, with a node view for troubleshooting shared failures. Light and dark appearances share one CSS token source.
 
@@ -72,7 +72,7 @@ UDP prefers a separate data plane when available and can fall back to Yamux, dep
 | `umbrad`      | Public gateway: TLS 1.3 tunnels, service listeners, `spa` kernel drops, graceful upgrade, web console, and API |
 | `umbra-node`  | Node behind NAT: connects outward to the gateway and dials local targets from server-provided mappings         |
 | `umbra-visit` | Visitor client: uses a ticket to establish a tunnel and opens a local TCP or UDP port                          |
-| Web console   | Manages nodes, mappings, credentials, traffic, audit events, and deployment commands                           |
+| Web console   | Manages nodes, mappings, credentials, traffic, audit events, and security settings                           |
 
 ## Quick start
 

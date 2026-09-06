@@ -139,6 +139,14 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
         <p className="sheet-eyebrow">SERVICE / 连接工作区</p>
         <SheetTitle>{m.name}</SheetTitle>
         <SheetDescription>连接服务、检查链路与管理访问权限。</SheetDescription>
+        <Link
+          to="/traffic"
+          search={{ node: m.nodeId, service: m.id }}
+          className="mt-3 inline-flex items-center gap-1.5 text-xs text-pine"
+        >
+          <Activity className="size-3.5" />
+          查看此服务流量
+        </Link>
       </SheetHeader>
       <Tabs.Root value={task} onValueChange={setTask} className="flex min-h-0 flex-1 flex-col">
         <Tabs.List className="connection-task-tabs" aria-label="服务操作">

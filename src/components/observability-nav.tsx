@@ -1,12 +1,15 @@
 import { Link } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
+import type { TrafficSearch } from "@/lib/umbra/traffic-scope";
 import type { ReactNode } from "react";
 export function ObservabilityNav({
   active,
   actions,
+  trafficSearch,
 }: {
   active: "traffic" | "audit";
   actions?: ReactNode;
+  trafficSearch?: TrafficSearch;
 }) {
   return (
     <div className="observation-viewbar">
@@ -20,6 +23,7 @@ export function ObservabilityNav({
           <Link
             key={item.key}
             to={item.to}
+            search={item.key === "traffic" ? trafficSearch : undefined}
             aria-current={active === item.key ? "page" : undefined}
             className={cn(
               "border-b-2 px-4 py-3 text-sm",

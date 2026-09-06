@@ -16,6 +16,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as MappingsRouteImport } from './routes/mappings'
 import { Route as NodesRouteImport } from './routes/nodes'
 import { Route as TrafficRouteImport } from './routes/traffic'
+import { Route as NodesNodeIdRouteImport } from './routes/nodes_.$nodeId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
 const IndexRoute = IndexRouteImport.update({
@@ -53,6 +54,11 @@ const TrafficRoute = TrafficRouteImport.update({
   path: '/traffic',
   getParentRoute: () => rootRouteImport,
 } as any)
+const NodesNodeIdRoute = NodesNodeIdRouteImport.update({
+  id: '/nodes_/$nodeId',
+  path: '/nodes/$nodeId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -67,6 +73,7 @@ export interface FileRoutesByFullPath {
   '/mappings': typeof MappingsRoute
   '/nodes': typeof NodesRoute
   '/traffic': typeof TrafficRoute
+  '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
@@ -77,6 +84,7 @@ export interface FileRoutesByTo {
   '/mappings': typeof MappingsRoute
   '/nodes': typeof NodesRoute
   '/traffic': typeof TrafficRoute
+  '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesById {
@@ -88,6 +96,7 @@ export interface FileRoutesById {
   '/mappings': typeof MappingsRoute
   '/nodes': typeof NodesRoute
   '/traffic': typeof TrafficRoute
+  '/nodes_/$nodeId': typeof NodesNodeIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
@@ -100,6 +109,7 @@ export interface FileRouteTypes {
     | '/mappings'
     | '/nodes'
     | '/traffic'
+    | '/nodes/$nodeId'
     | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -110,6 +120,7 @@ export interface FileRouteTypes {
     | '/mappings'
     | '/nodes'
     | '/traffic'
+    | '/nodes/$nodeId'
     | '/api/auth/$'
   id:
     | '__root__'
@@ -120,6 +131,7 @@ export interface FileRouteTypes {
     | '/mappings'
     | '/nodes'
     | '/traffic'
+    | '/nodes_/$nodeId'
     | '/api/auth/$'
   fileRoutesById: FileRoutesById
 }
@@ -131,6 +143,7 @@ export interface RootRouteChildren {
   MappingsRoute: typeof MappingsRoute
   NodesRoute: typeof NodesRoute
   TrafficRoute: typeof TrafficRoute
+  NodesNodeIdRoute: typeof NodesNodeIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
 
@@ -185,6 +198,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TrafficRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/nodes_/$nodeId': {
+      id: '/nodes_/$nodeId'
+      path: '/nodes/$nodeId'
+      fullPath: '/nodes/$nodeId'
+      preLoaderRoute: typeof NodesNodeIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -203,6 +223,7 @@ const rootRouteChildren: RootRouteChildren = {
   MappingsRoute: MappingsRoute,
   NodesRoute: NodesRoute,
   TrafficRoute: TrafficRoute,
+  NodesNodeIdRoute: NodesNodeIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }
 export const routeTree = rootRouteImport

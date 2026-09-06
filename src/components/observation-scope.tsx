@@ -23,7 +23,9 @@ export function ObservationScope({
 }) {
   const [open, setOpen] = useState(false);
   const current = nodes.find((node) => node.id === value);
-  const currentName = value ? (current?.name ?? "所选节点不可用") : "全部节点";
+  const currentName = value
+    ? (current?.name ?? (loading ? "正在读取节点…" : error ? "节点读取失败" : "所选节点不可用"))
+    : "全部节点";
   const pick = (id: string) => {
     onChange(id);
     setOpen(false);

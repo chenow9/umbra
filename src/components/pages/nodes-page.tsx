@@ -1,9 +1,9 @@
 "use client";
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useSearch, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Search } from "lucide-react";
+import { ArrowRight, Search } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { StatusDot } from "@/components/status-dot";
@@ -36,11 +36,13 @@ import {
   disconnectNode,
   queryNodes,
   listNodes,
+  listMappings,
   rotateNodeToken,
   revokeNode,
   updateNode,
 } from "@/lib/umbra/api";
 import { emptyPage, nodeFacets, PAGE_SIZE, type NodeFacets } from "@/lib/umbra/page";
+import { serviceSummary } from "@/lib/umbra/service";
 import { cn } from "@/lib/utils";
 import { Pager } from "@/components/ui/pager";
 import { formatBytes, formatBps, formatRelative } from "@/lib/umbra/format";
@@ -72,6 +74,8 @@ type Editor = { mode: "create" } | { mode: "edit"; node: Node };
 
 export function NodesPage() {
   const qc = useQueryClient();
+  const search = useSearch({ from: "/nodes" });
+  const navigate = useNavigate({ from: "/nodes" });
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
   const [os, setOs] = useState("all");
@@ -89,14 +93,28 @@ export function NodesPage() {
     placeholderData: keepPreviousData,
   });
   const catalog = useQuery({ queryKey: ["umbra", "nodes"], queryFn: listNodes });
+  const services = useQuery({ queryKey: ["umbra", "mappings"], queryFn: listMappings });
   const facets = nodeFacets(catalog.data ?? [], { q, status, os });
   const [editor, setEditor] = useState<Editor | null>(null);
+  useEffect(() => {
+    if (!search.edit || !catalog.data) return;
+    const node = catalog.data.find((item) => item.id === search.edit);
+    if (node) setEditor({ mode: "edit", node });
+    else toast.error("该节点已不存在");
+    void navigate({ search: {}, replace: true });
+  }, [search.edit, catalog.data, navigate]);
   const [issued, setIssued] = useState<Issued | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Node | null>(null);
   const [pendingRotate, setPendingRotate] = useState<Node | null>(null);
   const pageData = nodes.data ?? emptyPage<Node>(page);
   const list = pageData.items;
-  const empty = !nodes.isLoading && pageData.total === 0 && !q && status === "all" && os === "all";
+  const empty =
+    !nodes.isPending &&
+    !nodes.isError &&
+    pageData.total === 0 &&
+    !q &&
+    status === "all" &&
+    os === "all";
   useEffect(() => {
     setPage(1);
   }, [q, status, os]);
@@ -140,7 +158,8 @@ export function NodesPage() {
 
   return (
     <AppShell
-      description="接入承载内网服务的机器，管理连接与凭证。"
+      description="选择一台节点，打开它的服务。"
+      showTelemetry={false}
       title="节点"
       action={
         empty ? null : (
@@ -150,9 +169,21 @@ export function NodesPage() {
         )
       }
     >
-      {empty ? (
+      {nodes.isError ? (
+        <div role="alert" className="mb-5 rounded-xl border border-rose/25 p-4 text-sm">
+          <p>无法读取节点：{nodes.error.message}</p>
+          <Button variant="outline" className="mt-3" onClick={() => void nodes.refetch()}>
+            重新加载
+          </Button>
+        </div>
+      ) : null}
+      {nodes.isPending ? (
+        <p role="status" className="py-10 text-sm text-stone">
+          正在读取节点…
+        </p>
+      ) : empty ? (
         <EmptyNodes onCreate={() => setEditor({ mode: "create" })} />
-      ) : (
+      ) : nodes.isError && !nodes.data ? null : (
         <>
           <NodeFleetBar
             q={q}
@@ -171,53 +202,22 @@ export function NodesPage() {
             </p>
           ) : (
             <>
-              <div className="flex flex-col gap-3 md:hidden">
-                {list.map((a) => (
+              <div className="node-directory" role="list" aria-label="节点列表">
+                {list.map((node) => (
                   <NodeCard
-                    key={a.id}
-                    node={a}
-                    onEdit={() => setEditor({ mode: "edit", node: a })}
-                    onDelete={() => setPendingDelete(a)}
-                    onRotate={() => setPendingRotate(a)}
+                    key={node.id}
+                    node={node}
+                    attention={
+                      services.data
+                        ? serviceSummary(services.data.filter((m) => m.nodeId === node.id))
+                            .attention
+                        : undefined
+                    }
+                    onEdit={() => setEditor({ mode: "edit", node })}
+                    onDelete={() => setPendingDelete(node)}
+                    onRotate={() => setPendingRotate(node)}
                   />
                 ))}
-              </div>
-              <div className="hidden overflow-hidden rounded-xl bg-card shadow-border md:block">
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[720px] table-fixed text-left text-sm">
-                    <colgroup>
-                      <col className="w-[16%]" />
-                      <col className="w-[10%]" />
-                      <col className="w-[16%]" />
-                      <col className="w-[8%]" />
-                      <col className="w-[20%]" />
-                      <col className="w-[14%]" />
-                      <col className="w-28" />
-                    </colgroup>
-                    <thead>
-                      <tr className="border-b border-line text-xs text-stone">
-                        <th className="px-4 py-3 font-medium">名称</th>
-                        <th className="px-4 py-3 font-medium">状态</th>
-                        <th className="px-4 py-3 font-medium">地址</th>
-                        <th className="px-4 py-3 font-medium">服务</th>
-                        <th className="px-4 py-3 font-medium">流量</th>
-                        <th className="px-4 py-3 font-medium">心跳</th>
-                        <th className="py-3 pr-5 pl-2 font-medium" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {list.map((a) => (
-                        <NodeRow
-                          key={a.id}
-                          node={a}
-                          onEdit={() => setEditor({ mode: "edit", node: a })}
-                          onDelete={() => setPendingDelete(a)}
-                          onRotate={() => setPendingRotate(a)}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
               </div>
               <Pager
                 page={pageData.page}
@@ -398,114 +398,40 @@ function statusLabel(status: Node["status"]) {
   return status === "online" ? "在线" : status === "revoked" ? "已吊销" : "离线";
 }
 
-function trafficLine(node: Node) {
-  const total = formatBytes(node.bytesIn + node.bytesOut);
-  const rate = (node.bpsIn ?? 0) + (node.bpsOut ?? 0);
-  return rate > 0 ? `${total} · ${formatBps(rate)}` : total;
-}
-
-function tokenPolicyLine(node: Node) {
-  if (node.status === "revoked") return null;
-  if (node.tokenNoExpiry) return "凭证永不过期";
-  if (node.tokenExpiresAt) return `凭证 ${formatRelative(node.tokenExpiresAt)} 到期`;
-  return null;
-}
-
 function NodeCard({
   node,
+  attention,
   onEdit,
   onDelete,
   onRotate,
 }: {
   node: Node;
+  attention?: number;
   onEdit: () => void;
   onDelete: () => void;
   onRotate: () => void;
 }) {
-  const tokenLine = tokenPolicyLine(node);
   return (
-    <article className="rounded-xl bg-card p-4 shadow-border">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate font-medium">{node.name}</p>
-          <p className="mt-0.5 text-xs text-stone">{platformLabel(node.os, node.arch)}</p>
-          {node.comment ? <p className="mt-0.5 text-xs text-stone">{node.comment}</p> : null}
-        </div>
+    <article className="node-directory-row" role="listitem">
+      <Link
+        to="/nodes/$nodeId"
+        params={{ nodeId: node.id }}
+        className="node-directory-link"
+        aria-label={`打开 ${node.name} 的服务`}
+      >
+        <span className="node-directory-identity">
+          <strong>{node.name}</strong>
+          <small>{node.comment || node.addr || platformLabel(node.os, node.arch)}</small>
+        </span>
         <StatusDot status={node.status} label={statusLabel(node.status)} />
-      </div>
-      <p className="mt-3 font-mono text-xs text-ink-soft">
-        {node.addr ?? "未连接"} ·{" "}
-        <Link to="/mappings" search={{ node: node.id }} className="hover:text-ink">
-          {node.mappingCount} 服务
-        </Link>{" "}
-        · {trafficLine(node)}
-      </p>
-      <p className="mt-1 text-xs text-stone">
-        {formatRelative(node.lastSeen)}
-        {tokenLine ? ` · ${tokenLine}` : null}
-      </p>
-      <div className="mt-3 flex justify-end gap-1">
-        <NodeMappingsButton node={node} />
-        <NodeMenu node={node} onEdit={onEdit} onDelete={onDelete} onRotate={onRotate} />
-      </div>
-    </article>
-  );
-}
-
-function NodeRow({
-  node,
-  onEdit,
-  onDelete,
-  onRotate,
-}: {
-  node: Node;
-  onEdit: () => void;
-  onDelete: () => void;
-  onRotate: () => void;
-}) {
-  const tokenLine = tokenPolicyLine(node);
-  return (
-    <tr className="border-b border-line/70 last:border-0 hover:bg-paper-2/50">
-      <td className="px-4 py-3 align-middle">
-        <div className="truncate font-medium">{node.name}</div>
-        <div className="truncate text-xs text-stone">{platformLabel(node.os, node.arch)}</div>
-        {node.comment ? <div className="truncate text-xs text-stone">{node.comment}</div> : null}
-      </td>
-      <td className="truncate px-4 py-3 align-middle">
-        <StatusDot status={node.status} label={statusLabel(node.status)} />
-      </td>
-      <td className="truncate px-4 py-3 align-middle font-mono text-xs whitespace-nowrap text-ink-soft">
-        {node.addr ?? "—"}
-      </td>
-      <td className="px-4 py-3 align-middle font-mono tabular-nums">
-        <Link to="/mappings" search={{ node: node.id }} className="hover:text-pine">
-          {node.mappingCount}
-        </Link>
-      </td>
-      <td className="truncate px-4 py-3 align-middle font-mono text-xs tabular-nums whitespace-nowrap text-ink-soft">
-        {trafficLine(node)}
-      </td>
-      <td className="px-4 py-3 align-middle text-xs text-stone">
-        <div className="truncate whitespace-nowrap">{formatRelative(node.lastSeen)}</div>
-        {tokenLine ? <div className="truncate">{tokenLine}</div> : null}
-      </td>
-      <td className="py-3 pr-5 pl-2 align-middle text-right">
-        <div className="flex items-center justify-end gap-1">
-          <NodeMappingsButton node={node} />
-          <NodeMenu node={node} onEdit={onEdit} onDelete={onDelete} onRotate={onRotate} />
-        </div>
-      </td>
-    </tr>
-  );
-}
-
-function NodeMappingsButton({ node }: { node: Node }) {
-  return (
-    <Button asChild size="sm" variant="outline">
-      <Link to="/mappings" search={{ node: node.id }} aria-label={`查看 ${node.name} 的服务`}>
-        服务
+        <span className="node-directory-services">
+          <span>{node.mappingCount} 项服务</span>
+          {attention ? <small className="text-rose">{attention} 项需处理</small> : null}
+        </span>
+        <ArrowRight className="size-4 text-stone" />
       </Link>
-    </Button>
+      <NodeMenu node={node} onEdit={onEdit} onDelete={onDelete} onRotate={onRotate} />
+    </article>
   );
 }
 
@@ -708,6 +634,39 @@ function EditNodeForm({ node, onDone }: { node: Node; onDone: () => void }) {
         }}
       >
         <SheetBody className="flex flex-col gap-3">
+          <dl className="grid grid-cols-2 gap-3 rounded-lg bg-paper-2 p-3 text-xs">
+            <div>
+              <dt className="text-stone">节点状态</dt>
+              <dd className="mt-1">{statusLabel(node.status)}</dd>
+            </div>
+            <div>
+              <dt className="text-stone">最近心跳</dt>
+              <dd className="mt-1">{formatRelative(node.lastSeen)}</dd>
+            </div>
+            <div>
+              <dt className="text-stone">连接地址</dt>
+              <dd className="mt-1 break-all">{node.addr ?? "未连接"}</dd>
+            </div>
+            <div>
+              <dt className="text-stone">累计流量 / 当前速率</dt>
+              <dd className="mt-1">
+                {formatBytes(node.bytesIn + node.bytesOut)} /{" "}
+                {formatBps((node.bpsIn ?? 0) + (node.bpsOut ?? 0))}
+              </dd>
+            </div>
+            <div className="col-span-2">
+              <dt className="text-stone">凭证</dt>
+              <dd className="mt-1">
+                {node.status === "revoked"
+                  ? "已吊销"
+                  : node.tokenNoExpiry
+                    ? "永不过期"
+                    : node.tokenExpiresAt
+                      ? `${formatRelative(node.tokenExpiresAt)} 到期`
+                      : "未提供到期时间"}
+              </dd>
+            </div>
+          </dl>
           <TextField
             label="名称"
             required
@@ -830,7 +789,12 @@ function IssuedBody({ issued, onClose }: { issued: Issued; onClose: () => void }
         </p>
         {online ? (
           <Button asChild className="mt-3">
-            <Link to="/mappings" search={{ node: issued.id, create: true }} onClick={onClose}>
+            <Link
+              to="/nodes/$nodeId"
+              params={{ nodeId: issued.id }}
+              search={{ create: true }}
+              onClick={onClose}
+            >
               为此节点添加服务
             </Link>
           </Button>

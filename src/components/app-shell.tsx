@@ -12,8 +12,8 @@ import { formatBps } from "@/lib/umbra/format";
 import { useLiveStatus } from "@/lib/umbra/live";
 
 const nav = [
-  { to: "/mappings", label: "服务", icon: Layers, paths: ["/", "/mappings"] },
-  { to: "/nodes", label: "节点", icon: Radio, paths: ["/nodes"] },
+  { to: "/nodes", label: "节点", icon: Radio, paths: ["/", "/nodes"] },
+  { to: "/mappings", label: "全部服务", icon: Layers, paths: ["/mappings"] },
   { to: "/traffic", label: "观测", icon: Activity, paths: ["/traffic", "/audit"] },
   { to: "/deploy", label: "系统", icon: Settings2, paths: ["/deploy"] },
 ] as const;
@@ -21,12 +21,14 @@ const nav = [
 export function AppShell({
   title,
   workspace = false,
+  showTelemetry = true,
   description,
   action,
   children,
 }: {
   title: string;
   workspace?: boolean;
+  showTelemetry?: boolean;
   description?: string;
   action?: ReactNode;
   children: ReactNode;
@@ -65,7 +67,7 @@ export function AppShell({
               <p className="mt-1 hidden text-xs text-stone sm:block">{description}</p>
             ) : null}
           </div>
-          <LiveSummary />
+          {showTelemetry ? <LiveSummary /> : <div className="ml-auto" />}
           {action}
         </div>
       </div>
@@ -80,7 +82,7 @@ export function AppShell({
 
 function Brand() {
   return (
-    <Link to="/mappings" className="network-brand" aria-label="umbra">
+    <Link to="/nodes" className="network-brand" aria-label="umbra">
       <img
         src="/favicon.svg?v=umbra-eclipse-1"
         className="eclipse-mark"
@@ -146,7 +148,9 @@ function Nav({
   return (
     <nav aria-label="主导航" className={cn("network-nav", className)}>
       {nav.map((item) => {
-        const active = (item.paths as readonly string[]).includes(pathname);
+        const active =
+          (item.paths as readonly string[]).includes(pathname) ||
+          (item.to === "/nodes" && pathname.startsWith("/nodes/"));
         const Icon = item.icon;
         return (
           <Link

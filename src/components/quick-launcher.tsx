@@ -90,6 +90,20 @@ export function QuickLauncher() {
                   <ArrowUpRight />
                 </Command.Item>
               </Command.Group>
+              <Command.Group heading="节点">
+                {nodes.data?.map((node) => (
+                  <Command.Item
+                    key={node.id}
+                    value={`节点 ${node.name} ${node.addr ?? ""} ${node.comment ?? ""} ${node.id}`}
+                    onSelect={() => go("/mappings", { node: node.id })}
+                  >
+                    <Radio />
+                    <span className="min-w-0 flex-1 truncate">{node.name}</span>
+                    <span className="text-xs text-stone">{node.mappingCount} 项服务</span>
+                    <ArrowUpRight />
+                  </Command.Item>
+                ))}
+              </Command.Group>
               <Command.Group heading="服务">
                 {mappings.isPending ? (
                   <p className="p-4 text-xs text-stone" role="status">
@@ -105,7 +119,7 @@ export function QuickLauncher() {
                   <Command.Item
                     key={m.id}
                     value={`${m.name} ${m.nodeName} ${m.localHost} ${m.localPort} ${m.proto} ${m.id}`}
-                    onSelect={() => go("/mappings", { service: m.id })}
+                    onSelect={() => go("/mappings", { node: m.nodeId, service: m.id })}
                   >
                     <span className="quick-service-icon">{m.proto.toUpperCase()}</span>
                     <span className="min-w-0 flex-1">

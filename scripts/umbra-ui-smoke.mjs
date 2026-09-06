@@ -13,12 +13,12 @@ const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 try {
   await page.goto(base, { waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: "服务", exact: true, level: 1 }).waitFor();
-  assert.equal(new URL(page.url()).pathname, "/mappings");
+  await page.getByRole("heading", { name: "节点", exact: true, level: 1 }).waitFor();
+  assert.equal(new URL(page.url()).pathname, "/nodes");
   assert.equal(new URL(page.url()).searchParams.has("node"), false);
   for (const [path, title] of [
     ["/nodes", "节点"],
-    ["/mappings", "服务"],
+    ["/mappings", "全部服务"],
     ["/traffic", "观测"],
     ["/audit", "观测"],
     ["/deploy", "系统"],
@@ -50,21 +50,26 @@ try {
     // Keep this UI smoke read-only: submitting may expose a real target.
     await page.getByRole("button", { name: "取消", exact: true }).click();
   }
-  const endpoints = page.locator(".endpoint-select");
-  if ((await endpoints.count()) > 1) {
-    await endpoints.nth(0).click();
-    const initialTitle = await page
-      .getByRole("dialog")
-      .getByRole("heading", { level: 2 })
-      .innerText();
-    await endpoints.nth(1).click();
-    await page.getByRole("dialog").waitFor();
-    assert.equal(await page.locator("[data-workspace-inspector='true']").count(), 1);
-    await page.getByRole("button", { name: "紧凑布局", exact: true }).click();
-    assert.equal(await page.getByRole("dialog").isVisible(), true);
-    assert.ok(initialTitle.length > 0);
-    await page.getByRole("button", { name: "关闭", exact: true }).click();
-    await page.getByRole("button", { name: "网络布局", exact: true }).click();
+  // Node navigation establishes a scope; clearing service filters must preserve it.
+  await page.goto(base + "/nodes", { waitUntil: "domcontentloaded" });
+  const nodeLinks = page.getByRole("link", { name: /^打开 .+ 的服务$/ });
+  if (nodes.length) {
+    await nodeLinks.first().waitFor();
+    await nodeLinks.first().click();
+    const scopedPath = new URL(page.url()).pathname;
+    assert.ok(scopedPath.startsWith("/nodes/"));
+    await page.getByRole("textbox", { name: "搜索服务", exact: true }).fill("no-service-qa-result");
+    await page.getByRole("button", { name: "清除筛选", exact: true }).first().click();
+    assert.equal(new URL(page.url()).pathname, scopedPath);
+    const endpoints = page.locator(".service-directory-select");
+    if (await endpoints.count()) {
+      await endpoints.first().click();
+      await page.getByRole("dialog").waitFor();
+      await page.getByRole("button", { name: "关闭", exact: true }).click();
+      assert.equal(new URL(page.url()).pathname, scopedPath);
+    }
+    await page.getByRole("link", { name: "返回节点", exact: true }).click();
+    assert.equal(new URL(page.url()).pathname, "/nodes");
   }
   await page.screenshot({ path: join(output, "desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -80,7 +85,7 @@ try {
   await page.screenshot({ path: join(output, "mobile.png"), fullPage: true });
   assert.deepEqual(errors, []);
   console.log(
-    `PASS: service home, routes, appearance, private create defaults and mobile navigation. Screenshots: ${output}`,
+    `PASS: node home, routes, appearance, private create defaults and mobile navigation. Screenshots: ${output}`,
   );
 } finally {
   await browser.close();

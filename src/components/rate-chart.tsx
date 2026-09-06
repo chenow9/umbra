@@ -125,9 +125,8 @@ export function RateChart({
   const elRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
 
-  const hasBytes = data.some((p) => p.bytesIn > 0 || p.bytesOut > 0);
   const waitingRate = kind === "rate" && inn.length === 0;
-  const showChart = hasBytes && !waitingRate && data.length > 0;
+  const showChart = !waitingRate && data.length > 0;
 
   const option = useMemo<ECOption>(() => {
     const span = trafficRangeMs(range);
@@ -249,7 +248,7 @@ export function RateChart({
           className="absolute inset-0"
           style={{ visibility: showChart && !loading && !error ? "visible" : "hidden" }}
           role="img"
-          aria-label={kind === "rate" ? "实时速率" : "累计流量"}
+          aria-label={kind === "rate" ? "速率趋势" : "历史累计流量"}
         />
         {!showChart || loading || error ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-sm text-stone">
@@ -258,11 +257,11 @@ export function RateChart({
                 ? "流量读取失败，请重试。"
                 : loading
                   ? "正在读取流量…"
-                  : waitingRate && hasBytes
+                  : waitingRate && data.length > 0
                     ? "再等一个采样即可画出速率。"
                     : kind === "rate"
-                      ? "还没有流量。有数据后这里显示实时速率。"
-                      : "还没有流量。映射在线后会在这里累计。"}
+                      ? "还没有采样数据，收到采样后显示速率趋势。"
+                      : "还没有采样数据，收到采样后显示累计流量。"}
             </span>
             {!loading && !error ? emptyAction : null}
           </div>

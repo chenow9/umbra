@@ -3,7 +3,7 @@
 import { ArrowUpRight } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Mapping } from "@/lib/umbra/types";
-import { accessOptions, serviceState, targetAddress } from "@/lib/umbra/service";
+import { serviceState, targetAddress } from "@/lib/umbra/service";
 import { cn } from "@/lib/utils";
 
 export function ServiceList({
@@ -51,7 +51,6 @@ export function ServiceList({
                 <code title={targetAddress(m.localHost, m.localPort)}>
                   目标 {targetAddress(m.localHost, m.localPort)}
                 </code>
-                <small>{accessOptions.find((option) => option.mode === m.mode)?.label}</small>
               </span>
               <span className="service-directory-state" title={`${state.detail} ${state.next}`}>
                 <i className={`endpoint-dot tone-${state.tone}`} />

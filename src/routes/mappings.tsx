@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { MappingsPage } from "@/components/pages/mappings-page";
 
 export type MappingsSearch = {
@@ -13,5 +13,14 @@ export const Route = createFileRoute("/mappings")({
     create: raw.create === true || raw.create === "true" || raw.create === "1" ? true : undefined,
     node: typeof raw.node === "string" && raw.node.trim() ? raw.node.trim() : undefined,
   }),
+  beforeLoad: ({ search }) => {
+    if (search.node)
+      throw redirect({
+        to: "/nodes/$nodeId",
+        params: { nodeId: search.node },
+        search: { service: search.service, create: search.create },
+        replace: true,
+      });
+  },
   component: MappingsPage,
 });
