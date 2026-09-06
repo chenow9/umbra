@@ -17,14 +17,14 @@ func mappingReach(enabled bool, mode, listen, push, nodeStatus, listenErr string
 	if nodeStatus != "online" || push == "pending_offline" {
 		return "offline"
 	}
-	if mode == "visitor" {
-		if push == "acked" || push == "pending" {
-			return "visitor"
-		}
-		return "pending"
-	}
 	if push != "acked" {
 		return "pending"
+	}
+	if mode == "visitor" {
+		if maxConns > 0 && active >= maxConns {
+			return "full"
+		}
+		return "visitor"
 	}
 	if mode == "spa" && !granted {
 		return "closed"

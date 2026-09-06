@@ -7,11 +7,30 @@ import {
   groupMappings,
   mappingFacets,
   mergeNodeOptions,
+  nodeFacets,
   preferredNodeId,
   sortMappings,
 } from "./page.ts";
 import type { MappingGroup } from "./page.ts";
-import type { Mapping } from "./types.ts";
+import type { Mapping, Node } from "./types.ts";
+
+function node(partial: Partial<Node> & Pick<Node, "id" | "name">): Node {
+  return {
+    comment: "",
+    status: "offline",
+    addr: null,
+    version: null,
+    os: "linux",
+    arch: "amd64",
+    lastSeen: null,
+    enabled: true,
+    createdAt: "2026-08-28T00:00:00Z",
+    mappingCount: 0,
+    bytesIn: 0,
+    bytesOut: 0,
+    ...partial,
+  };
+}
 
 function mapping(partial: Partial<Mapping> & Pick<Mapping, "id" | "nodeId" | "nodeName">): Mapping {
   return {
@@ -86,6 +105,49 @@ describe("sortMappings", () => {
       sortMappings(rows).map((m) => m.id),
       ["public", "spa", "visitor"],
     );
+  });
+});
+
+describe("nodeFacets", () => {
+  const rows: Node[] = [
+    node({ id: "a", name: "studio", status: "online", os: "darwin" }),
+    node({ id: "b", name: "home-nas", status: "offline", os: "linux" }),
+    node({ id: "c", name: "edge-hk", status: "offline", os: "darwin" }),
+    node({ id: "d", name: "old-box", status: "revoked", os: "windows" }),
+    node({ id: "e", name: "mac-mini", status: "offline", os: "darwin" }),
+  ];
+
+  it("counts status and os independently", () => {
+    const facets = nodeFacets(rows);
+    assert.deepEqual(
+      facets.status.map((s) => [s.value, s.count]),
+      [
+        ["all", 5],
+        ["online", 1],
+        ["offline", 3],
+        ["revoked", 1],
+      ],
+    );
+    assert.deepEqual(
+      facets.os.map((o) => [o.value, o.count]),
+      [
+        ["linux", 1],
+        ["darwin", 3],
+        ["windows", 1],
+      ],
+    );
+  });
+
+  it("narrows status by search and os by the selected status", () => {
+    const bySearch = nodeFacets(rows, { q: "darwin" });
+    assert.equal(bySearch.status.find((s) => s.value === "all")?.count, 3);
+    assert.equal(bySearch.status.find((s) => s.value === "online")?.count, 1);
+    assert.equal(bySearch.os.find((o) => o.value === "darwin")?.count, 3);
+
+    const byStatus = nodeFacets(rows, { status: "offline" });
+    assert.equal(byStatus.os.find((o) => o.value === "darwin")?.count, 2);
+    assert.equal(byStatus.os.find((o) => o.value === "linux")?.count, 1);
+    assert.equal(byStatus.status.find((s) => s.value === "offline")?.count, 3);
   });
 });
 

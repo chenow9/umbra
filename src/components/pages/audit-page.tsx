@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { ObservabilityNav } from "@/components/observability-nav";
 import { AppShell } from "@/components/app-shell";
 import { SelectField } from "@/components/field";
 import { Input } from "@/components/ui/input";
@@ -46,7 +47,8 @@ export function AuditPage() {
   }, [audit.data, page]);
 
   return (
-    <AppShell title="审计">
+    <AppShell title="观测" description="查看服务流量与操作记录。">
+      <ObservabilityNav active="audit" />
       {empty ? (
         <p className="rounded-xl bg-card px-4 py-10 text-center text-sm text-stone shadow-border">
           还没有审计记录。

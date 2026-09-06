@@ -534,3 +534,13 @@ ${nodePlist(token).trim()}
   }
   return nodeWinService(token, arch);
 }
+
+/** Run a downloaded visitor binary and CA from the same directory, on any host OS. */
+export function portableVisitorCommand(command: string, platform: Platform, arch: Arch): string {
+  const binary = binaryName("umbra-visit", platform, arch);
+  const executable = platform === "windows" ? `.\\${binary}` : `./${binary}`;
+  const run = command
+    .replace(/^umbra-visit(?=\s)/, () => executable)
+    .replace(/--tls-ca \/etc\/umbra\/ca\.crt(?=\s|$)/, "--tls-ca ./ca.crt");
+  return platform === "windows" ? run : `chmod +x ./${binary}\n${run}`;
+}

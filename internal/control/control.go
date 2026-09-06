@@ -106,21 +106,22 @@ type nodeRec struct {
 }
 
 type mapRec struct {
-	Spec        wire.Mapping `json:"Spec"`
-	NodeID      string       `json:"NodeID"`
-	LegacyNode  string       `json:"AgentID,omitempty"`
-	ListenState string       `json:"ListenState"`
-	PushState   string       `json:"PushState"`
-	ListenError string       `json:"ListenError"`
-	BytesIn     int64        `json:"BytesIn"`
-	BytesOut    int64        `json:"BytesOut"`
-	Created     time.Time    `json:"Created"`
-	Updated     time.Time    `json:"Updated"`
-	LastProbe   *time.Time   `json:"LastProbe"`
-	LastPreview string       `json:"LastPreview"`
-	sessIn      int64        `json:"-"`
-	sessOut     int64        `json:"-"`
-	sessArmed   bool         `json:"-"`
+	Spec           wire.Mapping `json:"Spec"`
+	NodeID         string       `json:"NodeID"`
+	LegacyNode     string       `json:"AgentID,omitempty"`
+	ListenState    string       `json:"ListenState"`
+	PushState      string       `json:"PushState"`
+	ListenError    string       `json:"ListenError"`
+	BytesIn        int64        `json:"BytesIn"`
+	BytesOut       int64        `json:"BytesOut"`
+	Created        time.Time    `json:"Created"`
+	Updated        time.Time    `json:"Updated"`
+	LastProbe      *time.Time   `json:"LastProbe"`
+	LastPreview    string       `json:"LastPreview"`
+	LastProbeError string       `json:"LastProbeError,omitempty"`
+	sessIn         int64        `json:"-"`
+	sessOut        int64        `json:"-"`
+	sessArmed      bool         `json:"-"`
 }
 
 func (m *mapRec) absorbStats(in, out int64) (int64, int64) {

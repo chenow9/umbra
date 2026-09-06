@@ -287,6 +287,7 @@ func (c *Console) patchMapping(w http.ResponseWriter, r *http.Request) {
 	oldNode := m.NodeID
 	bumpGeneration(&next)
 	m.Spec = next
+	m.LastProbe, m.LastPreview, m.LastProbeError = nil, "", ""
 	m.NodeID = nodeID
 	m.Updated = time.Now()
 	c.logAudit("mapping.update", id, next.Name)

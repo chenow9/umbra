@@ -13,11 +13,17 @@ export function SheetContent({
   className,
   children,
   side = "left",
+  overlay = true,
   ...props
-}: ComponentProps<typeof DialogPrimitive.Content> & { side?: "left" | "right" }) {
+}: ComponentProps<typeof DialogPrimitive.Content> & {
+  side?: "left" | "right";
+  overlay?: boolean;
+}) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-ink/30 pointer-events-auto" />
+      {overlay ? (
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-ink/30 pointer-events-auto" />
+      ) : null}
       <DialogPrimitive.Content
         className={cn(
           "fixed inset-y-0 z-50 flex flex-col shadow-border pointer-events-auto",

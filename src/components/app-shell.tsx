@@ -1,38 +1,37 @@
 "use client";
 
 import { Link, Navigate, useRouterState } from "@tanstack/react-router";
-import { Activity, GitBranch, LayoutGrid, Menu, Radio, ScrollText, Server } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { Activity, Layers, Radio, Settings2 } from "lucide-react";
+import { type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { QuickLauncher } from "@/components/quick-launcher";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { getOwnerStatus, getOverview, logoutOwnerSession } from "@/lib/umbra/api";
 import { formatBps } from "@/lib/umbra/format";
 import { useLiveStatus } from "@/lib/umbra/live";
 
 const nav = [
-  { to: "/", label: "总览", icon: LayoutGrid },
-  { to: "/nodes", label: "节点", icon: Radio },
-  { to: "/mappings", label: "映射", icon: GitBranch },
-  { to: "/traffic", label: "流量", icon: Activity },
-  { to: "/audit", label: "审计", icon: ScrollText },
-  { to: "/deploy", label: "部署", icon: Server },
+  { to: "/mappings", label: "服务", icon: Layers, paths: ["/", "/mappings"] },
+  { to: "/nodes", label: "节点", icon: Radio, paths: ["/nodes"] },
+  { to: "/traffic", label: "观测", icon: Activity, paths: ["/traffic", "/audit"] },
+  { to: "/deploy", label: "系统", icon: Settings2, paths: ["/deploy"] },
 ] as const;
 
 export function AppShell({
   title,
+  workspace = false,
   description,
   action,
   children,
 }: {
   title: string;
+  workspace?: boolean;
   description?: string;
   action?: ReactNode;
   children: ReactNode;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const [open, setOpen] = useState(false);
   const owner = useQuery({ queryKey: ["umbra", "owner"], queryFn: () => getOwnerStatus() });
 
   if (owner.data?.required && !owner.data.signedIn) {
@@ -41,58 +40,55 @@ export function AppShell({
 
   return (
     <div className="min-h-screen bg-paper text-ink">
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-60 flex-col border-r border-line bg-paper-2/90 px-3 py-5 md:flex">
-        <Brand />
-        <LiveSummary />
-        <Nav pathname={pathname} className="mt-5" />
-      </aside>
-
-      <div className="md:pl-60">
-        <header className="sticky top-0 z-30 border-b border-line bg-paper/90 backdrop-blur-sm">
-          <div className="flex flex-wrap items-center gap-2 px-4 py-3 md:gap-3 md:px-8">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="md:hidden"
-              onClick={() => setOpen(true)}
-              aria-label="打开导航"
-            >
-              <Menu className="size-5" />
-            </Button>
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate text-lg font-medium tracking-tight text-ink">{title}</h1>
-              {description ? (
-                <p className="mt-0.5 hidden truncate text-xs text-stone sm:block">{description}</p>
-              ) : null}
-            </div>
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-card focus:p-3"
+      >
+        跳到主要内容
+      </a>
+      <header className="network-masthead">
+        <div className="network-masthead-inner">
+          <Brand />
+          <Nav pathname={pathname} className="desktop-navigation" />
+          <div className="ml-auto flex items-center gap-3">
+            <QuickLauncher />
             <LiveBadge />
             {owner.data?.required ? <SignOut /> : null}
-            {action}
           </div>
-        </header>
-
-        <main className="mx-auto w-full max-w-6xl px-4 py-6 pb-24 md:px-8 md:py-8">{children}</main>
-      </div>
-
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent>
-          <SheetTitle className="sr-only">主导航</SheetTitle>
-          <SheetDescription className="sr-only">
-            前往总览、节点、映射、流量、审计或部署页面。
-          </SheetDescription>
-          <Brand />
+        </div>
+      </header>
+      <div className="network-context">
+        <div className="network-context-inner">
+          <div className="min-w-0">
+            <h1 className="text-sm font-semibold">{title}</h1>
+            {description ? (
+              <p className="mt-1 hidden text-xs text-stone sm:block">{description}</p>
+            ) : null}
+          </div>
           <LiveSummary />
-          <Nav pathname={pathname} className="mt-5" onNavigate={() => setOpen(false)} />
-        </SheetContent>
-      </Sheet>
+          {action}
+        </div>
+      </div>
+      <SnapshotNotice />
+      <main id="main-content" className={cn("network-main", workspace && "network-main-workspace")}>
+        {children}
+      </main>
+      <Nav pathname={pathname} className="mobile-navigation" />
     </div>
   );
 }
 
 function Brand() {
   return (
-    <Link to="/" className="mb-4 flex items-baseline gap-2 px-2">
-      <span className="font-serif text-2xl tracking-tight text-ink italic">umbra</span>
+    <Link to="/mappings" className="network-brand" aria-label="umbra">
+      <img
+        src="/favicon.svg?v=umbra-eclipse-1"
+        className="eclipse-mark"
+        width={29}
+        height={29}
+        alt=""
+      />
+      <span>umbra</span>
     </Link>
   );
 }
@@ -101,40 +97,22 @@ function LiveSummary() {
   const overview = useQuery({ queryKey: ["umbra", "overview"], queryFn: () => getOverview() });
   const o = overview.data;
   return (
-    <div className="mx-1 rounded-lg bg-paper px-3 py-2.5 shadow-border">
-      <p className="text-xs tracking-wide text-stone uppercase">入口</p>
+    <div className="network-telemetry" aria-label="网络实时概况">
       {o ? (
         <>
-          <p className="mt-1 grid grid-cols-2 gap-x-2 font-mono text-sm tabular-nums text-ink">
-            <span className="min-w-0 truncate whitespace-nowrap">
-              {o.nodesOnline}/{o.nodesTotal} 在线
-            </span>
-            <span className="min-w-0 truncate whitespace-nowrap">
-              {o.mappingsActive}/{o.mappingsTotal} 映射
-            </span>
-          </p>
-          <p className="mt-0.5 grid grid-cols-2 gap-x-2 font-mono text-xs tabular-nums text-ink">
-            <span className="flex min-w-0 items-baseline gap-1">
-              <span className="shrink-0 text-live" aria-hidden>
-                ↓
-              </span>
-              <span className="truncate whitespace-nowrap">{formatBps(o.bpsIn)}</span>
-              <span className="sr-only">入站</span>
-            </span>
-            <span className="flex min-w-0 items-baseline gap-1">
-              <span className="shrink-0 text-amber" aria-hidden>
-                ↑
-              </span>
-              <span className="truncate whitespace-nowrap">{formatBps(o.bpsOut)}</span>
-              <span className="sr-only">出站</span>
-            </span>
-          </p>
+          <span>
+            <i className="telemetry-dot" />
+            {o.nodesOnline}/{o.nodesTotal} 节点在线
+          </span>
+          <span className="font-mono">
+            ↓ {formatBps(o.bpsIn)} <span className="sr-only">入站</span>
+          </span>
+          <span className="font-mono">
+            ↑ {formatBps(o.bpsOut)} <span className="sr-only">出站</span>
+          </span>
         </>
       ) : (
-        <>
-          <p className="mt-1 font-mono text-sm tabular-nums text-ink">—</p>
-          <p className="mt-0.5 font-mono text-xs tabular-nums text-stone">等待计数</p>
-        </>
+        <span>正在读取网络状态…</span>
       )}
     </div>
   );
@@ -151,7 +129,7 @@ function LiveBadge() {
       title={connected ? "流量与状态正在推送" : "实时通道未连接，显示上次快照"}
     >
       <span className={cn("size-1.5 rounded-full", connected ? "bg-pine live-dot" : "bg-stone")} />
-      {connected ? "实时" : "离线"}
+      {connected ? "实时更新" : "快照"}
     </span>
   );
 }
@@ -166,21 +144,17 @@ function Nav({
   className?: string;
 }) {
   return (
-    <nav aria-label="主导航" className={cn("flex flex-col gap-0.5", className)}>
+    <nav aria-label="主导航" className={cn("network-nav", className)}>
       {nav.map((item) => {
-        const active = pathname === item.to;
+        const active = (item.paths as readonly string[]).includes(pathname);
         const Icon = item.icon;
         return (
           <Link
             key={item.to}
             to={item.to}
+            aria-current={active ? "page" : undefined}
             onClick={onNavigate}
-            className={cn(
-              "flex h-11 items-center gap-2.5 rounded-md px-2.5 text-sm transition-[background-color,color,box-shadow] duration-150 ease-out",
-              active
-                ? "bg-paper text-ink shadow-border"
-                : "text-ink-soft hover:bg-paper/70 hover:text-ink",
-            )}
+            className={cn("network-nav-item", active && "is-active")}
           >
             <Icon className="size-4 opacity-70" />
             <span>{item.label}</span>
@@ -209,5 +183,18 @@ function SignOut() {
     >
       退出
     </Button>
+  );
+}
+
+function SnapshotNotice() {
+  const { connected } = useLiveStatus();
+  if (connected) return null;
+  return (
+    <p
+      role="status"
+      className="border-b border-line bg-paper-2 px-4 py-2 text-xs text-ink-soft md:px-8"
+    >
+      实时状态尚未连接，当前为上次快照。通道正在自动重连；操作前请确认最新状态。
+    </p>
   );
 }

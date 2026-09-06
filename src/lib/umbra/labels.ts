@@ -28,10 +28,10 @@ export const pushLabel: Record<string, string> = {
 };
 
 export const reachLabel: Record<string, string> = {
-  open: "外网可连",
+  open: "入口就绪",
   full: "连接已满",
-  closed: "未敲门",
-  visitor: "需签发",
+  closed: "等待放行",
+  visitor: "凭证访问",
   offline: "节点离线",
   pending: "等待确认",
   error: "无法开流",

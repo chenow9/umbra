@@ -1,3 +1,4 @@
+import type { ServiceInput } from "./service";
 import type {
   Node,
   AuditItem,
@@ -37,7 +38,8 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
-export type OwnerAuthNext = "setup_password" | "enroll_2fa" | "login" | "authenticated" | "save_recovery_codes";
+export type OwnerAuthNext =
+  "setup_password" | "enroll_2fa" | "login" | "authenticated" | "save_recovery_codes";
 
 export type OwnerStatus = {
   required: boolean;
@@ -63,7 +65,10 @@ export function getOwnerStatus() {
 }
 
 export function setupOwnerPassword({ data }: { data: { password: string } }) {
-  return api<{ ok: true; next: OwnerAuthNext }>("/v1/setup", { method: "POST", body: JSON.stringify(data) });
+  return api<{ ok: true; next: OwnerAuthNext }>("/v1/setup", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 }
 
 export function loginOwnerPassword({
@@ -71,7 +76,10 @@ export function loginOwnerPassword({
 }: {
   data: { password: string; totp?: string; recoveryCode?: string; migrationCode?: string };
 }) {
-  return api<{ ok: true; next: OwnerAuthNext }>("/v1/login", { method: "POST", body: JSON.stringify(data) });
+  return api<{ ok: true; next: OwnerAuthNext }>("/v1/login", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 }
 
 export function logoutOwnerSession() {
@@ -83,10 +91,13 @@ export function getTwoFactorEnrollment() {
 }
 
 export function confirmTwoFactorEnrollment({ data }: { data: { code: string } }) {
-  return api<{ ok: true; next: OwnerAuthNext; recoveryCodes: string[] }>("/v1/2fa/enrollment/confirm", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
+  return api<{ ok: true; next: OwnerAuthNext; recoveryCodes: string[] }>(
+    "/v1/2fa/enrollment/confirm",
+    {
+      method: "POST",
+      body: JSON.stringify(data),
+    },
+  );
 }
 
 export function replaceTwoFactor({
@@ -292,11 +303,11 @@ export function deleteNode({ data }: { data: { id: string; force?: boolean } }) 
   });
 }
 
-export function createMapping({ data }: { data: Record<string, unknown> }) {
+export function createMapping({ data }: { data: ServiceInput }) {
   return api<Mapping>("/v1/mappings", { method: "POST", body: JSON.stringify(data) });
 }
 
-export function updateMapping({ data }: { data: Record<string, unknown> & { id: string } }) {
+export function updateMapping({ data }: { data: ServiceInput & { id: string } }) {
   const { id, ...body } = data;
   return api<Mapping>(`/v1/mappings/${encodeURIComponent(id)}`, {
     method: "PATCH",

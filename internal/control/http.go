@@ -1127,9 +1127,15 @@ func (c *Console) postMapping(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	c.mu.Lock()
-	if c.nodes[b.NodeID] == nil {
+	node := c.nodes[b.NodeID]
+	if node == nil {
 		c.mu.Unlock()
 		writeErr(w, 404, "节点不存在")
+		return
+	}
+	if node.Status == "revoked" || !node.Enabled {
+		c.mu.Unlock()
+		writeErr(w, 400, "节点已吊销")
 		return
 	}
 	if err := c.portTaken(id, spec); err != nil {
@@ -1137,7 +1143,8 @@ func (c *Console) postMapping(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	c.maps[id] = &mapRec{Spec: spec, NodeID: b.NodeID, ListenState: "pending", PushState: "pending_offline", Created: now, Updated: now}
+	m := &mapRec{Spec: spec, NodeID: b.NodeID, ListenState: "pending", PushState: "pending_offline", Created: now, Updated: now}
+	c.maps[id] = m
 	c.logAudit("mapping.create", id, spec.Name)
 	if err := c.save(); err != nil {
 		delete(c.maps, id)
@@ -1147,7 +1154,11 @@ func (c *Console) postMapping(w http.ResponseWriter, r *http.Request) {
 	}
 	c.mu.Unlock()
 	c.push(b.NodeID)
-	writeJSON(w, map[string]any{"id": id, "nodeId": b.NodeID, "name": spec.Name})
+	live, stats := c.live(), c.Gate.MappingStats()
+	c.mu.Lock()
+	view := c.mappingView(m, live, stats)
+	c.mu.Unlock()
+	writeJSON(w, view)
 }
 
 func (c *Console) postEnabled(w http.ResponseWriter, r *http.Request) {
@@ -1282,52 +1293,97 @@ func (c *Console) probe(w http.ResponseWriter, r *http.Request, visit bool) {
 	id := r.PathValue("id")
 	c.mu.Lock()
 	m := c.maps[id]
-	c.mu.Unlock()
 	if m == nil {
+		c.mu.Unlock()
 		writeErr(w, 404, "映射不存在")
 		return
 	}
-	payload := []byte("umbra-probe " + id + "\n")
-	if m.Spec.Mode == "spa" {
-		c.Gate.Knock(id, "127.0.0.1", policy.SPATimeout(m.Spec.SpaTTLSec))
-		time.Sleep(50 * time.Millisecond)
+	spec := m.Spec
+	c.mu.Unlock()
+	if !spec.Enabled {
+		writeErr(w, 400, "服务已停用，请先启用")
+		return
 	}
-	var preview string
-	var inN, outN int
-	if m.Spec.Mode == "visitor" || visit || m.Spec.EntryPort == nil {
-		reply, err := c.Gate.Probe(id, payload, 2*time.Second)
-		if err != nil {
-			writeErr(w, 400, err.Error())
+	finish := func(preview string, probeErr error) bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		current := c.maps[id]
+		// A result from an old target must not be attached to an edited service.
+		if current == nil || current.Spec.Generation != spec.Generation {
+			return false
+		}
+		now := time.Now()
+		current.LastProbe, current.LastPreview, current.LastProbeError = &now, preview, ""
+		detail := "收到目标响应"
+		if probeErr != nil {
+			current.LastProbeError = probeErr.Error()
+			detail = "未验证目标响应：" + probeErr.Error()
+		}
+		c.logAudit("mapping.probe", id, detail)
+		return true
+	}
+	fail := func(err error) {
+		if !finish("", err) {
+			writeErr(w, 409, "服务配置已改变，请重新探测")
 			return
 		}
-		preview = string(reply)
-		inN, outN = len(reply), len(payload)
-	} else {
-		addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(*m.Spec.EntryPort))
-		network := "tcp"
-		if m.Spec.Proto == "udp" {
-			network = "udp"
-		}
-		conn, err := net.DialTimeout(network, addr, 2*time.Second)
+		writeErr(w, 400, "未验证目标响应："+err.Error())
+	}
+	payload := []byte("umbra-probe " + id + "\n")
+	if spec.Mode == "spa" {
+		c.Gate.Knock(id, "127.0.0.1", policy.SPATimeout(spec.SpaTTLSec))
+		time.Sleep(50 * time.Millisecond)
+	}
+	var reply []byte
+	outN := len(payload)
+	if spec.Mode == "visitor" || visit || spec.EntryPort == nil {
+		var err error
+		reply, err = c.Gate.Probe(id, payload, 2*time.Second)
 		if err != nil {
-			writeErr(w, 400, err.Error())
+			fail(err)
+			return
+		}
+	} else {
+		addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(*spec.EntryPort))
+		conn, err := net.DialTimeout(spec.Proto, addr, 2*time.Second)
+		if err != nil {
+			fail(err)
 			return
 		}
 		defer conn.Close()
-		_, _ = conn.Write(payload)
-		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			fail(err)
+			return
+		}
+		outN, err = conn.Write(payload)
+		if err != nil {
+			fail(err)
+			return
+		}
+		if outN != len(payload) {
+			fail(fmt.Errorf("探测数据未完整发送"))
+			return
+		}
 		buf := make([]byte, 256)
-		n, _ := conn.Read(buf)
-		preview = string(buf[:n])
-		inN, outN = n, len(payload)
+		n, readErr := conn.Read(buf)
+		if n == 0 {
+			if readErr == nil {
+				readErr = fmt.Errorf("目标未返回数据")
+			}
+			fail(readErr)
+			return
+		}
+		reply = buf[:n]
 	}
-	now := time.Now()
-	c.mu.Lock()
-	m.LastProbe = &now
-	m.LastPreview = preview
-	c.logAudit("mapping.probe", id, "")
-	c.mu.Unlock()
-	writeJSON(w, map[string]any{"bytesIn": inN, "bytesOut": outN, "preview": preview})
+	if len(reply) == 0 {
+		fail(fmt.Errorf("目标未返回数据"))
+		return
+	}
+	if !finish(string(reply), nil) {
+		writeErr(w, 409, "服务配置已改变，请重新探测")
+		return
+	}
+	writeJSON(w, map[string]any{"bytesIn": len(reply), "bytesOut": outN, "preview": string(reply)})
 }
 
 func (c *Console) postVisitor(w http.ResponseWriter, r *http.Request) {

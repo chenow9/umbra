@@ -100,11 +100,17 @@ export function RateChart({
   emptyAction,
   kind,
   range = "24h",
+  loading = false,
+  updating = false,
+  error = false,
 }: {
   data: TrafficPoint[];
   emptyAction?: ReactNode;
   kind: "rate" | "bytes";
   range?: TrafficRange;
+  loading?: boolean;
+  updating?: boolean;
+  error?: boolean;
 }) {
   useTheme();
   const live = cssVar("--live", "#1e7a45");
@@ -131,7 +137,7 @@ export function RateChart({
     return {
       useUTC: false,
       animation: !reduced,
-      animationDuration: 400,
+      animationDuration: 0,
       animationDurationUpdate: reduced ? 0 : 200,
       grid: { top: 12, right: 12, left: 4, bottom: 4, containLabel: true },
       tooltip: {
@@ -213,7 +219,6 @@ export function RateChart({
   }, [amber, card, formatTick, inn, ink, line, live, out, range, reduced, stone]);
 
   useEffect(() => {
-    if (!showChart) return;
     const el = elRef.current;
     if (!el) return;
     const chart = echarts.init(el);
@@ -225,41 +230,44 @@ export function RateChart({
       chart.dispose();
       chartRef.current = null;
     };
-  }, [showChart]);
+  }, []);
 
   useEffect(() => {
-    chartRef.current?.setOption(option, { notMerge: true });
-  }, [option, showChart]);
-
-  if (data.length === 0 || !hasBytes) {
-    return (
-      <div className="flex h-48 flex-col items-center justify-center gap-3 text-center text-sm text-stone">
-        <span>
-          {kind === "rate"
-            ? "还没有流量。有数据后这里显示实时速率。"
-            : "还没有流量。映射在线后会在这里累计。"}
-        </span>
-        {emptyAction}
-      </div>
-    );
-  }
-
-  if (waitingRate) {
-    return (
-      <div className="flex h-48 flex-col items-center justify-center gap-3 text-center text-sm text-stone">
-        <span>再等一个采样即可画出速率。</span>
-        {emptyAction}
-      </div>
-    );
-  }
+    // Keep the previous chart and axis together while the next range is loading.
+    if (!updating) chartRef.current?.setOption(option, { notMerge: true });
+  }, [option, updating]);
 
   return (
-    <div>
-      <div className="mb-2 flex items-center justify-end gap-3">
-        <Swatch color={live} label="入站" />
-        <Swatch color={amber} label="出站" />
+    <div aria-busy={loading || updating}>
+      <div className="mb-2 flex h-5 items-center justify-end gap-3">
+        <Swatch color="var(--live)" label="入站" />
+        <Swatch color="var(--amber)" label="出站" />
       </div>
-      <div ref={elRef} className="h-52 w-full" role="img" aria-label={kind === "rate" ? "实时速率" : "累计流量"} />
+      <div className="relative h-52 w-full">
+        <div
+          ref={elRef}
+          className="absolute inset-0"
+          style={{ visibility: showChart && !loading && !error ? "visible" : "hidden" }}
+          role="img"
+          aria-label={kind === "rate" ? "实时速率" : "累计流量"}
+        />
+        {!showChart || loading || error ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-sm text-stone">
+            <span>
+              {error
+                ? "流量读取失败，请重试。"
+                : loading
+                  ? "正在读取流量…"
+                  : waitingRate && hasBytes
+                    ? "再等一个采样即可画出速率。"
+                    : kind === "rate"
+                      ? "还没有流量。有数据后这里显示实时速率。"
+                      : "还没有流量。映射在线后会在这里累计。"}
+            </span>
+            {!loading && !error ? emptyAction : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

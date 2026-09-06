@@ -53,6 +53,11 @@ export type MappingFacets = {
   reaches: FacetOption[];
 };
 
+export type NodeFacets = {
+  status: FacetOption[];
+  os: FacetOption[];
+};
+
 export type AuditQuery = {
   q?: string;
   action?: string;
@@ -197,6 +202,30 @@ function orderedFacets(
     out.push({ value, label: labels[value] ?? value, hint: hints?.[value], count });
   }
   return out;
+}
+
+export function nodeFacets(rows: Node[], q: Pick<NodeQuery, "q" | "status" | "os"> = {}): NodeFacets {
+  const statusFilter = q.status && q.status !== "all" ? q.status : undefined;
+  const osFilter = q.os && q.os !== "all" ? q.os : undefined;
+  const searched = filterNodes(rows, { q: q.q, page: 1, size: Math.max(rows.length, 1) });
+  const statusPool = osFilter ? searched.filter((n) => n.os === osFilter) : searched;
+  const osPool = statusFilter ? searched.filter((n) => n.status === statusFilter) : searched;
+  const statusCount = (status?: NodeStatus) =>
+    status ? statusPool.filter((n) => n.status === status).length : statusPool.length;
+  const osCount = (os: string) => osPool.filter((n) => n.os === os).length;
+  return {
+    status: [
+      { value: "all", label: "全部", count: statusCount() },
+      { value: "online", label: "在线", count: statusCount("online"), status: "online" },
+      { value: "offline", label: "离线", count: statusCount("offline"), status: "offline" },
+      { value: "revoked", label: "已吊销", count: statusCount("revoked"), status: "revoked" },
+    ],
+    os: [
+      { value: "linux", label: "Linux", count: osCount("linux") },
+      { value: "darwin", label: "macOS", count: osCount("darwin") },
+      { value: "windows", label: "Windows", count: osCount("windows") },
+    ],
+  };
 }
 
 export function mappingFacets(rows: Mapping[]): MappingFacets {

@@ -1,7 +1,9 @@
 package control
 
 import (
+	"net"
 	"sort"
+	"strconv"
 	"time"
 
 	"umbra/internal/gate"
@@ -218,7 +220,7 @@ func (c *Console) mappingView(m *mapRec, live map[string]gateNode, stats map[str
 	return map[string]any{
 		"id": m.Spec.ID, "nodeId": m.NodeID, "nodeName": name, "nodeStatus": ast,
 		"name": m.Spec.Name, "proto": m.Spec.Proto, "mode": m.Spec.Mode,
-		"entryPort": port, "localHost": m.Spec.LocalHost, "localPort": m.Spec.LocalPort,
+		"entryAddress": serviceEntryAddress(c.Listen, m.Spec.Mode, m.Spec.EntryPort), "entryPort": port, "localHost": m.Spec.LocalHost, "localPort": m.Spec.LocalPort,
 		"enabled": m.Spec.Enabled, "listenState": listen, "listenError": nilIfEmpty(listenErr),
 		"pushState": push, "bytesIn": in, "bytesOut": outB, "activeConns": active,
 		"udpActive": udpActive, "udpDropMaxConns": dropMax, "udpDropPerIP": dropIP, "udpDropRate": dropRate,
@@ -232,7 +234,7 @@ func (c *Console) mappingView(m *mapRec, live map[string]gateNode, stats map[str
 		"tcpDropMaxConns": tcpMax, "tcpDropAcl": tcpACL, "tcpDropSpa": tcpSPA,
 		"tcpDropOffline": tcpOff, "tcpDropTunnel": tcpTun, "tcpDropSplice": tcpSplice,
 		"lastDrop": lastDrop, "lastDropAt": lastDropAt,
-		"lastProbeAt": rfc3339Ptr(m.LastProbe), "lastProbePreview": m.LastPreview, "grantUntil": grantUntil,
+		"lastProbeError": m.LastProbeError, "lastProbeAt": rfc3339Ptr(m.LastProbe), "lastProbePreview": m.LastPreview, "grantUntil": grantUntil,
 		"grantIP": grantIP, "grants": grantRows,
 		"maxConns": m.Spec.MaxConns, "rateKbps": m.Spec.RateKbps, "allowCidrs": m.Spec.AllowCidrs,
 		"idleTimeoutSec":    m.Spec.IdleTimeoutSec,
@@ -272,15 +274,9 @@ func (c *Console) overviewView(live map[string]gateNode, stats map[string]gate.M
 	maps := len(c.maps)
 	active := 0
 	for _, m := range c.maps {
-		if !m.Spec.Enabled {
-			continue
-		}
-		ast := "offline"
-		if a := c.nodes[m.NodeID]; a != nil {
-			st, _, _, _, _ := nodeRuntime(a, live)
-			ast = st
-		}
-		if ast == "online" {
+		view := c.mappingView(m, live, stats)
+		switch view["reach"] {
+		case "open", "closed", "visitor":
 			active++
 		}
 	}
@@ -415,4 +411,20 @@ func (c *Console) livePayload() map[string]any {
 		"mappings": c.mappingViews(live, stats),
 		"sample":   c.latestSample(),
 	}
+}
+
+// The management origin may be an SSH forward or reverse proxy. Only the
+// advertised tunnel hostname can supply a business entry address.
+func serviceEntryAddress(advertise, mode string, port *int) string {
+	if mode == "visitor" || port == nil {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(advertise)
+	if err != nil || host == "" {
+		return ""
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		return ""
+	}
+	return net.JoinHostPort(host, strconv.Itoa(*port))
 }

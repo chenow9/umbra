@@ -8,6 +8,7 @@ import {
   nodeEnrollLinuxCmd,
   nodeEnrollServiceCmd,
   nodeEnrollWindowsCmd,
+  portableVisitorCommand,
   shSingleQuote,
 } from "./units.ts";
 
@@ -108,4 +109,16 @@ describe("nodeEnrollWindowsCmd", () => {
     assert.match(cmd, /Start-Service -Name 'UmbraNode'/);
     assert.doesNotMatch(cmd, /sc\.exe create UmbraNode/);
   });
+});
+
+it("portable visitor commands preserve credentials and use a local CA on each OS", () => {
+  const command =
+    "umbra-visit --server gate.example.com:4400 --tls-ca /etc/umbra/ca.crt --ticket umbra_vis_test --local 127.0.0.1:2222";
+  const windows = portableVisitorCommand(command, "windows", "arm64");
+  assert.ok(windows.startsWith(".\\umbra-visit_windows_arm64.exe "));
+  assert.ok(windows.includes("--tls-ca ./ca.crt"));
+  assert.ok(windows.includes("--ticket umbra_vis_test"));
+  const mac = portableVisitorCommand(command, "darwin", "arm64");
+  assert.ok(mac.startsWith("chmod +x ./umbra-visit_darwin_arm64\n./umbra-visit_darwin_arm64 "));
+  assert.ok(mac.includes("--server gate.example.com:4400"));
 });

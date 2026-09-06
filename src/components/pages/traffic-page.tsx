@@ -3,8 +3,9 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { ObservabilityNav } from "@/components/observability-nav";
 import { AppShell } from "@/components/app-shell";
-import { FilterChips } from "@/components/filter-chips";
+import { ObservationScope } from "@/components/observation-scope";
 import { RateChart } from "@/components/rate-chart";
 import { Pager } from "@/components/ui/pager";
 import { Button } from "@/components/ui/button";
@@ -42,22 +43,19 @@ export function TrafficPage() {
           mappingId: mappingId || undefined,
         },
       }),
+    // Keep the current view during a time-range refresh, never across node/service scopes.
+    placeholderData: (previous, query) =>
+      query?.queryKey[3] === nodeId && query?.queryKey[4] === mappingId ? previous : undefined,
   });
 
   const t = traffic.data;
   const pageData = mappings.data ?? emptyPage<Mapping>(page);
   const filteredMaps = pageData.items;
-  const nodeChips = (nodes.data ?? []).map((a) => ({
-    value: a.id,
-    label: a.name,
-    count: (mappingOpts.data ?? []).filter((m) => m.nodeId === a.id).length,
-  }));
-
-  useEffect(() => {
-    setPage(1);
-  }, [nodeId]);
+  const scopeService = mappingOpts.data?.find((m) => m.id === mappingId);
+  const scopeNode = nodes.data?.find((node) => node.id === nodeId);
 
   function pickMapping(id: string) {
+    if (mappings.isPlaceholderData) return;
     setMappingId((cur) => (cur === id ? "" : id));
   }
   useEffect(() => {
@@ -67,66 +65,101 @@ export function TrafficPage() {
   }, [mappings.data, page]);
 
   return (
-    <AppShell title="流量">
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col gap-3">
-          <div
-            role="group"
-            aria-label="流量时间范围"
-            className="flex w-fit rounded-md bg-paper-2 p-0.5 shadow-border"
-          >
-            {(["1h", "24h", "7d"] as const).map((r) => (
-              <button
-                key={r}
-                type="button"
-                aria-pressed={range === r}
-                onClick={() => setRange(r)}
-                className={cn(
-                  "h-11 rounded-sm px-3 text-sm font-medium transition-colors duration-150",
-                  range === r ? "bg-paper text-ink" : "text-stone hover:text-ink",
-                )}
-              >
-                {r === "1h" ? "1 小时" : r === "24h" ? "24 小时" : "7 天"}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <FilterChips
-              label="节点"
-              value={nodeId || "all"}
-              onChange={(v) => {
-                setNodeId(v === "all" ? "" : v);
+    <AppShell title="观测" description="查看服务流量与操作记录。">
+      <ObservabilityNav
+        active="traffic"
+        actions={
+          <div className="observation-toolbar">
+            <ObservationScope
+              value={nodeId}
+              onChange={(id) => {
+                setNodeId(id);
                 setMappingId("");
+                setPage(1);
               }}
-              options={nodeChips}
+              nodes={nodes.data ?? []}
+              loading={nodes.isPending}
+              error={nodes.isError}
+              onRetry={() => {
+                void nodes.refetch();
+              }}
             />
-            {mappingId ? (
-              <Button type="button" size="sm" variant="ghost" onClick={() => setMappingId("")}>
-                取消选中映射
-              </Button>
-            ) : (
-              <p className="text-xs text-stone">点下面一行，只看那条映射的流量。</p>
-            )}
+            <div
+              role="group"
+              aria-label="流量时间范围"
+              className="flex w-fit rounded-md bg-paper-2 p-0.5 shadow-border"
+            >
+              {(["1h", "24h", "7d"] as const).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  aria-pressed={range === r}
+                  onClick={() => setRange(r)}
+                  className={cn(
+                    "h-11 rounded-sm px-3 text-sm font-medium transition-colors duration-150",
+                    range === r ? "bg-paper text-ink" : "text-stone hover:text-ink",
+                  )}
+                >
+                  {r === "1h" ? "1 小时" : r === "24h" ? "24 小时" : "7 天"}
+                </button>
+              ))}
+            </div>
           </div>
+        }
+      />
+      <div className="flex flex-col gap-6">
+        <div className="observation-scope-summary" aria-live="polite">
+          <p>
+            {scopeNode?.name ?? (nodeId ? "所选节点" : "全部节点")}
+            <span> / </span>
+            {mappingId ? (scopeService?.name ?? "所选服务") : "全部服务"}
+          </p>
+          <span className="observation-refresh" role="status">
+            {traffic.isFetching || mappings.isPlaceholderData ? "更新中…" : ""}
+          </span>
+          {mappingId ? (
+            <Button type="button" size="sm" variant="ghost" onClick={() => setMappingId("")}>
+              返回全部服务
+            </Button>
+          ) : (
+            <span>选择下方服务可进一步查看</span>
+          )}
         </div>
+        {traffic.isError ? (
+          <p role="alert" className="text-sm text-rose">
+            流量读取失败。
+            <button
+              className="ml-2 underline"
+              onClick={() => {
+                void traffic.refetch();
+              }}
+            >
+              重新加载
+            </button>
+          </p>
+        ) : null}
 
-        <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Mini label="入站累计" value={formatBytes(t?.bytesIn ?? 0)} />
-          <Mini label="出站累计" value={formatBytes(t?.bytesOut ?? 0)} />
+        <section
+          aria-label="流量指标"
+          aria-busy={traffic.isFetching}
+          className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+        >
+          <Mini label="入站累计" value={t ? formatBytes(t.bytesIn) : "—"} />
+          <Mini label="出站累计" value={t ? formatBytes(t.bytesOut) : "—"} />
           <Mini
             label="入站速率"
-            value={formatBps(t?.bpsIn ?? 0)}
+            value={t ? formatBps(t.bpsIn) : "—"}
             hint={(t?.peakBpsIn ?? 0) > 0 ? `峰值 ${formatBps(t?.peakBpsIn ?? 0)}` : undefined}
           />
           <Mini
             label="出站速率"
-            value={formatBps(t?.bpsOut ?? 0)}
+            value={t ? formatBps(t.bpsOut) : "—"}
             hint={(t?.peakBpsOut ?? 0) > 0 ? `峰值 ${formatBps(t?.peakBpsOut ?? 0)}` : undefined}
           />
         </section>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-xl bg-card p-4 shadow-border">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="min-w-0 rounded-xl bg-card p-4 shadow-border">
             <div className="mb-2 flex items-center justify-between gap-2">
               <p className="text-xs text-stone">实时速率</p>
               <LiveHint />
@@ -135,23 +168,33 @@ export function TrafficPage() {
               kind="rate"
               range={range}
               data={t?.series ?? []}
+              loading={traffic.isPending}
+              updating={traffic.isPlaceholderData}
+              error={traffic.isError}
               emptyAction={
                 <Button asChild size="sm" variant="outline">
-                  <Link to="/mappings">检查映射</Link>
+                  <Link to="/mappings">检查服务</Link>
                 </Button>
               }
             />
           </div>
-          <div className="rounded-xl bg-card p-4 shadow-border">
+          <div className="min-w-0 rounded-xl bg-card p-4 shadow-border">
             <p className="mb-2 text-xs text-stone">累计流量</p>
-            <RateChart kind="bytes" range={range} data={t?.series ?? []} />
+            <RateChart
+              kind="bytes"
+              range={range}
+              data={t?.series ?? []}
+              loading={traffic.isPending}
+              updating={traffic.isPlaceholderData}
+              error={traffic.isError}
+            />
           </div>
         </div>
 
         <div className="flex flex-col gap-3 md:hidden">
           {pageData.total === 0 ? (
             <p className="rounded-xl bg-card px-4 py-6 text-sm text-stone shadow-border">
-              暂无映射。
+              暂无服务。
             </p>
           ) : (
             filteredMaps.map((m) => (
@@ -204,7 +247,7 @@ export function TrafficPage() {
               </colgroup>
               <thead>
                 <tr className="border-b border-line text-xs text-stone">
-                  <th className="px-4 py-3 font-medium">映射</th>
+                  <th className="px-4 py-3 font-medium">服务</th>
                   <th className="px-4 py-3 font-medium">协议</th>
                   <th className="px-4 py-3 font-medium">节点</th>
                   <th className="px-4 py-3 font-medium">入站</th>
@@ -214,51 +257,51 @@ export function TrafficPage() {
                 </tr>
               </thead>
               <tbody>
-              {pageData.total === 0 ? (
-                <tr>
-                  <td className="px-4 py-6 text-stone" colSpan={7}>
-                    暂无映射。
-                  </td>
-                </tr>
-              ) : (
-                filteredMaps.map((m) => (
-                  <tr
-                    key={m.id}
-                    tabIndex={0}
-                    aria-selected={mappingId === m.id}
-                    className={cn(
-                      "cursor-pointer border-b border-line/70 last:border-0 hover:bg-paper-2/50",
-                      mappingId === m.id && "bg-paper-2",
-                    )}
-                    onClick={() => pickMapping(m.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        pickMapping(m.id);
-                      }
-                    }}
-                  >
-                    <td className="truncate px-4 py-3 font-medium">{m.name}</td>
-                    <td className="px-4 py-3 font-mono text-xs uppercase">{m.proto}</td>
-                    <td className="truncate px-4 py-3 text-ink-soft">{m.nodeName}</td>
-                    <td className="truncate px-4 py-3 font-mono text-xs tabular-nums whitespace-nowrap">
-                      {formatBytes(m.bytesIn)}
-                    </td>
-                    <td className="truncate px-4 py-3 font-mono text-xs tabular-nums whitespace-nowrap">
-                      {formatBytes(m.bytesOut)}
-                    </td>
-                    <td className="truncate px-4 py-3 font-mono text-xs tabular-nums whitespace-nowrap text-ink-soft">
-                      {formatBps((m.bpsIn ?? 0) + (m.bpsOut ?? 0))}
-                    </td>
-                    <td className="px-4 py-3 font-mono tabular-nums">
-                      <div className="whitespace-nowrap">
-                        {m.proto === "udp" ? (m.udpActive ?? m.activeConns) : m.activeConns}
-                      </div>
-                      <UdpDropNote mapping={m} block />
+                {pageData.total === 0 ? (
+                  <tr>
+                    <td className="px-4 py-6 text-stone" colSpan={7}>
+                      暂无服务。
                     </td>
                   </tr>
-                ))
-              )}
+                ) : (
+                  filteredMaps.map((m) => (
+                    <tr
+                      key={m.id}
+                      tabIndex={0}
+                      aria-selected={mappingId === m.id}
+                      className={cn(
+                        "cursor-pointer border-b border-line/70 last:border-0 hover:bg-paper-2/50",
+                        mappingId === m.id && "bg-paper-2",
+                      )}
+                      onClick={() => pickMapping(m.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          pickMapping(m.id);
+                        }
+                      }}
+                    >
+                      <td className="truncate px-4 py-3 font-medium">{m.name}</td>
+                      <td className="px-4 py-3 font-mono text-xs uppercase">{m.proto}</td>
+                      <td className="truncate px-4 py-3 text-ink-soft">{m.nodeName}</td>
+                      <td className="truncate px-4 py-3 font-mono text-xs tabular-nums whitespace-nowrap">
+                        {formatBytes(m.bytesIn)}
+                      </td>
+                      <td className="truncate px-4 py-3 font-mono text-xs tabular-nums whitespace-nowrap">
+                        {formatBytes(m.bytesOut)}
+                      </td>
+                      <td className="truncate px-4 py-3 font-mono text-xs tabular-nums whitespace-nowrap text-ink-soft">
+                        {formatBps((m.bpsIn ?? 0) + (m.bpsOut ?? 0))}
+                      </td>
+                      <td className="px-4 py-3 font-mono tabular-nums">
+                        <div className="whitespace-nowrap">
+                          {m.proto === "udp" ? (m.udpActive ?? m.activeConns) : m.activeConns}
+                        </div>
+                        <UdpDropNote mapping={m} block />
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -307,7 +350,7 @@ function Mini({ label, value, hint }: { label: string; value: string; hint?: str
     <div className="rounded-xl bg-card px-4 py-3 shadow-border">
       <p className="text-xs text-stone">{label}</p>
       <p className="mt-1 font-mono text-lg tabular-nums">{value}</p>
-      {hint ? <p className="mt-0.5 text-[11px] text-stone">{hint}</p> : null}
+      <p className="mt-0.5 h-4 text-[11px] leading-4 text-stone">{hint}</p>
     </div>
   );
 }

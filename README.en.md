@@ -24,6 +24,12 @@
 
 Umbra connects TCP and UDP services behind NAT or firewalls to a public gateway you control. Mappings, access modes, and CIDR rules are centrally managed on the server and pushed to online nodes. A node only stores the gateway address, its credential, and the trusted CA—not a local mapping file.
 
+## Service workspace
+
+The console opens on **Services** across all nodes. Add a service by choosing its target and access policy; advanced limits are optional. New services in the UI default to `visitor` (credential access). The API retains `public` when `mode` is omitted for compatibility with existing clients. Saving opens the service connection panel, where you can get an address or visitor command, manage that service’s tickets, and explicitly probe its target. Configuration readiness is not proof of target health or external reachability. A probe that receives no data reports an unverified response instead of success.
+
+Navigation is organized into Services, Nodes, Observability (traffic and audit), and System (security and appearance). Services open as a searchable list, with a node view for troubleshooting shared failures. Light and dark appearances share one CSS token source.
+
 ## Why Umbra
 
 - **Centralized management** — Manage nodes, mappings, access modes, ACLs, and credentials from one web console.
@@ -43,7 +49,7 @@ Umbra fits home labs, remote development, private services, game UDP, and tempor
 | `spa`     | The gateway listens on a service port; on Linux with nftables, unauthorized traffic is dropped in the kernel | An authenticated action temporarily authorizes a source IP; the default 60-second window affects new connections only | SSH, RDP, and administrative services where reduced scan exposure is useful     |
 | `visitor` | No public service port is opened for the mapping                                                             | A server-issued ticket (24 hours by default) lets `umbra-visit` open a local port on the client machine               | Private services that should not expose a public service port                   |
 
-> New mappings default to `public`. Choose `spa` for temporary source-IP authorization, or `visitor` for ticket-based access without a public service listener.
+> New console services default to `visitor`; API clients that omit `mode` retain the `public` default. Choose `spa` for temporary source-IP authorization, or `visitor` for ticket-based access without a public service listener.
 
 ## How it works
 
@@ -507,7 +513,7 @@ The public gate `/health` endpoint returns only the aggregate health state. Auth
 - The management endpoint defaults to `127.0.0.1`. Non-loopback binds require TLS. When using a reverse proxy, trust only proxy addresses you control and configure `-http-trust-proxy` as described in [Reverse proxies and client IP addresses](#reverse-proxies-and-client-ip-addresses).
 - Protect and back up the entire `-tls-dir`. It contains the CA private key, gateway certificate, administrator password hash, TOTP secret, node credentials, mappings, and traffic history. A leaked backup exposes the TOTP secret and enables offline password guessing; never commit or share it with an untrusted party.
 - TOTP substantially reduces risk from password leaks, credential stuffing, and ordinary brute force, but it does not stop a real-time phishing proxy. Verify the console hostname and TLS before entering a code.
-- New mappings default to `public`. Before Internet exposure, review the access mode, CIDR rules, target address, and the service's own authentication.
+- New console services default to `visitor`; API clients that omit `mode` retain the `public` default. Before Internet exposure, review the access mode, CIDR rules, target address, and the service's own authentication.
 
 ## Project and releases
 

@@ -34,6 +34,7 @@ export type Mapping = {
   proto: Proto;
   mode: MappingMode;
   entryPort: number | null;
+  entryAddress?: string;
   localHost: string;
   localPort: number;
   enabled: boolean;
@@ -73,6 +74,7 @@ export type Mapping = {
   lastDrop?: string;
   lastDropAt?: string;
   lastProbeAt: string | null;
+  lastProbeError?: string;
   lastProbePreview: string | null;
   grantUntil: string | null;
   grantIP?: string | null;
@@ -163,30 +165,11 @@ export type ProbeResult = {
   preview: string;
 };
 
-export type DemoResult = {
-  nodeId: string;
-  mappingId: string;
-  bytesIn: number;
-  bytesOut: number;
-  preview: string;
-  dropped: boolean;
-  udpBytesIn: number;
-  udpBytesOut: number;
-};
-
 export type VisitorIssued = {
   id: string;
   ticket: string;
   visitCmd: string;
   expiresAt: string;
-};
-
-export type NodeIssued = {
-  id: string;
-  token: string;
-  installCmd: string;
-  dockerCmd?: string;
-  unit: string;
 };
 
 export type TrafficSample = {

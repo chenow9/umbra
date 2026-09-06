@@ -3,10 +3,14 @@ import { MappingsPage } from "@/components/pages/mappings-page";
 
 export type MappingsSearch = {
   node?: string;
+  service?: string;
+  create?: boolean;
 };
 
 export const Route = createFileRoute("/mappings")({
   validateSearch: (raw: Record<string, unknown>): MappingsSearch => ({
+    service: typeof raw.service === "string" && raw.service.trim() ? raw.service.trim() : undefined,
+    create: raw.create === true || raw.create === "true" || raw.create === "1" ? true : undefined,
     node: typeof raw.node === "string" && raw.node.trim() ? raw.node.trim() : undefined,
   }),
   component: MappingsPage,

@@ -3,6 +3,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { StatusDot } from "@/components/status-dot";
@@ -27,7 +28,6 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { CheckField, TextAreaField, TextField, SelectField } from "@/components/field";
-import { FilterChips } from "@/components/filter-chips";
 import { Input } from "@/components/ui/input";
 import {
   caDownloadURL,
@@ -35,11 +35,13 @@ import {
   deleteNode,
   disconnectNode,
   queryNodes,
+  listNodes,
   rotateNodeToken,
   revokeNode,
   updateNode,
 } from "@/lib/umbra/api";
-import { emptyPage, PAGE_SIZE } from "@/lib/umbra/page";
+import { emptyPage, nodeFacets, PAGE_SIZE, type NodeFacets } from "@/lib/umbra/page";
+import { cn } from "@/lib/utils";
 import { Pager } from "@/components/ui/pager";
 import { formatBytes, formatBps, formatRelative } from "@/lib/umbra/format";
 import type { Node } from "@/lib/umbra/types";
@@ -86,6 +88,8 @@ export function NodesPage() {
     queryFn: () => queryNodes(query),
     placeholderData: keepPreviousData,
   });
+  const catalog = useQuery({ queryKey: ["umbra", "nodes"], queryFn: listNodes });
+  const facets = nodeFacets(catalog.data ?? [], { q, status, os });
   const [editor, setEditor] = useState<Editor | null>(null);
   const [issued, setIssued] = useState<Issued | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Node | null>(null);
@@ -136,6 +140,7 @@ export function NodesPage() {
 
   return (
     <AppShell
+      description="接入承载内网服务的机器，管理连接与凭证。"
       title="节点"
       action={
         empty ? null : (
@@ -149,52 +154,16 @@ export function NodesPage() {
         <EmptyNodes onCreate={() => setEditor({ mode: "create" })} />
       ) : (
         <>
-          <div className="mb-4 flex flex-col gap-3">
-            <Input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="搜索名称、备注、地址"
-              aria-label="搜索节点"
-              className="max-w-sm"
-            />
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <FilterChips
-                label="状态"
-                value={status}
-                onChange={setStatus}
-                always
-                options={[
-                  { value: "online", label: "在线" },
-                  { value: "offline", label: "离线" },
-                  { value: "revoked", label: "已吊销" },
-                ]}
-              />
-              <FilterChips
-                label="系统"
-                value={os}
-                onChange={setOs}
-                always
-                options={[
-                  { value: "linux", label: "Linux" },
-                  { value: "darwin", label: "macOS" },
-                  { value: "windows", label: "Windows" },
-                ]}
-              />
-              {status !== "all" || os !== "all" ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setStatus("all");
-                    setOs("all");
-                  }}
-                >
-                  清除
-                </Button>
-              ) : null}
-            </div>
-          </div>
+          <NodeFleetBar
+            q={q}
+            onQuery={setQ}
+            status={status}
+            os={os}
+            onStatus={setStatus}
+            onOs={setOs}
+            facets={facets}
+            loading={catalog.isPending}
+          />
 
           {pageData.total === 0 ? (
             <p className="rounded-xl bg-card px-4 py-8 text-center text-sm text-stone shadow-border">
@@ -230,7 +199,7 @@ export function NodesPage() {
                         <th className="px-4 py-3 font-medium">名称</th>
                         <th className="px-4 py-3 font-medium">状态</th>
                         <th className="px-4 py-3 font-medium">地址</th>
-                        <th className="px-4 py-3 font-medium">映射</th>
+                        <th className="px-4 py-3 font-medium">服务</th>
                         <th className="px-4 py-3 font-medium">流量</th>
                         <th className="px-4 py-3 font-medium">心跳</th>
                         <th className="py-3 pr-5 pl-2 font-medium" />
@@ -287,10 +256,10 @@ export function NodesPage() {
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        title={pendingDelete?.mappingCount ? "删除节点及其映射" : "删除节点"}
+        title={pendingDelete?.mappingCount ? "删除节点及其服务" : "删除节点"}
         description={
           pendingDelete?.mappingCount
-            ? `「${pendingDelete.name}」下还有 ${pendingDelete.mappingCount} 条映射，将一并删除并吊销凭证。`
+            ? `「${pendingDelete.name}」下还有 ${pendingDelete.mappingCount} 条服务，将一并删除并吊销凭证。`
             : `删除「${pendingDelete?.name ?? ""}」并吊销凭证。此操作不能恢复。`
         }
         confirmLabel="删除"
@@ -313,13 +282,107 @@ export function NodesPage() {
   );
 }
 
+function NodeFleetBar({
+  q,
+  onQuery,
+  status,
+  os,
+  onStatus,
+  onOs,
+  facets,
+  loading,
+}: {
+  q: string;
+  onQuery: (value: string) => void;
+  status: string;
+  os: string;
+  onStatus: (value: string) => void;
+  onOs: (value: string) => void;
+  facets: NodeFacets;
+  loading: boolean;
+}) {
+  const filtered = status !== "all" || os !== "all" || q.trim() !== "";
+  return (
+    <div className="mb-5 space-y-4">
+      <div className="workspace-view-row">
+        <div role="group" aria-label="节点状态" className="service-view-tabs">
+          {facets.status.map((item) => {
+            const selected = status === item.value;
+            return (
+              <button
+                key={item.value}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => onStatus(item.value === "all" || selected ? "all" : item.value)}
+                className={cn("service-view-tab", selected && "is-active")}
+              >
+                {item.status ? <i className={cn("node-signal", `is-${item.status}`)} /> : null}
+                <span>{item.label}</span>
+                <span
+                  className={cn(
+                    "service-tab-count",
+                    item.value === "revoked" && item.count > 0 && "text-rose",
+                  )}
+                >
+                  {loading ? "—" : item.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div role="group" aria-label="节点系统" className="node-os-switch">
+          {facets.os.map((item) => {
+            const selected = os === item.value;
+            return (
+              <button
+                key={item.value}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => onOs(selected ? "all" : item.value)}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="service-filter-bar">
+        <div className="relative min-w-48 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-3.5 size-4 text-stone" />
+          <Input
+            value={q}
+            onChange={(e) => onQuery(e.target.value)}
+            placeholder="搜索名称、备注、地址"
+            aria-label="搜索节点"
+            className="pl-9 bg-card"
+          />
+        </div>
+        {filtered ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              onQuery("");
+              onStatus("all");
+              onOs("all");
+            }}
+          >
+            清除筛选
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function EmptyNodes({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="mx-auto flex max-w-md flex-col items-start gap-5 py-8">
       <div>
         <h2 className="font-serif text-3xl italic tracking-tight text-ink">先登记一台节点</h2>
         <p className="mt-2 text-sm leading-relaxed text-ink-soft">
-          凭证只显示一次。之后映射都在服务端改，不用再登录那台机器。
+          凭证只显示一次。之后服务都在服务端改，不用再登录那台机器。
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
@@ -373,7 +436,7 @@ function NodeCard({
       <p className="mt-3 font-mono text-xs text-ink-soft">
         {node.addr ?? "未连接"} ·{" "}
         <Link to="/mappings" search={{ node: node.id }} className="hover:text-ink">
-          {node.mappingCount} 映射
+          {node.mappingCount} 服务
         </Link>{" "}
         · {trafficLine(node)}
       </p>
@@ -439,8 +502,8 @@ function NodeRow({
 function NodeMappingsButton({ node }: { node: Node }) {
   return (
     <Button asChild size="sm" variant="outline">
-      <Link to="/mappings" search={{ node: node.id }} aria-label={`查看 ${node.name} 的映射`}>
-        映射
+      <Link to="/mappings" search={{ node: node.id }} aria-label={`查看 ${node.name} 的服务`}>
+        服务
       </Link>
     </Button>
   );
@@ -461,7 +524,7 @@ function NodeMenu({
   const bye = useMutation({
     mutationFn: () => disconnectNode({ data: { id: node.id } }),
     onSuccess: () => {
-      toast.message("节点已离线，映射等待重连");
+      toast.message("节点已离线，服务等待重连");
       void qc.invalidateQueries({ queryKey: ["umbra"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -540,7 +603,7 @@ function CreateNodeForm({ onIssued }: { onIssued: (v: Issued) => void }) {
     <>
       <SheetHeader>
         <SheetTitle>登记节点</SheetTitle>
-        <SheetDescription>只生成凭证。不要在客户端写映射。</SheetDescription>
+        <SheetDescription>选择这台机器的平台，生成安装命令。上线后直接添加服务。</SheetDescription>
       </SheetHeader>
       <form
         className="flex min-h-0 flex-1 flex-col"
@@ -721,6 +784,8 @@ function defaultEnrollKind(os: Platform): "docker" | "bin" {
 }
 
 function IssuedBody({ issued, onClose }: { issued: Issued; onClose: () => void }) {
+  const liveNodes = useQuery({ queryKey: ["umbra", "nodes"], queryFn: listNodes });
+  const online = liveNodes.data?.find((node) => node.id === issued.id)?.status === "online";
   const [kind, setKind] = useState<"docker" | "bin">(defaultEnrollKind(issued.os));
   const [fetchedPem, setFetchedPem] = useState(issued.caPem ?? "");
   useEffect(() => {
@@ -754,6 +819,23 @@ function IssuedBody({ issued, onClose }: { issued: Issued; onClose: () => void }
 
   return (
     <>
+      <div role="status" className="mb-3 rounded-lg border border-line bg-paper-2 p-4">
+        <p className="text-sm font-medium">
+          {online ? "节点已上线，可以添加服务了" : "等待节点上线"}
+        </p>
+        <p className="mt-1 text-xs text-stone">
+          {online
+            ? "连接状态已自动确认，继续填写这台机器上的服务目标。"
+            : "在节点执行下方命令，状态会自动更新。"}
+        </p>
+        {online ? (
+          <Button asChild className="mt-3">
+            <Link to="/mappings" search={{ node: issued.id, create: true }} onClick={onClose}>
+              为此节点添加服务
+            </Link>
+          </Button>
+        ) : null}
+      </div>
       <div
         role="tablist"
         aria-label="安装方式"
@@ -816,7 +898,7 @@ function IssuedBody({ issued, onClose }: { issued: Issued; onClose: () => void }
 
       <p className="mt-2 text-xs leading-relaxed text-stone">
         {kind === "docker"
-          ? "host 网络让映射目标 127.0.0.1 指向节点本机。执行后回到节点列表等待心跳更新。"
+          ? "host 网络让服务目标 127.0.0.1 指向节点本机。执行后回到节点列表等待心跳更新。"
           : issued.os === "windows"
             ? "请把对应的二进制放在当前目录，并在管理员 PowerShell 中执行；终端关闭后服务仍会运行。"
             : "请把对应的二进制放在当前目录后执行；命令会请求管理员权限，终端关闭后服务仍会运行。"}
