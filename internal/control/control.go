@@ -289,6 +289,17 @@ func bumpGeneration(m *wire.Mapping) {
 	}
 }
 
+func (c *Console) recordSampleLocked(now time.Time) {
+	var in, out int64
+	by := map[string][2]int64{}
+	for id, rec := range c.maps {
+		in += rec.BytesIn
+		out += rec.BytesOut
+		by[id] = [2]int64{rec.BytesIn, rec.BytesOut}
+	}
+	c.samples = compactSamples(append(c.samples, sampleRec{Ts: now, In: in, Out: out, By: by}), now)
+}
+
 func (c *Console) sampleLoop() {
 	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
@@ -305,14 +316,7 @@ func (c *Console) sampleLoop() {
 		c.mu.Lock()
 		c.touchOnlineLocked(live, now)
 		c.absorbAllLocked(st)
-		var in, out int64
-		by := map[string][2]int64{}
-		for id, rec := range c.maps {
-			in += rec.BytesIn
-			out += rec.BytesOut
-			by[id] = [2]int64{rec.BytesIn, rec.BytesOut}
-		}
-		c.samples = compactSamples(append(c.samples, sampleRec{Ts: now, In: in, Out: out, By: by}), now)
+		c.recordSampleLocked(now)
 		n++
 		trafficRaw, trafficErr := encodeTrafficFile(c.samples, now)
 		saveCtrl := n%6 == 0

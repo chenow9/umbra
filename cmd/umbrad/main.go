@@ -278,6 +278,9 @@ func main() {
 		s.WaitIdle(3 * time.Second)
 		con.StopBackground()
 		con.FlushTraffic()
+		if err := con.PersistNow(); err != nil {
+			log.Printf("persist: %v", err)
+		}
 		st.Clear()
 		return
 	}

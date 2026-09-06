@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"umbra/internal/gate"
 )
 
 const (
@@ -183,10 +185,19 @@ func (c *Console) saveTrafficLocked() error {
 	return writeAtomic(path, raw, 0o600)
 }
 
-// FlushTraffic writes the in-memory traffic series to tls-dir/traffic.
+// FlushTraffic absorbs live mapping counters, records a final sample, and
+// writes tls-dir/traffic. Mapping totals still live in control.json; call
+// PersistNow afterwards so shutdown does not drop the last unsaved minute.
 func (c *Console) FlushTraffic() {
+	var st map[string]gate.MapStat
+	if c.Gate != nil {
+		st = c.Gate.MappingStats()
+	}
+	now := time.Now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.absorbAllLocked(st)
+	c.recordSampleLocked(now)
 	if err := c.saveTrafficLocked(); err != nil {
 		log.Printf("traffic: %v", err)
 	}

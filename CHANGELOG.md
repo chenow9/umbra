@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- 停机和热升级在刷新流量曲线后立即把累计流量写入控制数据，避免约 60 秒保存周期内尚未落盘的计数丢失
+
+- Persist cumulative traffic on shutdown and upgrade after flushing the series, so counters absorbed since the last ~60s control.json write are not dropped
+
 ## 0.1.5
 
 控制台强制 TOTP 双因素认证。

@@ -160,6 +160,65 @@ func TestBucketSamplesMinute(t *testing.T) {
 	}
 }
 
+func TestFlushPersistsUnsavedCumulativeTraffic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "control.json")
+	c1, err := New(gate.New("127.0.0.1", stealth.New(false)), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c1.mu.Lock()
+	c1.maps["map_a"] = &mapRec{
+		Spec: wire.Mapping{
+			ID: "map_a", Name: "a", Proto: "tcp", Mode: "visitor",
+			LocalHost: "127.0.0.1", LocalPort: 22,
+		},
+		NodeID: "n1",
+	}
+	if err := c1.save(); err != nil {
+		c1.mu.Unlock()
+		t.Fatal(err)
+	}
+	c1.maps["map_a"].BytesIn = 12345
+	c1.maps["map_a"].BytesOut = 6789
+	c1.mu.Unlock()
+
+	lost, err := New(gate.New("127.0.0.1", stealth.New(false)), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := lost.maps["map_a"]; m == nil || m.BytesIn != 0 || m.BytesOut != 0 {
+		t.Fatalf("unsaved counters should be zero after reload, got %+v", m)
+	}
+
+	c1.FlushTraffic()
+	if err := c1.PersistNow(); err != nil {
+		t.Fatal(err)
+	}
+
+	c2, err := New(gate.New("127.0.0.1", stealth.New(false)), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := c2.maps["map_a"]
+	if m == nil {
+		t.Fatal("mapping missing after flush")
+	}
+	if m.BytesIn != 12345 || m.BytesOut != 6789 {
+		t.Fatalf("counters %d/%d", m.BytesIn, m.BytesOut)
+	}
+	if len(c2.samples) == 0 {
+		t.Fatal("expected final traffic sample")
+	}
+	last := c2.samples[len(c2.samples)-1]
+	if last.In != 12345 || last.Out != 6789 {
+		t.Fatalf("sample %+v", last)
+	}
+	if last.By["map_a"] != [2]int64{12345, 6789} {
+		t.Fatalf("sample by %v", last.By)
+	}
+}
+
 func TestGetTrafficHonorsRange(t *testing.T) {
 	c, srv, _ := newTestConsole(t)
 	now := time.Now()
