@@ -300,7 +300,10 @@ try {
     "PASS: fresh unsaved traffic -> SIGTERM -> on-disk totals -> process restart -> counters and history retained",
   );
   await until(
-    async () => (await api("mappings")).every((m) => !m.enabled || m.pushState === "acked"),
+    async () =>
+      (await api("mappings"))
+        .filter((m) => m.nodeId === node.id)
+        .every((m) => !m.enabled || m.pushState === "acked"),
     "node reconnect after restart",
   );
   if (keep) {
