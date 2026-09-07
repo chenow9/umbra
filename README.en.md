@@ -526,6 +526,7 @@ The public gate `/health` endpoint returns only the aggregate health state. Auth
 ## Related Projects
 
 - [MoonProxy](https://github.com/MoonProxyHQ/moonproxy-desktop) — A cross-platform desktop GUI client for frp, built for non-technical users, with visual configuration and connection management. Works with an frps server.
+- [Lantunnel](https://github.com/lantunnel/lantunnel) — A P2P-first, end-to-end encrypted private networking tool written in Rust, with direct peer connections and encrypted relay fallback, without port forwarding.
 
 ## License
 

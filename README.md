@@ -520,6 +520,7 @@ UMBRA_UDP_READ_BUFFER=8388608 docker compose -f deploy/compose.gate.yml up -d
 ## 相关项目
 
 - [MoonProxy](https://github.com/MoonProxyHQ/moonproxy-desktop) — 面向非技术用户的跨平台 frp 桌面图形客户端，支持可视化配置和连接管理，配合 frps 服务端使用。
+- [Lantunnel](https://github.com/lantunnel/lantunnel) — 使用 Rust 编写的 P2P 优先、端到端加密私有组网工具；优先直连，无法直连时回退到加密中继，无需端口转发。
 
 ## 许可
 
