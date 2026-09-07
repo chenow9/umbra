@@ -1,10 +1,42 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
-- 停机和热升级在刷新流量曲线后立即把累计流量写入控制数据，避免约 60 秒保存周期内尚未落盘的计数丢失
+节点优先的控制台重构、完整认证入口与服务访问流程。
 
-- Persist cumulative traffic on shutdown and upgrade after flushing the series, so counters absorbed since the last ~60s control.json write are not dropped
+- 控制台以节点和服务为中心组织导航：首页进入节点列表，新增节点服务视图，流量与审计共享观测入口和筛选范围
+- 重构服务创建、编辑与连接流程；新建服务默认使用凭证访问，按访问方式提供连接信息、访问命令和票据管理
+- 统一桌面与手机布局、月食标识及明暗主题，新增快速查找；修复完整操作名称无法被搜索的问题
+- 新增中文 / English，默认跟随浏览器，手动选择后保存偏好；登录、首次设置、验证器绑定和恢复码页面统一视觉与文案，错误提示按认证状态本地化
+- 服务创建返回完整状态，并拒绝在已吊销节点上创建服务；就绪状态要求配置确认，入口地址使用网关公布地址
+- 探测必须收到目标响应才算成功，记录无响应等失败原因；禁止探测已停用服务，配置变更后不会误用旧目标的探测结果
+- 停机和热升级刷新流量曲线后立即保存累计流量，避免约 60 秒保存周期内尚未落盘的计数丢失
+- 移除失效的旧前端控制与转发实现，补充认证、控制台、服务流程、真实停机重启和跨版本升级回归
+- 完善可信反向代理部署说明，中英文 README 增加 MoonProxy 和 Lantunnel 相关项目
+
+A node-first console, a complete authentication entry, and clearer service access workflows.
+
+- Organize navigation around nodes and services: open the node list by default, add per-node service views, and share observation navigation and scope between traffic and audit
+- Rebuild service creation, editing, and connection flows; default new services to credential-based visitor access, with mode-specific connection details, commands, and ticket management
+- Unify desktop/mobile layouts, eclipse branding, and light/dark themes; add quick search and fix matching by the full visible action name
+- Add Chinese and English with browser-language defaults and saved preferences; refresh sign-in, setup, authenticator enrollment, and recovery-code screens with state-aware localized guidance
+- Return the full service view on creation and reject revoked nodes; require configuration acknowledgement for readiness and derive entry addresses from the advertised gateway address
+- Require a target response for a successful probe, record failure details, reject disabled services, and discard probe results from outdated configurations
+- Persist cumulative traffic immediately after flushing the series on shutdown and hot upgrade, retaining counters from the latest control-data save interval
+- Remove obsolete frontend control/forwarding implementations and add authentication, console, service, shutdown/restart, and cross-version regression coverage
+- Document trusted reverse proxies and add MoonProxy and Lantunnel to both READMEs
+
+### 升级说明 / Upgrade notes
+
+升级前备份完整 `tls-dir`（CA / 证书、`control.json`、`.prev`、`.tomb`、`traffic`），继续使用原目录。控制数据 schema 2、流量历史 schema 1 不变；已验证 v0.1.5 合成数据的升级和回退。TOTP 仍默认开启。跨版本试验未覆盖真实账户会话与 2FA 的端到端迁移，不代表支持任意旧版本回退。
+
+Back up the complete `tls-dir` and reuse it when upgrading. Control schema 2 and traffic schema 1 are unchanged; upgrade and rollback were checked with synthetic v0.1.5 data. TOTP remains enabled by default. The cross-version test does not establish end-to-end migration of real account sessions/2FA or rollback support for arbitrary older releases.
+
+### 验证说明 / Validation notes
+
+Go 全量测试、vet、race，94 项前端 TypeScript 测试，生产与跨平台构建，认证/控制台浏览器回归，转发/热升级 30 项，60 秒稳定性检查以及流量停机持久化检查通过。全仓 `npm test` 仍有 18 项与旧 main 一致的模板测试失败，构建前 lint 有 1 项相同的历史错误；不能视为所有检查全绿。详细范围见 [合并前回归报告](https://github.com/chenow9/umbra/blob/v0.2.0/docs/product-review/premerge-regression-2026-09-07.md)。
+
+Go tests, vet/race, all 94 frontend TypeScript tests, production/cross-platform builds, authentication/console browser checks, 30 forwarding/hot-upgrade checks, a 60-second stability run, and shutdown persistence checks passed. The full npm test command still has 18 template failures matching the previous main baseline, and pre-build lint has one matching historical error. See the linked regression report for coverage and limits.
 
 ## 0.1.5
 
