@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 const base = process.env.SMOKE_URL ?? "http://127.0.0.1:8080";
 const output = mkdtempSync(join(tmpdir(), "umbra-ui-smoke-"));
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, locale: "zh-CN" });
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 try {

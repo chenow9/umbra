@@ -76,7 +76,7 @@ export function QuickLauncher() {
   ];
   const hits = quickLaunchHits(query, mappings.data ?? [], nodes.data ?? []);
   const visibleActions = hits.searching
-    ? actions.filter((action) => queryWordsMatch(action.value, query))
+    ? actions.filter((action) => queryWordsMatch(`${action.label} ${action.value}`, query))
     : actions;
   return (
     <>

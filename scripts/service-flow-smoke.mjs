@@ -4,7 +4,7 @@
 // disposable gate until interrupted, for manual browser QA.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import net from "node:net";
@@ -248,6 +248,60 @@ try {
   );
   console.log(
     `PASS: node enrollment, TCP/UDP, three access modes, probe failure, scoped ticket lifecycle, enable/disable/delete and embedded routes.\nPreview: ${base}\nEvidence: ${join(dir, "result.json")}`,
+  );
+  // Generate fresh traffic after all config writes; no save mutation before SIGTERM.
+  const target = services.find((m) => m.mode === "public");
+  const beforeSaved = JSON.parse(readFileSync(join(dir, "control.json"), "utf8")).payload.maps.find(
+    (m) => m.Spec.id === target.id || m.Spec.ID === target.id,
+  );
+  for (let i = 0; i < 15; i++) await api(`mappings/${target.id}/probe`, {});
+  const beforeStop = (await api("mappings")).find((m) => m.id === target.id);
+  assert.ok(beforeSaved, "saved mapping found");
+  assert.ok(beforeStop.bytesIn > beforeSaved.BytesIn, "fixture has unsaved inbound traffic");
+  const gate = children[0];
+  gate.kill("SIGTERM");
+  await until(() => gate.exitCode !== null || gate.signalCode !== null, "graceful shutdown");
+  const saved = JSON.parse(readFileSync(join(dir, "control.json"), "utf8")).payload.maps.find(
+    (m) => m.Spec.id === target.id || m.Spec.ID === target.id,
+  );
+  assert.ok(
+    saved.BytesIn >= beforeStop.bytesIn && saved.BytesOut >= beforeStop.bytesOut,
+    "shutdown saved fresh totals",
+  );
+  start(
+    join(dir, "umbrad"),
+    [
+      "-listen",
+      `127.0.0.1:${tunnelPort}`,
+      "-advertise",
+      `127.0.0.1:${tunnelPort}`,
+      "-http",
+      `127.0.0.1:${httpPort}`,
+      "-bind",
+      "127.0.0.1",
+      "-tls-dir",
+      dir,
+      "-stealth",
+      "off",
+    ],
+    { UMBRA_LOGIN: "off", UMBRA_UI_UPSTREAM: "", GROK_AGENT: "", GROK_PROJECT_ID: "" },
+  );
+  await until(async () => (await fetch(`${base}/health`)).ok, "restart");
+  const restored = (await api("mappings")).find((m) => m.id === target.id);
+  assert.ok(
+    restored.bytesIn >= beforeStop.bytesIn && restored.bytesOut >= beforeStop.bytesOut,
+    "restart retains totals",
+  );
+  assert.ok(
+    (await api(`traffic?range=1h&mappingId=${target.id}`)).series.length > 0,
+    "restart retains history",
+  );
+  console.log(
+    "PASS: fresh unsaved traffic -> SIGTERM -> on-disk totals -> process restart -> counters and history retained",
+  );
+  await until(
+    async () => (await api("mappings")).every((m) => !m.enabled || m.pushState === "acked"),
+    "node reconnect after restart",
   );
   if (keep) {
     console.log("Disposable loopback QA instance retained; press Ctrl-C to stop.");
