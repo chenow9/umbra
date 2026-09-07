@@ -12,6 +12,16 @@ import type {
 } from "./types";
 import type { ListPage } from "./page";
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const r = await fetch(path, {
     credentials: "include",
@@ -33,7 +43,7 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (!r.ok) {
     const err = data as { error?: string };
-    throw new Error(err?.error || text || r.statusText);
+    throw new ApiError(err?.error || text || r.statusText, r.status);
   }
   return data as T;
 }

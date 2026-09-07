@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useI18n } from "@/lib/i18n";
+import { authErrorMessage } from "@/lib/umbra/auth-error";
 import {
   changeOwnerPassword,
   confirmTwoFactorEnrollment,
@@ -33,12 +34,20 @@ export function AuthPanel() {
         {s.twoFactorRequired ? t("auth.required") : t("auth.optional")}
       </p>
       {s.twoFactorConfigured ? (
-        <p className="mt-2 text-sm text-ink">{t("auth.remaining", { n: s.recoveryRemaining ?? 0 })}</p>
+        <p className="mt-2 text-sm text-ink">
+          {t("auth.remaining", { n: s.recoveryRemaining ?? 0 })}
+        </p>
       ) : null}
       <div className="mt-4 grid gap-6 lg:grid-cols-2">
-        <PasswordForm needSecond={Boolean(s.twoFactorConfigured)} onDone={() => qc.invalidateQueries({ queryKey: ["umbra"] })} />
+        <PasswordForm
+          needSecond={Boolean(s.twoFactorConfigured)}
+          onDone={() => qc.invalidateQueries({ queryKey: ["umbra"] })}
+        />
         {s.twoFactorRequired && s.twoFactorConfigured ? (
-          <TwoFactorManage remaining={s.recoveryRemaining ?? 0} onDone={() => qc.invalidateQueries({ queryKey: ["umbra"] })} />
+          <TwoFactorManage
+            remaining={s.recoveryRemaining ?? 0}
+            onDone={() => qc.invalidateQueries({ queryKey: ["umbra"] })}
+          />
         ) : null}
       </div>
     </section>
@@ -62,7 +71,7 @@ function PasswordForm({ needSecond, onDone }: { needSecond: boolean; onDone: () 
       setTotp("");
       onDone();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(authErrorMessage(e, needSecond ? "totp" : "password")),
   });
   return (
     <form
@@ -75,11 +84,24 @@ function PasswordForm({ needSecond, onDone }: { needSecond: boolean; onDone: () 
       <h3 className="text-sm font-medium text-ink">{t("auth.changePassword")}</h3>
       <label className="flex flex-col gap-1.5">
         <Label>{t("auth.currentPassword")}</Label>
-        <Input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
+        <Input
+          type="password"
+          autoComplete="current-password"
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+          required
+        />
       </label>
       <label className="flex flex-col gap-1.5">
         <Label>{t("auth.newPassword")}</Label>
-        <Input type="password" autoComplete="new-password" minLength={8} value={next} onChange={(e) => setNext(e.target.value)} required />
+        <Input
+          type="password"
+          autoComplete="new-password"
+          minLength={8}
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+          required
+        />
       </label>
       {needSecond ? (
         <label className="flex flex-col gap-1.5">
@@ -118,7 +140,7 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
       toast.success(t("auth.codesReady"));
       onDone();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(authErrorMessage(e, "totp")),
   });
   const startReplace = useMutation({
     mutationFn: () => replaceTwoFactor({ data: { password, totp } }),
@@ -127,7 +149,7 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
       setEnroll(view);
       setCode("");
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(authErrorMessage(e, "totp")),
   });
   const confirm = useMutation({
     mutationFn: () => confirmTwoFactorEnrollment({ data: { code } }),
@@ -139,7 +161,7 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
       toast.success(t("auth.replaced"));
       onDone();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(authErrorMessage(e, "enrollment")),
   });
 
   if (codes) {
@@ -152,7 +174,12 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
           ))}
         </ul>
         <div className="mt-3 flex gap-2">
-          <Button type="button" size="sm" variant="outline" onClick={() => downloadRecoveryCodes(codes)}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => downloadRecoveryCodes(codes)}
+          >
             {t("common.download")}
           </Button>
           <Button
@@ -185,7 +212,11 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
       >
         <h3 className="text-sm font-medium text-ink">{t("auth.scanNew")}</h3>
         {enroll.qrPng ? (
-          <img alt={t("login.qrAlt")} className="size-36 rounded-md bg-white p-2" src={`data:image/png;base64,${enroll.qrPng}`} />
+          <img
+            alt={t("login.qrAlt")}
+            className="size-36 rounded-md bg-white p-2"
+            src={`data:image/png;base64,${enroll.qrPng}`}
+          />
         ) : null}
         <p className="break-all font-mono text-xs">{enroll.secret}</p>
         <Input
@@ -209,7 +240,13 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
       <p className="text-xs text-stone">{t("auth.manageHint", { n: remaining })}</p>
       <label className="flex flex-col gap-1.5">
         <Label>{t("login.password")}</Label>
-        <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <Input
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
       </label>
       <label className="flex flex-col gap-1.5">
         <Label>{t("auth.currentCode")}</Label>
@@ -223,10 +260,20 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
         />
       </label>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" disabled={regen.isPending} onClick={() => regen.mutate()}>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={regen.isPending}
+          onClick={() => regen.mutate()}
+        >
           {regen.isPending ? t("common.loading") : t("auth.regen")}
         </Button>
-        <Button type="button" variant="outline" disabled={startReplace.isPending} onClick={() => startReplace.mutate()}>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={startReplace.isPending}
+          onClick={() => startReplace.mutate()}
+        >
           {startReplace.isPending ? t("common.loading") : t("auth.replace")}
         </Button>
       </div>

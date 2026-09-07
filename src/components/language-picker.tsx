@@ -1,17 +1,17 @@
 "use client";
 
 import { useI18n } from "@/lib/i18n";
-import type { LocalePreference } from "@/lib/i18n";
+import type { Locale } from "@/lib/i18n";
+import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
-const OPTIONS: { id: LocalePreference; labelKey: string }[] = [
-  { id: "auto", labelKey: "locale.auto" },
+const OPTIONS: { id: Locale; labelKey: string }[] = [
   { id: "zh", labelKey: "locale.zh" },
   { id: "en", labelKey: "locale.en" },
 ];
 
 export function LanguagePicker() {
-  const { preference, setPreference, t } = useI18n();
+  const { locale, setPreference, t } = useI18n();
   return (
     <section className="flex flex-wrap items-center justify-between gap-4 rounded-xl bg-card p-5 shadow-border">
       <div>
@@ -23,12 +23,10 @@ export function LanguagePicker() {
           <button
             key={item.id}
             type="button"
-            aria-pressed={preference === item.id}
+            aria-pressed={locale === item.id}
             className={cn(
               "flex h-11 items-center gap-2 rounded-md border px-4 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine",
-              preference === item.id
-                ? "border-pine bg-paper-2 text-pine"
-                : "border-line text-ink-soft",
+              locale === item.id ? "border-pine bg-paper-2 text-pine" : "border-line text-ink-soft",
             )}
             onClick={() => setPreference(item.id)}
           >
@@ -37,5 +35,19 @@ export function LanguagePicker() {
         ))}
       </div>
     </section>
+  );
+}
+
+export function LanguageSelect() {
+  const { locale, setPreference, t } = useI18n();
+  return (
+    <Select
+      value={locale}
+      onValueChange={(value) => setPreference(value as Locale)}
+      options={OPTIONS.map((item) => ({ value: item.id, label: t(item.labelKey) }))}
+      aria-label={t("locale.group")}
+      triggerClassName="auth-language-control"
+      contentClassName="border border-line shadow-lg"
+    />
   );
 }

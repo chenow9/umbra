@@ -15,6 +15,7 @@ export function Select({
   id,
   "aria-label": ariaLabel,
   triggerClassName,
+  contentClassName,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -24,6 +25,7 @@ export function Select({
   id?: string;
   "aria-label"?: string;
   triggerClassName?: string;
+  contentClassName?: string;
 }) {
   const { t } = useI18n();
   return (
@@ -41,6 +43,7 @@ export function Select({
           "disabled:cursor-not-allowed disabled:opacity-50",
           "data-[placeholder]:text-stone",
           triggerClassName,
+          contentClassName,
         )}
       >
         <span className="min-w-0 flex-1 truncate">
@@ -58,6 +61,7 @@ export function Select({
             "z-[80] max-h-72 overflow-hidden rounded-md bg-card text-ink shadow-border",
             "min-w-[var(--radix-select-trigger-width)] w-max max-w-[min(20rem,calc(100vw-2rem))]",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
+            contentClassName,
           )}
         >
           <SelectPrimitive.Viewport className="p-1">
