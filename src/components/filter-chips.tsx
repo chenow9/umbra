@@ -2,6 +2,7 @@
 
 import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { statusText, useI18n } from "@/lib/i18n";
 import { filterNodeOptions } from "@/lib/umbra/page";
 import type { NodeStatus } from "@/lib/umbra/types";
 import { cn } from "@/lib/utils";
@@ -100,9 +101,9 @@ function nodeText(status?: NodeStatus) {
 }
 
 function nodeStatusLabel(status?: NodeStatus) {
-  if (status === "online") return "在线";
-  if (status === "revoked") return "已吊销";
-  if (status === "offline") return "离线";
+  if (status === "online" || status === "revoked" || status === "offline") {
+    return statusText(status);
+  }
   return "";
 }
 
@@ -110,18 +111,17 @@ function NodeMark({ status, className }: { status?: NodeStatus; className?: stri
   return <span className={cn("size-2.5 shrink-0 rounded-full", nodeTone(status), className)} />;
 }
 
-function groupNodes(nodes: NodeOption[]) {
-  const online = nodes.filter((n) => n.status === "online");
-  const offline = nodes.filter((n) => n.status === "offline");
-  const revoked = nodes.filter((n) => n.status === "revoked");
+function groupNodes(nodes: NodeOption[], online: string, offline: string, revoked: string) {
+  const on = nodes.filter((n) => n.status === "online");
+  const off = nodes.filter((n) => n.status === "offline");
+  const rev = nodes.filter((n) => n.status === "revoked");
   const rest = nodes.filter((n) => !n.status);
-  const groups = [
-    { label: "在线", items: online },
-    { label: "离线", items: offline },
-    { label: "已吊销", items: revoked },
+  return [
+    { label: online, items: on },
+    { label: offline, items: off },
+    { label: revoked, items: rev },
     { label: "", items: rest },
   ].filter((g) => g.items.length > 0);
-  return groups;
 }
 
 export function NodeSwitcher({
@@ -133,6 +133,7 @@ export function NodeSwitcher({
   onChange: (value: string) => void;
   options: NodeOption[];
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
@@ -141,7 +142,12 @@ export function NodeSwitcher({
   const total = options.reduce((n, o) => n + (o.count ?? 0), 0);
   const searchable = options.length > 6;
   const filtered = useMemo(() => filterNodeOptions(options, q), [options, q]);
-  const groups = groupNodes(filtered);
+  const groups = groupNodes(
+    filtered,
+    t("status.online"),
+    t("status.offline"),
+    t("status.revoked"),
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -174,7 +180,7 @@ export function NodeSwitcher({
     <div className="relative" ref={rootRef}>
       <button
         type="button"
-        aria-label="切换节点"
+        aria-label={t("switcher.label")}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
@@ -182,19 +188,24 @@ export function NodeSwitcher({
       >
         {current ? <NodeMark status={current.status} /> : null}
         <span className={cn("truncate font-medium", current ? nodeText(current.status) : "text-ink")}>
-          {current?.label ?? "全部节点"}
+          {current?.label ?? t("switcher.all")}
         </span>
         <span className="shrink-0 text-xs text-stone">
           {current
-            ? `${nodeStatusLabel(current.status)}${current.count != null ? ` · ${current.count} 条` : ""}`
-            : `${total} 条`}
+            ? current.count != null
+              ? t("switcher.statusCount", {
+                  status: nodeStatusLabel(current.status),
+                  n: current.count,
+                })
+              : nodeStatusLabel(current.status)
+            : t("switcher.count", { n: total })}
         </span>
         <ChevronDown className={cn("size-4 shrink-0 text-stone transition-transform", open && "rotate-180")} />
       </button>
       {open ? (
         <div
           role="listbox"
-          aria-label="节点"
+          aria-label={t("switcher.list")}
           className="absolute left-0 z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-lg bg-card p-2 shadow-border"
         >
           {searchable ? (
@@ -202,8 +213,8 @@ export function NodeSwitcher({
               autoFocus
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="搜索节点"
-              aria-label="搜索节点"
+              placeholder={t("switcher.search")}
+              aria-label={t("switcher.search")}
               className="mb-2 h-9"
             />
           ) : null}
@@ -219,12 +230,12 @@ export function NodeSwitcher({
                   value === "all" ? "bg-paper-2 text-ink" : "text-ink-soft hover:bg-paper-2 hover:text-ink",
                 )}
               >
-                <span>全部节点</span>
+                <span>{t("switcher.all")}</span>
                 <span className="font-mono text-xs tabular-nums text-stone">{total}</span>
               </button>
             ) : null}
             {filtered.length === 0 ? (
-              <p className="px-2.5 py-3 text-xs text-stone">没有匹配的节点。</p>
+              <p className="px-2.5 py-3 text-xs text-stone">{t("switcher.empty")}</p>
             ) : (
               groups.map((group) => (
                 <div key={group.label || "nodes"} className="mt-1">

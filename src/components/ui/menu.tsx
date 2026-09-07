@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/lib/i18n";
 
 export type MenuItem = {
   label: string;
@@ -14,7 +15,8 @@ export type MenuItem = {
   hidden?: boolean;
 };
 
-export function ActionMenu({ label = "更多操作", items }: { label?: string; items: MenuItem[] }) {
+export function ActionMenu({ label, items }: { label?: string; items: MenuItem[] }) {
+  const { t } = useI18n();
   const visible = items.filter((i) => !i.hidden);
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
@@ -85,7 +87,7 @@ export function ActionMenu({ label = "更多操作", items }: { label?: string; 
         size="icon"
         variant="ghost"
         className="size-8"
-        aria-label={label}
+        aria-label={label ?? t("common.moreActions")}
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={() => {

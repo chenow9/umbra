@@ -2,6 +2,7 @@ import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-r
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { AppProviders } from "@/components/app-providers";
+import { LOCALE_BOOT_SCRIPT, t } from "@/lib/i18n";
 import appCss from "../styles.css?url";
 
 const APP_NAME = "umbra";
@@ -15,7 +16,7 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#f3f6f8" },
       {
         name: "description",
-        content: "Umbra — 自托管内网服务访问网关。连接服务，管理访问权限，诊断连接链路。",
+        content: t("meta.description"),
       },
     ],
     links: [
@@ -41,6 +42,7 @@ export const Route = createRootRoute({
   component: () => (
     <html lang="zh-CN" className="antialiased" data-theme="yueying" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: LOCALE_BOOT_SCRIPT }} />
         <HeadContent />
       </head>
       <body className="min-h-screen bg-paper font-sans text-ink">

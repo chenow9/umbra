@@ -3,13 +3,14 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 import { NameDotHint } from "@/components/mode-name";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export function Select({
   value,
   onValueChange,
   options,
-  placeholder = "选择",
+  placeholder,
   disabled,
   id,
   "aria-label": ariaLabel,
@@ -24,6 +25,7 @@ export function Select({
   "aria-label"?: string;
   triggerClassName?: string;
 }) {
+  const { t } = useI18n();
   return (
     <SelectPrimitive.Root
       value={value || undefined}
@@ -42,7 +44,7 @@ export function Select({
         )}
       >
         <span className="min-w-0 flex-1 truncate">
-          <SelectPrimitive.Value placeholder={placeholder} />
+          <SelectPrimitive.Value placeholder={placeholder ?? t("common.select")} />
         </span>
         <SelectPrimitive.Icon asChild>
           <ChevronDown className="size-4 shrink-0 text-stone" />

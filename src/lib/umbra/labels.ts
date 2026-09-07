@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import type { MappingMode } from "./types";
 
 export const modeLabel: Record<MappingMode, string> = {
@@ -6,48 +7,94 @@ export const modeLabel: Record<MappingMode, string> = {
   visitor: "visitor",
 };
 
-export const modeHint: Record<MappingMode, string> = {
-  public: "公开访问",
-  spa: "敲门访问",
-  visitor: "加密隧道访问",
-};
+export function modeHint(): Record<MappingMode, string> {
+  return {
+    public: t("mode.public.hint"),
+    spa: t("mode.spa.hint"),
+    visitor: t("mode.visitor.hint"),
+  };
+}
 
-export const listenLabel: Record<string, string> = {
-  listening: "监听中",
-  ready: "就绪",
-  pending: "待推送",
-  disabled: "已停",
-  error: "失败",
-};
+export function listenLabel(): Record<string, string> {
+  return {
+    listening: t("listen.listening"),
+    ready: t("listen.ready"),
+    pending: t("listen.pending"),
+    disabled: t("listen.disabled"),
+    error: t("listen.error"),
+  };
+}
 
-export const pushLabel: Record<string, string> = {
-  acked: "已确认",
-  pending: "已下发",
-  pending_offline: "等待上线",
-  error: "下发失败",
-};
+export function pushLabel(): Record<string, string> {
+  return {
+    acked: t("push.acked"),
+    pending: t("push.pending"),
+    pending_offline: t("push.pending_offline"),
+    error: t("push.error"),
+  };
+}
 
-export const reachLabel: Record<string, string> = {
-  open: "入口就绪",
-  full: "连接已满",
-  closed: "等待放行",
-  visitor: "凭证访问",
-  offline: "节点离线",
-  pending: "等待确认",
-  error: "无法开流",
-  disabled: "已停用",
-};
+export function reachLabel(): Record<string, string> {
+  return {
+    open: t("reach.open"),
+    full: t("reach.full"),
+    closed: t("reach.closed"),
+    visitor: t("reach.visitor"),
+    offline: t("reach.offline"),
+    pending: t("reach.pending"),
+    error: t("reach.error"),
+    disabled: t("reach.disabled"),
+  };
+}
 
-export const dropReasonLabel: Record<string, string> = {
-  maxconns: "连接已满",
-  acl: "网段不允许",
-  spa: "未敲门",
-  offline: "当时节点离线",
-  splice: "入口配额已满",
-  tunnel: "隧道开流失败",
-  per_ip: "单 IP 流过多",
-  rate: "新建过快",
-};
+export function dropReasonLabel(): Record<string, string> {
+  return {
+    maxconns: t("drop.maxconns"),
+    acl: t("drop.acl"),
+    spa: t("drop.spa"),
+    offline: t("drop.offline"),
+    splice: t("drop.splice"),
+    tunnel: t("drop.tunnel"),
+    per_ip: t("drop.per_ip"),
+    rate: t("drop.rate"),
+  };
+}
+
+export function actionLabel(): Record<string, string> {
+  return {
+    "node.create": t("action.node.create"),
+    "node.update": t("action.node.update"),
+    "node.delete": t("action.node.delete"),
+    "node.enroll": t("action.node.enroll"),
+    "node.offline": t("action.node.offline"),
+    "node.rotate": t("action.node.rotate"),
+    "node.hello": t("action.node.hello"),
+    "mapping.ack": t("action.mapping.ack"),
+    "mapping.ack_fail": t("action.mapping.ack_fail"),
+    "acl.drop": t("action.acl.drop"),
+    "mapping.push": t("action.mapping.push"),
+    "mapping.probe": t("action.mapping.probe"),
+    "mapping.knock": t("action.mapping.knock"),
+    "mapping.visit": t("action.mapping.visit"),
+    "visitor.issue": t("action.visitor.issue"),
+    "visitor.revoke": t("action.visitor.revoke"),
+    "node.disconnect": t("action.node.disconnect"),
+    "node.revoke": t("action.node.revoke"),
+    "mapping.create": t("action.mapping.create"),
+    "mapping.update": t("action.mapping.update"),
+    "mapping.policy": t("action.mapping.policy"),
+    "mapping.delete": t("action.mapping.delete"),
+    "mapping.enable": t("action.mapping.enable"),
+    "mapping.disable": t("action.mapping.disable"),
+    "demo.run": t("action.demo.run"),
+    "auth.password.changed": t("action.auth.password.changed"),
+    "auth.2fa.enrolled": t("action.auth.2fa.enrolled"),
+    "auth.2fa.replaced": t("action.auth.2fa.replaced"),
+    "auth.2fa.recovery_used": t("action.auth.2fa.recovery_used"),
+    "auth.2fa.recovery_regenerated": t("action.auth.2fa.recovery_regenerated"),
+    "auth.2fa.local_reset": t("action.auth.2fa.local_reset"),
+  };
+}
 
 export function policyBits(
   maxConns: number,
@@ -55,12 +102,12 @@ export function policyBits(
   proto: string,
   extra?: { spaTtlSec?: number; udpIdleTimeoutSec?: number; mode?: string; rateKbps?: number },
 ) {
-  const bits = [`${maxConns || 1024} 路`];
-  if (extra?.mode === "spa") bits.push(`敲门 ${extra.spaTtlSec || 60}s`);
+  const bits = [t("policy.conns", { n: maxConns || 1024 })];
+  if (extra?.mode === "spa") bits.push(t("policy.knock", { n: extra.spaTtlSec || 60 }));
   if (proto === "udp") {
-    bits.push(`空闲 ${extra?.udpIdleTimeoutSec || idleTimeoutSec || 60}s`);
+    bits.push(t("policy.idle", { n: extra?.udpIdleTimeoutSec || idleTimeoutSec || 60 }));
   } else if (idleTimeoutSec) {
-    bits.push(`空闲 ${idleTimeoutSec}s`);
+    bits.push(t("policy.idle", { n: idleTimeoutSec }));
   }
   if (extra?.rateKbps) bits.push(`${extra.rateKbps} KB/s`);
   return bits;
@@ -75,53 +122,21 @@ export function policyLine(
   return policyBits(maxConns, idleTimeoutSec, proto, extra).join(" · ");
 }
 
-export const frameLabel: Record<string, string> = {
-  Enroll: "登记",
-  EnrollOk: "登记完成",
-  Hello: "握手",
-  HelloOk: "全量下发",
-  MappingSync: "增量推送",
-  MappingAck: "确认",
-  Heartbeat: "心跳",
-  OpenStream: "开流",
-  CloseStream: "关流",
-  Knock: "敲门",
-  KnockOk: "放行",
-  Dropped: "丢弃",
-  Visit: "探访",
-  Revoked: "吊销",
-};
-
-export const actionLabel: Record<string, string> = {
-  "node.create": "登记节点",
-  "node.update": "修改节点",
-  "node.delete": "删除节点",
-  "node.enroll": "节点登记",
-  "node.offline": "节点离线",
-  "node.rotate": "轮换凭证",
-  "node.hello": "Hello 全量下发",
-  "mapping.ack": "映射确认",
-  "mapping.ack_fail": "映射确认失败",
-  "acl.drop": "ACL 丢弃",
-  "mapping.push": "MappingSync",
-  "mapping.probe": "探测开流",
-  "mapping.knock": "敲门",
-  "mapping.visit": "探访",
-  "visitor.issue": "签发",
-  "visitor.revoke": "作废票据",
-  "node.disconnect": "节点离线",
-  "node.revoke": "吊销凭证",
-  "mapping.create": "新建映射",
-  "mapping.update": "修改映射",
-  "mapping.policy": "更新策略",
-  "mapping.delete": "删除映射",
-  "mapping.enable": "启用映射",
-  "mapping.disable": "停用映射",
-  "demo.run": "连通性探测",
-  "auth.password.changed": "修改口令",
-  "auth.2fa.enrolled": "绑定双因素",
-  "auth.2fa.replaced": "更换双因素",
-  "auth.2fa.recovery_used": "使用恢复码",
-  "auth.2fa.recovery_regenerated": "重生恢复码",
-  "auth.2fa.local_reset": "本机重置双因素",
-};
+export function frameLabel(): Record<string, string> {
+  return {
+    Enroll: t("frame.Enroll"),
+    EnrollOk: t("frame.EnrollOk"),
+    Hello: t("frame.Hello"),
+    HelloOk: t("frame.HelloOk"),
+    MappingSync: t("frame.MappingSync"),
+    MappingAck: t("frame.MappingAck"),
+    Heartbeat: t("frame.Heartbeat"),
+    OpenStream: t("frame.OpenStream"),
+    CloseStream: t("frame.CloseStream"),
+    Knock: t("frame.Knock"),
+    KnockOk: t("frame.KnockOk"),
+    Dropped: t("frame.Dropped"),
+    Visit: t("frame.Visit"),
+    Revoked: t("frame.Revoked"),
+  };
+}

@@ -16,6 +16,7 @@ import {
   type TwoFactorEnrollment,
 } from "@/lib/umbra/api";
 import { copyText, downloadRecoveryCodes } from "@/lib/umbra/recovery-file";
+import { t as translate, useI18n } from "@/lib/i18n";
 
 type Phase = "form" | "enroll" | "recovery";
 
@@ -67,6 +68,7 @@ function reduce(state: State, action: Action): State {
 }
 
 export function LoginPage() {
+  const { t } = useI18n();
   const nav = useNavigate();
   const qc = useQueryClient();
   const status = useQuery({ queryKey: ["umbra", "owner"], queryFn: () => getOwnerStatus() });
@@ -79,7 +81,7 @@ export function LoginPage() {
       dispatch({ type: "enroll", value: view });
       return true;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "绑定信息加载失败，请刷新页面重试");
+      toast.error(e instanceof Error ? e.message : t("login.enrollLoadFail"));
       return false;
     }
   };
@@ -111,7 +113,7 @@ export function LoginPage() {
         if (!(await showEnrollment())) return;
       }
       void qc.invalidateQueries({ queryKey: ["umbra", "owner"] });
-      toast.success("口令已设定，继续绑定 Authenticator");
+      toast.success(t("login.passwordSet"));
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -169,7 +171,7 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-paper px-4 text-ink">
       <section className="w-full max-w-md rounded-xl bg-card p-7 shadow-border">
         <p className="font-serif text-3xl italic tracking-tight">umbra</p>
-        <p className="mt-3 text-xs text-stone">自托管 L4 隐匿穿透 · 配置只在服务端</p>
+        <p className="mt-3 text-xs text-stone">{t("login.tagline")}</p>
         {phase === "recovery" && state.recoveryCodes ? (
           <RecoveryStep
             codes={state.recoveryCodes}
@@ -200,7 +202,7 @@ export function LoginPage() {
             onSubmit={() => {
               if (configuring) {
                 if (state.password !== state.confirm) {
-                  toast.error("两次口令不一致");
+                  toast.error(t("login.mismatch"));
                   return;
                 }
                 setup.mutate();
@@ -217,7 +219,7 @@ export function LoginPage() {
 
 function hintAuthError(message: string) {
   if (message.includes("认证凭证不正确")) {
-    return `${message}。若口令无误，请检查手机与服务器时间是否同步。`;
+    return `${message}${translate("login.clockHint")}`;
   }
   return message;
 }
@@ -239,6 +241,7 @@ function AuthForm({
   dispatch: (a: Action) => void;
   onSubmit: () => void;
 }) {
+  const { t } = useI18n();
   const needSecond = twoFactor && !configuring;
   const minLen = configuring ? 8 : 1;
   const canSubmit =
@@ -250,13 +253,14 @@ function AuthForm({
   return (
     <>
       <h1 className="mt-6 text-base font-medium">
-        {configuring ? "设定控制台口令" : migration ? "升级后绑定双因素" : "登录"}
+        {configuring ? t("login.setupTitle") : migration ? t("login.migrateTitle") : t("login.title")}
       </h1>
       {configuring ? (
-        <p className="mt-1 text-sm leading-relaxed text-stone">第一次打开。口令只存在这台机器上。接下来会绑定 Authenticator。</p>
+        <p className="mt-1 text-sm leading-relaxed text-stone">{t("login.setupHint")}</p>
       ) : migration ? (
         <p className="mt-1 text-sm leading-relaxed text-stone">
-          请输入原口令，以及服务器 <span className="font-mono text-ink">2fa-bootstrap</span> 文件中的迁移码。
+          {t("login.migrateHintPrefix")} <span className="font-mono text-ink">2fa-bootstrap</span>{" "}
+          {t("login.migrateHintSuffix")}
         </p>
       ) : null}
       <form
@@ -267,7 +271,7 @@ function AuthForm({
           onSubmit();
         }}
       >
-        <Field label={configuring ? "新口令" : "口令"}>
+        <Field label={configuring ? t("login.newPassword") : t("login.password")}>
           <Input
             type="password"
             autoFocus
@@ -279,7 +283,7 @@ function AuthForm({
           />
         </Field>
         {configuring ? (
-          <Field label="再输入一次">
+          <Field label={t("login.confirmPassword")}>
             <Input
               type="password"
               autoComplete="new-password"
@@ -291,7 +295,7 @@ function AuthForm({
           </Field>
         ) : null}
         {migration ? (
-          <Field label="服务器迁移码">
+          <Field label={t("login.migrationCode")}>
             <Input
               autoComplete="off"
               spellCheck={false}
@@ -302,7 +306,7 @@ function AuthForm({
           </Field>
         ) : null}
         {needSecond && !state.useRecovery ? (
-          <Field label="Authenticator 验证码">
+          <Field label={t("login.totp")}>
             <Input
               inputMode="numeric"
               autoComplete="one-time-code"
@@ -315,7 +319,7 @@ function AuthForm({
           </Field>
         ) : null}
         {needSecond && state.useRecovery ? (
-          <Field label="恢复码">
+          <Field label={t("login.recovery")}>
             <Input
               autoComplete="off"
               spellCheck={false}
@@ -331,12 +335,12 @@ function AuthForm({
             className="self-start text-xs text-pine hover:underline"
             onClick={() => dispatch({ type: "field", key: "useRecovery", value: !state.useRecovery })}
           >
-            {state.useRecovery ? "改用验证码" : "改用恢复码"}
+            {state.useRecovery ? t("login.useTotp") : t("login.useRecovery")}
           </button>
         ) : null}
         <div className="mt-2 flex justify-end">
           <Button type="submit" disabled={busy || !canSubmit}>
-            {busy ? "…" : configuring ? "设定并继续" : "进入"}
+            {busy ? t("common.loading") : configuring ? t("login.setupSubmit") : t("login.submit")}
           </Button>
         </div>
       </form>
@@ -357,13 +361,14 @@ function EnrollStep({
   onCode: (v: string) => void;
   onSubmit: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <>
-      <h1 className="mt-6 text-base font-medium">绑定 Authenticator</h1>
-      <p className="mt-1 text-sm leading-relaxed text-stone">用 1Password、Google Authenticator 或 Microsoft Authenticator 扫描，或手工输入密钥。</p>
+      <h1 className="mt-6 text-base font-medium">{t("login.enrollTitle")}</h1>
+      <p className="mt-1 text-sm leading-relaxed text-stone">{t("login.enrollHint")}</p>
       {enroll.qrPng ? (
         <img
-          alt="TOTP 二维码"
+          alt={t("login.qrAlt")}
           className="mx-auto mt-4 size-44 rounded-md bg-white p-2"
           src={`data:image/png;base64,${enroll.qrPng}`}
         />
@@ -376,10 +381,10 @@ function EnrollStep({
           size="sm"
           onClick={async () => {
             await copyText(enroll.secret);
-            toast.success("密钥已复制");
+            toast.success(t("login.secretCopied"));
           }}
         >
-          复制密钥
+          {t("login.copySecret")}
         </Button>
       </div>
       <form
@@ -390,7 +395,7 @@ function EnrollStep({
           onSubmit();
         }}
       >
-        <Field label="六位验证码">
+        <Field label={t("login.sixDigit")}>
           <Input
             autoFocus
             inputMode="numeric"
@@ -404,7 +409,7 @@ function EnrollStep({
         </Field>
         <div className="mt-2 flex justify-end">
           <Button type="submit" disabled={busy || code.length !== 6}>
-            {busy ? "…" : "确认绑定"}
+            {busy ? t("common.loading") : t("login.confirmBind")}
           </Button>
         </div>
       </form>
@@ -425,10 +430,11 @@ function RecoveryStep({
   onSaved: (v: boolean) => void;
   onDone: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <>
-      <h1 className="mt-6 text-base font-medium">保存恢复码</h1>
-      <p className="mt-1 text-sm leading-relaxed text-stone">每个码只能用一次。关掉页面后无法再看到明文，请先下载或复制。</p>
+      <h1 className="mt-6 text-base font-medium">{t("login.saveCodesTitle")}</h1>
+      <p className="mt-1 text-sm leading-relaxed text-stone">{t("login.saveCodesHint")}</p>
       <ul className="mt-4 space-y-1 font-mono text-sm text-ink">
         {codes.map((c) => (
           <li key={c}>{c}</li>
@@ -436,7 +442,7 @@ function RecoveryStep({
       </ul>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button type="button" variant="outline" size="sm" onClick={() => downloadRecoveryCodes(codes)}>
-          下载文本
+          {t("login.downloadTxt")}
         </Button>
         <Button
           type="button"
@@ -444,19 +450,19 @@ function RecoveryStep({
           size="sm"
           onClick={async () => {
             await copyText(codes.join("\n"));
-            toast.success("恢复码已复制");
+            toast.success(t("login.codesCopied"));
           }}
         >
-          复制全部
+          {t("login.copyAll")}
         </Button>
       </div>
       <label className="mt-4 flex items-start gap-2 text-sm text-ink">
         <input type="checkbox" className="mt-1" checked={saved} onChange={(e) => onSaved(e.target.checked)} />
-        我已把恢复码保存到安全的地方
+        {t("login.savedConfirm")}
       </label>
       <div className="mt-4 flex justify-end">
         <Button type="button" disabled={!saved || busy} onClick={() => onDone()}>
-          进入控制台
+          {t("login.enterConsole")}
         </Button>
       </div>
     </>

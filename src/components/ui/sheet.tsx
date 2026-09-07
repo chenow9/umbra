@@ -3,6 +3,7 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import type { ComponentProps } from "react";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export const Sheet = DialogPrimitive.Root;
@@ -19,6 +20,7 @@ export function SheetContent({
   side?: "left" | "right";
   overlay?: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <DialogPrimitive.Portal>
       {overlay ? (
@@ -37,7 +39,7 @@ export function SheetContent({
         {children}
         <DialogPrimitive.Close className="absolute top-2 right-2 inline-flex size-10 items-center justify-center rounded-md text-stone hover:bg-paper-2 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine/40">
           <X className="size-4" />
-          <span className="sr-only">关闭</span>
+          <span className="sr-only">{t("common.close")}</span>
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>

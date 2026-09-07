@@ -4,6 +4,7 @@ import { formatBps, formatBytes } from "@/lib/umbra/format";
 import { seriesToRate, trafficRangeMs, type TrafficRange } from "@/lib/umbra/live";
 import type { TrafficPoint } from "@/lib/umbra/types";
 import { useTheme } from "@/components/app-providers";
+import { dateLocale, useI18n } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as echarts from "echarts/core";
 import { LineChart } from "echarts/charts";
@@ -38,26 +39,26 @@ function Swatch({ color, label }: { color: string; label: string }) {
   );
 }
 
-function formatX(t: number, span: number): string {
+function formatX(t: number, span: number, locale: string): string {
   const d = new Date(t);
   if (span > 36 * 3600 * 1000) {
-    return d.toLocaleString("zh-CN", { month: "numeric", day: "numeric" });
+    return d.toLocaleString(locale, { month: "numeric", day: "numeric" });
   }
   if (span < 4 * 60 * 1000) {
-    return d.toLocaleTimeString("zh-CN", {
+    return d.toLocaleTimeString(locale, {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
       hour12: false,
     });
   }
-  return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
-function formatTooltipTime(t: number, span: number): string {
+function formatTooltipTime(t: number, span: number, locale: string): string {
   const d = new Date(t);
   if (span > 36 * 3600 * 1000) {
-    return d.toLocaleString("zh-CN", {
+    return d.toLocaleString(locale, {
       month: "numeric",
       day: "numeric",
       hour: "2-digit",
@@ -65,7 +66,7 @@ function formatTooltipTime(t: number, span: number): string {
       hour12: false,
     });
   }
-  return formatX(t, span);
+  return formatX(t, span, locale);
 }
 
 function toPairs(data: TrafficPoint[], kind: "rate" | "bytes"): [number, number][][] {
@@ -113,6 +114,8 @@ export function RateChart({
   error?: boolean;
 }) {
   useTheme();
+  const { t, locale } = useI18n();
+  const dl = dateLocale(locale);
   const live = cssVar("--live", "#1e7a45");
   const amber = cssVar("--amber", "#8d7344");
   const stone = cssVar("--stone", "#8a8478");
@@ -155,7 +158,7 @@ export function RateChart({
           }[];
           const t = items[0]?.value?.[0];
           if (t == null || Number.isNaN(Number(t))) return "";
-          const rows = [`<div>${formatTooltipTime(Number(t), span)}</div>`];
+          const rows = [`<div>${formatTooltipTime(Number(t), span, dl)}</div>`];
           for (const it of items) {
             rows.push(
               `<div>${it.marker ?? ""}${it.seriesName ?? ""} ${formatTick(Number(it.value?.[1] ?? 0))}</div>`,
@@ -175,7 +178,7 @@ export function RateChart({
           color: stone,
           fontSize: 11,
           hideOverlap: true,
-          formatter: (v) => formatX(Number(v), span),
+          formatter: (v) => formatX(Number(v), span, dl),
         },
       },
       yAxis: {
@@ -193,7 +196,7 @@ export function RateChart({
       },
       series: [
         {
-          name: "出站",
+          name: t("chart.out"),
           type: "line",
           showSymbol: false,
           sampling: "lttb",
@@ -204,7 +207,7 @@ export function RateChart({
           z: 1,
         },
         {
-          name: "入站",
+          name: t("chart.in"),
           type: "line",
           showSymbol: false,
           sampling: "lttb",
@@ -215,7 +218,7 @@ export function RateChart({
         },
       ],
     };
-  }, [amber, card, formatTick, inn, ink, line, live, out, range, reduced, stone]);
+  }, [amber, card, dl, formatTick, inn, ink, line, live, out, range, reduced, stone, t]);
 
   useEffect(() => {
     const el = elRef.current;
@@ -239,8 +242,8 @@ export function RateChart({
   return (
     <div aria-busy={loading || updating}>
       <div className="mb-2 flex h-5 items-center justify-end gap-3">
-        <Swatch color="var(--live)" label="入站" />
-        <Swatch color="var(--amber)" label="出站" />
+        <Swatch color="var(--live)" label={t("chart.in")} />
+        <Swatch color="var(--amber)" label={t("chart.out")} />
       </div>
       <div className="relative h-52 w-full">
         <div
@@ -248,20 +251,20 @@ export function RateChart({
           className="absolute inset-0"
           style={{ visibility: showChart && !loading && !error ? "visible" : "hidden" }}
           role="img"
-          aria-label={kind === "rate" ? "速率趋势" : "历史累计流量"}
+          aria-label={kind === "rate" ? t("traffic.rate") : t("chart.bytesAria")}
         />
         {!showChart || loading || error ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-sm text-stone">
             <span>
               {error
-                ? "流量读取失败，请重试。"
+                ? t("traffic.trafficFail")
                 : loading
-                  ? "正在读取流量…"
+                  ? t("chart.loading")
                   : waitingRate && data.length > 0
-                    ? "再等一个采样即可画出速率。"
+                    ? t("chart.waitSample")
                     : kind === "rate"
-                      ? "还没有采样数据，收到采样后显示速率趋势。"
-                      : "还没有采样数据，收到采样后显示累计流量。"}
+                      ? t("chart.emptyRate")
+                      : t("chart.emptyBytes")}
             </span>
             {!loading && !error ? emptyAction : null}
           </div>

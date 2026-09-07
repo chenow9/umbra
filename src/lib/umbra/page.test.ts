@@ -117,7 +117,7 @@ describe("nodeFacets", () => {
     node({ id: "e", name: "mac-mini", status: "offline", os: "darwin" }),
   ];
 
-  it("counts status and os independently", () => {
+  it("counts status", () => {
     const facets = nodeFacets(rows);
     assert.deepEqual(
       facets.status.map((s) => [s.value, s.count]),
@@ -128,26 +128,12 @@ describe("nodeFacets", () => {
         ["revoked", 1],
       ],
     );
-    assert.deepEqual(
-      facets.os.map((o) => [o.value, o.count]),
-      [
-        ["linux", 1],
-        ["darwin", 3],
-        ["windows", 1],
-      ],
-    );
   });
 
-  it("narrows status by search and os by the selected status", () => {
+  it("narrows status by search", () => {
     const bySearch = nodeFacets(rows, { q: "darwin" });
     assert.equal(bySearch.status.find((s) => s.value === "all")?.count, 3);
     assert.equal(bySearch.status.find((s) => s.value === "online")?.count, 1);
-    assert.equal(bySearch.os.find((o) => o.value === "darwin")?.count, 3);
-
-    const byStatus = nodeFacets(rows, { status: "offline" });
-    assert.equal(byStatus.os.find((o) => o.value === "darwin")?.count, 2);
-    assert.equal(byStatus.os.find((o) => o.value === "linux")?.count, 1);
-    assert.equal(byStatus.status.find((s) => s.value === "offline")?.count, 3);
   });
 });
 

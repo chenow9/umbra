@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useI18n } from "@/lib/i18n";
 import {
   changeOwnerPassword,
   confirmTwoFactorEnrollment,
@@ -18,6 +19,7 @@ import {
 import { copyText, downloadRecoveryCodes } from "@/lib/umbra/recovery-file";
 
 export function AuthPanel() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const owner = useQuery({ queryKey: ["umbra", "owner"], queryFn: () => getOwnerStatus() });
   const s = owner.data;
@@ -25,15 +27,13 @@ export function AuthPanel() {
 
   return (
     <section className="rounded-xl bg-card p-5 shadow-border">
-      <p className="text-xs font-medium text-pine">控制台认证</p>
-      <h2 className="mt-1 text-base font-medium text-ink">口令与双因素</h2>
+      <p className="text-xs font-medium text-pine">{t("auth.kicker")}</p>
+      <h2 className="mt-1 text-base font-medium text-ink">{t("auth.title")}</h2>
       <p className="mt-1 text-sm leading-relaxed text-stone">
-        {s.twoFactorRequired
-          ? "登录需要口令和 Authenticator 验证码。关闭 2FA 只能改环境变量，不能在网页上解绑。"
-          : "当前 UMBRA_2FA=off，登录只验口令。已有绑定不会删除；重新开启后 password-only 会话会失效。"}
+        {s.twoFactorRequired ? t("auth.required") : t("auth.optional")}
       </p>
       {s.twoFactorConfigured ? (
-        <p className="mt-2 text-sm text-ink">剩余恢复码 {s.recoveryRemaining ?? 0} 个。</p>
+        <p className="mt-2 text-sm text-ink">{t("auth.remaining", { n: s.recoveryRemaining ?? 0 })}</p>
       ) : null}
       <div className="mt-4 grid gap-6 lg:grid-cols-2">
         <PasswordForm needSecond={Boolean(s.twoFactorConfigured)} onDone={() => qc.invalidateQueries({ queryKey: ["umbra"] })} />
@@ -46,6 +46,7 @@ export function AuthPanel() {
 }
 
 function PasswordForm({ needSecond, onDone }: { needSecond: boolean; onDone: () => void }) {
+  const { t } = useI18n();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [totp, setTotp] = useState("");
@@ -55,7 +56,7 @@ function PasswordForm({ needSecond, onDone }: { needSecond: boolean; onDone: () 
         data: { current, new: next, totp: needSecond ? totp : undefined },
       }),
     onSuccess: () => {
-      toast.success("口令已更新，其他会话已退出");
+      toast.success(t("auth.passwordUpdated"));
       setCurrent("");
       setNext("");
       setTotp("");
@@ -71,18 +72,18 @@ function PasswordForm({ needSecond, onDone }: { needSecond: boolean; onDone: () 
         mut.mutate();
       }}
     >
-      <h3 className="text-sm font-medium text-ink">修改口令</h3>
+      <h3 className="text-sm font-medium text-ink">{t("auth.changePassword")}</h3>
       <label className="flex flex-col gap-1.5">
-        <Label>当前口令</Label>
+        <Label>{t("auth.currentPassword")}</Label>
         <Input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
       </label>
       <label className="flex flex-col gap-1.5">
-        <Label>新口令</Label>
+        <Label>{t("auth.newPassword")}</Label>
         <Input type="password" autoComplete="new-password" minLength={8} value={next} onChange={(e) => setNext(e.target.value)} required />
       </label>
       {needSecond ? (
         <label className="flex flex-col gap-1.5">
-          <Label>当前验证码</Label>
+          <Label>{t("auth.currentCode")}</Label>
           <Input
             inputMode="numeric"
             autoComplete="one-time-code"
@@ -94,13 +95,14 @@ function PasswordForm({ needSecond, onDone }: { needSecond: boolean; onDone: () 
         </label>
       ) : null}
       <Button type="submit" variant="outline" disabled={mut.isPending}>
-        {mut.isPending ? "…" : "更新口令"}
+        {mut.isPending ? t("common.loading") : t("auth.updatePassword")}
       </Button>
     </form>
   );
 }
 
 function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () => void }) {
+  const { t } = useI18n();
   const [password, setPassword] = useState("");
   const [totp, setTotp] = useState("");
   const [enroll, setEnroll] = useState<TwoFactorEnrollment | null>(null);
@@ -113,7 +115,7 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
       setCodes(res.recoveryCodes);
       setPassword("");
       setTotp("");
-      toast.success("已生成新的恢复码");
+      toast.success(t("auth.codesReady"));
       onDone();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -134,7 +136,7 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
       setCodes(res.recoveryCodes);
       setPassword("");
       setTotp("");
-      toast.success("已更换 Authenticator");
+      toast.success(t("auth.replaced"));
       onDone();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -143,7 +145,7 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
   if (codes) {
     return (
       <div>
-        <h3 className="text-sm font-medium text-ink">新的恢复码</h3>
+        <h3 className="text-sm font-medium text-ink">{t("auth.newCodes")}</h3>
         <ul className="mt-2 space-y-1 font-mono text-sm">
           {codes.map((item) => (
             <li key={item}>{item}</li>
@@ -151,7 +153,7 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
         </ul>
         <div className="mt-3 flex gap-2">
           <Button type="button" size="sm" variant="outline" onClick={() => downloadRecoveryCodes(codes)}>
-            下载
+            {t("common.download")}
           </Button>
           <Button
             type="button"
@@ -159,13 +161,13 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
             variant="outline"
             onClick={async () => {
               await copyText(codes.join("\n"));
-              toast.success("已复制");
+              toast.success(t("common.copied"));
             }}
           >
-            复制
+            {t("common.copy")}
           </Button>
           <Button type="button" size="sm" onClick={() => setCodes(null)}>
-            完成
+            {t("common.done")}
           </Button>
         </div>
       </div>
@@ -181,9 +183,9 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
           confirm.mutate();
         }}
       >
-        <h3 className="text-sm font-medium text-ink">扫描新的 Authenticator</h3>
+        <h3 className="text-sm font-medium text-ink">{t("auth.scanNew")}</h3>
         {enroll.qrPng ? (
-          <img alt="TOTP 二维码" className="size-36 rounded-md bg-white p-2" src={`data:image/png;base64,${enroll.qrPng}`} />
+          <img alt={t("login.qrAlt")} className="size-36 rounded-md bg-white p-2" src={`data:image/png;base64,${enroll.qrPng}`} />
         ) : null}
         <p className="break-all font-mono text-xs">{enroll.secret}</p>
         <Input
@@ -195,7 +197,7 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
           required
         />
         <Button type="submit" disabled={confirm.isPending || code.length !== 6}>
-          {confirm.isPending ? "…" : "确认更换"}
+          {confirm.isPending ? t("common.loading") : t("auth.confirmReplace")}
         </Button>
       </form>
     );
@@ -203,14 +205,14 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
 
   return (
     <form className="flex flex-col gap-3">
-      <h3 className="text-sm font-medium text-ink">更换绑定 / 重生恢复码</h3>
-      <p className="text-xs text-stone">剩余 {remaining} 个恢复码。关闭 2FA 时这两项不可用。</p>
+      <h3 className="text-sm font-medium text-ink">{t("auth.manageTitle")}</h3>
+      <p className="text-xs text-stone">{t("auth.manageHint", { n: remaining })}</p>
       <label className="flex flex-col gap-1.5">
-        <Label>口令</Label>
+        <Label>{t("login.password")}</Label>
         <Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
       </label>
       <label className="flex flex-col gap-1.5">
-        <Label>当前验证码</Label>
+        <Label>{t("auth.currentCode")}</Label>
         <Input
           inputMode="numeric"
           autoComplete="one-time-code"
@@ -222,10 +224,10 @@ function TwoFactorManage({ remaining, onDone }: { remaining: number; onDone: () 
       </label>
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline" disabled={regen.isPending} onClick={() => regen.mutate()}>
-          {regen.isPending ? "…" : "重生恢复码"}
+          {regen.isPending ? t("common.loading") : t("auth.regen")}
         </Button>
         <Button type="button" variant="outline" disabled={startReplace.isPending} onClick={() => startReplace.mutate()}>
-          {startReplace.isPending ? "…" : "更换 Authenticator"}
+          {startReplace.isPending ? t("common.loading") : t("auth.replace")}
         </Button>
       </div>
     </form>

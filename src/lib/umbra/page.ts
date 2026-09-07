@@ -1,3 +1,4 @@
+import { collateLocale, getLocale, t } from "../i18n/index.ts";
 import { modeHint, modeLabel, reachLabel } from "./labels.ts";
 import type { AuditItem, Mapping, Node, NodeStatus } from "./types.ts";
 
@@ -55,7 +56,6 @@ export type MappingFacets = {
 
 export type NodeFacets = {
   status: FacetOption[];
-  os: FacetOption[];
 };
 
 export type AuditQuery = {
@@ -141,7 +141,7 @@ function compareMapping(a: Mapping, b: Mapping) {
   const pa = a.entryPort ?? 1_000_000;
   const pb = b.entryPort ?? 1_000_000;
   if (pa !== pb) return pa - pb;
-  return a.name.localeCompare(b.name, "zh");
+  return a.name.localeCompare(b.name, collateLocale(getLocale()));
 }
 
 export function groupMappings(rows: Mapping[], q: MappingFilter = {}): MappingGroup[] {
@@ -165,7 +165,7 @@ export function groupMappings(rows: Mapping[], q: MappingFilter = {}): MappingGr
   groups.sort((a, b) => {
     const d = nodeRank(a.nodeStatus) - nodeRank(b.nodeStatus);
     if (d !== 0) return d;
-    return a.nodeName.localeCompare(b.nodeName, "zh");
+    return a.nodeName.localeCompare(b.nodeName, collateLocale(getLocale()));
   });
   return groups;
 }
@@ -204,26 +204,16 @@ function orderedFacets(
   return out;
 }
 
-export function nodeFacets(rows: Node[], q: Pick<NodeQuery, "q" | "status" | "os"> = {}): NodeFacets {
-  const statusFilter = q.status && q.status !== "all" ? q.status : undefined;
-  const osFilter = q.os && q.os !== "all" ? q.os : undefined;
+export function nodeFacets(rows: Node[], q: Pick<NodeQuery, "q" | "status"> = {}): NodeFacets {
   const searched = filterNodes(rows, { q: q.q, page: 1, size: Math.max(rows.length, 1) });
-  const statusPool = osFilter ? searched.filter((n) => n.os === osFilter) : searched;
-  const osPool = statusFilter ? searched.filter((n) => n.status === statusFilter) : searched;
   const statusCount = (status?: NodeStatus) =>
-    status ? statusPool.filter((n) => n.status === status).length : statusPool.length;
-  const osCount = (os: string) => osPool.filter((n) => n.os === os).length;
+    status ? searched.filter((n) => n.status === status).length : searched.length;
   return {
     status: [
-      { value: "all", label: "全部", count: statusCount() },
-      { value: "online", label: "在线", count: statusCount("online"), status: "online" },
-      { value: "offline", label: "离线", count: statusCount("offline"), status: "offline" },
-      { value: "revoked", label: "已吊销", count: statusCount("revoked"), status: "revoked" },
-    ],
-    os: [
-      { value: "linux", label: "Linux", count: osCount("linux") },
-      { value: "darwin", label: "macOS", count: osCount("darwin") },
-      { value: "windows", label: "Windows", count: osCount("windows") },
+      { value: "all", label: t("status.all"), count: statusCount() },
+      { value: "online", label: t("status.online"), count: statusCount("online"), status: "online" },
+      { value: "offline", label: t("status.offline"), count: statusCount("offline"), status: "offline" },
+      { value: "revoked", label: t("status.revoked"), count: statusCount("revoked"), status: "revoked" },
     ],
   };
 }
@@ -245,14 +235,14 @@ export function mappingFacets(rows: Mapping[]): MappingFacets {
     .sort((a, b) => {
       const d = nodeRank(a.status) - nodeRank(b.status);
       if (d !== 0) return d;
-      return a.label.localeCompare(b.label, "zh");
+      return a.label.localeCompare(b.label, collateLocale(getLocale()));
     });
 
   return {
     nodes,
     protos: orderedFacets(tally(rows, (m) => m.proto), PROTO_ORDER, { tcp: "TCP", udp: "UDP" }),
-    modes: orderedFacets(tally(rows, (m) => m.mode), MODE_ORDER, modeLabel, modeHint),
-    reaches: orderedFacets(tally(rows, (m) => m.reach ?? ""), REACH_ORDER, reachLabel),
+    modes: orderedFacets(tally(rows, (m) => m.mode), MODE_ORDER, modeLabel, modeHint()),
+    reaches: orderedFacets(tally(rows, (m) => m.reach ?? ""), REACH_ORDER, reachLabel()),
   };
 }
 
@@ -260,7 +250,7 @@ export function sortMappings(rows: Mapping[]): Mapping[] {
   return [...rows].sort((a, b) => {
     const d = nodeRank(a.nodeStatus) - nodeRank(b.nodeStatus);
     if (d !== 0) return d;
-    const n = a.nodeName.localeCompare(b.nodeName, "zh");
+    const n = a.nodeName.localeCompare(b.nodeName, collateLocale(getLocale()));
     if (n !== 0) return n;
     return compareMapping(a, b);
   });
@@ -285,7 +275,7 @@ export function mergeNodeOptions(
   return [...byId.values()].sort((a, b) => {
     const d = nodeRank(a.status ?? "offline") - nodeRank(b.status ?? "offline");
     if (d !== 0) return d;
-    return a.label.localeCompare(b.label, "zh");
+    return a.label.localeCompare(b.label, collateLocale(getLocale()));
   });
 }
 

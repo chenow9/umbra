@@ -16,6 +16,7 @@ import { ServiceList } from "@/components/services/service-list";
 import { NodeScopePicker } from "@/components/services/node-scope-picker";
 import { ServiceEditor } from "@/components/services/service-editor";
 import { ServiceConnect, ServiceConnectSession } from "@/components/services/service-connect";
+import { statusText, useI18n } from "@/lib/i18n";
 import { listNodes, listMappings, deleteMapping, setMappingEnabled } from "@/lib/umbra/api";
 import { PAGE_SIZE, pageOf } from "@/lib/umbra/page";
 import { serviceState, serviceSummary, serviceMatches } from "@/lib/umbra/service";
@@ -27,6 +28,7 @@ type ServiceSearch = { node?: string; service?: string; create?: boolean };
 type Editor = { mode: "create"; nodeId?: string } | { mode: "edit"; mapping: Mapping };
 
 export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const rawSearch = useSearch({ strict: false }) as ServiceSearch;
   const search = { ...rawSearch, node: nodeId };
@@ -101,7 +103,7 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
     onSuccess: () => {
       setPendingDelete(null);
       refresh();
-      toast.success("服务已删除");
+      toast.success(t("services.deleted"));
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -115,15 +117,15 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
   };
   const renderMenu = (m: Mapping) => (
     <ActionMenu
-      label={`${m.name} 的更多操作`}
+      label={t("services.more", { name: m.name })}
       items={[
-        { label: "编辑服务", onSelect: () => setEditor({ mode: "edit", mapping: m }) },
+        { label: t("services.edit"), onSelect: () => setEditor({ mode: "edit", mapping: m }) },
         {
-          label: m.enabled ? "停用" : "启用",
+          label: m.enabled ? t("common.disable") : t("common.enable"),
           disabled: toggle.isPending,
           onSelect: () => toggle.mutate(m),
         },
-        { label: "删除服务", tone: "danger", onSelect: () => setPendingDelete(m) },
+        { label: t("services.deleteTitle"), tone: "danger", onSelect: () => setPendingDelete(m) },
       ]}
     />
   );
@@ -131,10 +133,10 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
   const affected = all.filter((m) => m.nodeId === search.node && m.enabled).length;
   const filterCount = Number(view !== "all") + Number(proto !== "all");
   const statusOptions = [
-    { value: "all", label: "全部状态" },
-    { value: "attention", label: "需要处理" },
-    { value: "pending", label: "等待确认" },
-    { value: "disabled", label: "已停用" },
+    { value: "all", label: t("services.allStates") },
+    { value: "attention", label: t("services.attention") },
+    { value: "pending", label: t("services.pending") },
+    { value: "disabled", label: t("services.disabled") },
   ];
   const clearFilters = () => {
     setQ("");
@@ -148,10 +150,10 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
   return (
     <AppShell
       workspace
-      title={nodeId ? (scopedNode?.name ?? "节点服务") : "全部服务"}
+      title={nodeId ? (scopedNode?.name ?? t("nodes.nodeServices")) : t("services.title")}
       description={
         nodeId && scopedNode
-          ? `${scopedNode.status === "online" ? "在线" : scopedNode.status === "revoked" ? "已吊销" : "离线"} · ${scoped.length} 项服务`
+          ? t("scope.line", { status: statusText(scopedNode.status), count: scoped.length })
           : undefined
       }
       showTelemetry={false}
@@ -162,11 +164,11 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
             onClick={() => setEditor({ mode: "create", nodeId: search.node })}
           >
             <Plus className="mr-1.5 size-4" />
-            添加服务
+            {t("services.add")}
           </Button>
         ) : (
           <Button asChild>
-            <Link to="/nodes">接入节点</Link>
+            <Link to="/nodes">{t("services.enrollNode")}</Link>
           </Button>
         )
       }
@@ -180,15 +182,15 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                 className="inline-flex items-center gap-2 text-stone hover:text-ink"
               >
                 <ArrowLeft className="size-4" />
-                返回节点
+                {t("services.backNode")}
               </Link>
               {scopedNode ? (
                 <div className="flex items-center gap-5">
                   <Link to="/traffic" search={{ node: nodeId }} className="text-pine">
-                    查看流量
+                    {t("services.viewTraffic")}
                   </Link>
                   <Link to="/nodes" search={{ edit: nodeId }} className="text-stone hover:text-ink">
-                    节点设置
+                    {t("services.nodeSettings")}
                   </Link>
                 </div>
               ) : null}
@@ -196,7 +198,7 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
           ) : null}
           {error ? (
             <div role="alert" className="rounded-lg border border-rose/30 p-4 text-sm">
-              <p>无法更新服务数据：{error.message}</p>
+              <p>{t("services.loadError", { message: error.message })}</p>
               <Button
                 className="mt-3"
                 variant="outline"
@@ -205,41 +207,41 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                   void mappings.refetch();
                 }}
               >
-                重新加载
+                {t("common.retry")}
               </Button>
             </div>
           ) : null}
           {loading ? (
             <p role="status" className="py-12 text-sm text-stone">
-              正在读取节点与服务…
+              {t("services.readingAll")}
             </p>
           ) : nodeId && !scopedNode && !nodes.error ? (
             <p role="status" className="rounded-xl border border-line p-6">
-              该节点已不存在，请返回节点列表。
+              {t("services.missingNode")}
             </p>
           ) : !nodes.data?.length && !all.length && !error ? (
             <section className="rounded-xl border border-line bg-card p-6 sm:p-8">
-              <h3 className="text-xl font-semibold">从一台内网节点开始</h3>
+              <h3 className="text-xl font-semibold">{t("services.startTitle")}</h3>
               <ol className="my-6 grid gap-5 text-sm sm:grid-cols-3">
                 <li>
                   <span className="text-xs text-stone">01</span>
-                  <p className="mt-1 font-medium">接入节点</p>
-                  <p className="mt-1 text-stone">复制安装命令，在内网机器执行。</p>
+                  <p className="mt-1 font-medium">{t("services.stepEnroll")}</p>
+                  <p className="mt-1 text-stone">{t("services.stepEnrollHint")}</p>
                 </li>
                 <li>
                   <span className="text-xs text-stone">02</span>
-                  <p className="mt-1 font-medium">添加服务</p>
-                  <p className="mt-1 text-stone">填写真实目标，选择访问范围。</p>
+                  <p className="mt-1 font-medium">{t("services.stepAdd")}</p>
+                  <p className="mt-1 text-stone">{t("services.stepAddHint")}</p>
                 </li>
                 <li>
                   <span className="text-xs text-stone">03</span>
-                  <p className="mt-1 font-medium">开始连接</p>
-                  <p className="mt-1 text-stone">获取地址或访问命令，验证响应。</p>
+                  <p className="mt-1 font-medium">{t("services.stepConnect")}</p>
+                  <p className="mt-1 text-stone">{t("services.stepConnectHint")}</p>
                 </li>
               </ol>
               <Button asChild>
                 <Link to="/nodes">
-                  接入第一台节点 <ArrowRight className="ml-2 size-4" />
+                  {t("services.firstNode")} <ArrowRight className="ml-2 size-4" />
                 </Link>
               </Button>
             </section>
@@ -251,8 +253,8 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                   <Input
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
-                    aria-label="搜索服务"
-                    placeholder={nodeId ? "搜索此节点的服务或端口" : "搜索服务、节点或端口"}
+                    aria-label={t("services.search")}
+                    placeholder={nodeId ? t("services.searchHere") : t("services.searchAll")}
                     className="bg-card pl-9"
                   />
                 </div>
@@ -263,7 +265,7 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                   onClick={() => setFiltersOpen(!filtersOpen)}
                 >
                   <SlidersHorizontal className="size-4" />
-                  筛选{filterCount ? ` · ${filterCount}` : ""}
+                  {filterCount ? t("services.filterCount", { n: filterCount }) : t("services.filter")}
                 </Button>
               </div>
               {filtersOpen ? (
@@ -273,7 +275,7 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                 >
                   {!nodeId ? (
                     <div>
-                      <span className="service-refine-label">节点</span>
+                      <span className="service-refine-label">{t("services.node")}</span>
                       <NodeScopePicker
                         nodes={nodes.data ?? []}
                         mappings={all}
@@ -283,22 +285,22 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                     </div>
                   ) : null}
                   <div>
-                    <span className="service-refine-label">状态</span>
+                    <span className="service-refine-label">{t("services.state")}</span>
                     <Select
-                      aria-label="筛选状态"
+                      aria-label={t("services.state")}
                       value={view}
                       onValueChange={setView}
                       options={statusOptions}
                     />
                   </div>
                   <div>
-                    <span className="service-refine-label">协议</span>
+                    <span className="service-refine-label">{t("services.proto")}</span>
                     <Select
-                      aria-label="筛选协议"
+                      aria-label={t("services.proto")}
                       value={proto}
                       onValueChange={setProto}
                       options={[
-                        { value: "all", label: "全部协议" },
+                        { value: "all", label: t("services.allProtos") },
                         { value: "tcp", label: "TCP" },
                         { value: "udp", label: "UDP" },
                       ]}
@@ -310,14 +312,14 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                 <div className="flex flex-wrap items-center gap-2">
                   <span>
                     {q || filterCount
-                      ? `${rows.length} / ${scoped.length} 项服务`
-                      : `${scoped.length} 项服务`}
+                      ? t("services.countFiltered", { shown: rows.length, total: scoped.length })
+                      : t("services.count", { count: scoped.length })}
                   </span>
                   {view !== "all" ? (
                     <Button
                       size="sm"
                       variant="secondary"
-                      aria-label="清除状态筛选"
+                      aria-label={t("services.clearState")}
                       onClick={() => setView("all")}
                     >
                       {statusOptions.find((option) => option.value === view)?.label}
@@ -328,7 +330,7 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                     <Button
                       size="sm"
                       variant="secondary"
-                      aria-label="清除协议筛选"
+                      aria-label={t("services.clearProto")}
                       onClick={() => setProto("all")}
                     >
                       {proto.toUpperCase()}
@@ -338,7 +340,7 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                 </div>
                 {q || filterCount ? (
                   <Button size="sm" variant="ghost" onClick={clearFilters}>
-                    清除筛选
+                    {t("services.clear")}
                   </Button>
                 ) : summary.attention > 0 ? (
                   <Button
@@ -347,7 +349,7 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                     className="text-rose"
                     onClick={() => setView("attention")}
                   >
-                    {summary.attention} 项需处理
+                    {t("services.needAttention", { n: summary.attention })}
                     <ArrowRight className="size-3.5" />
                   </Button>
                 ) : null}
@@ -355,24 +357,25 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
               {scopedNode && scopedNode.status !== "online" && affected > 0 ? (
                 <div
                   className="rounded-xl border border-rose/25 px-4 py-3 text-sm"
-                  aria-label="节点故障影响"
+                  aria-label={t("services.nodeImpact")}
                 >
                   <p>
-                    {scopedNode.name} {scopedNode.status === "revoked" ? "已吊销" : "离线"}，影响{" "}
-                    {affected} 项已启用服务。
+                    {t("services.nodeDown", {
+                      name: scopedNode.name,
+                      status: statusText(scopedNode.status),
+                      n: affected,
+                    })}
                   </p>
                   <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-stone">
                     <span>
-                      {scopedNode.status === "revoked"
-                        ? "请为服务选择有效节点。"
-                        : "先检查节点连接，无需逐个修改服务。"}
+                      {scopedNode.status === "revoked" ? t("services.pickValid") : t("services.checkNode")}
                     </span>
                     <Link
                       to="/nodes"
                       search={{ edit: nodeId }}
                       className="text-pine underline underline-offset-4"
                     >
-                      查看节点
+                      {t("services.viewNode")}
                     </Link>
                   </div>
                 </div>
@@ -381,21 +384,21 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                 <section className="rounded-lg border border-dashed border-line px-5 py-10 text-center">
                   <h3 className="font-medium">
                     {q || filterCount
-                      ? "没有匹配的服务"
+                      ? t("services.noneMatch")
                       : scopedNode?.status === "revoked"
-                        ? "此节点没有服务"
-                        : "添加你的第一个服务"}
+                        ? t("services.noneOnNode")
+                        : t("services.first")}
                   </h3>
                   <p className="mt-2 text-sm text-stone">
                     {q || filterCount
-                      ? "调整搜索或筛选条件，查看其他服务。"
+                      ? t("services.noneMatchHint")
                       : scopedNode?.status === "revoked"
-                        ? "该节点已吊销，请返回并选择有效节点。"
-                        : "填写目标地址和端口，即可开始连接。"}
+                        ? t("services.revokedHint")
+                        : t("services.firstHint")}
                   </p>
                   {q || filterCount ? (
                     <Button variant="outline" className="mt-5" onClick={clearFilters}>
-                      清除筛选
+                      {t("services.clear")}
                     </Button>
                   ) : null}
                 </section>
@@ -472,9 +475,9 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
       </Sheet>
       <ConfirmDialog
         open={pendingDelete !== null}
-        title="删除服务"
-        description={`删除「${pendingDelete?.name ?? ""}」将释放入口端口并撤销关联访问凭证。其它服务不受影响。`}
-        confirmLabel="删除服务"
+        title={t("services.deleteTitle")}
+        description={t("services.deleteBody", { name: pendingDelete?.name ?? "" })}
+        confirmLabel={t("services.deleteTitle")}
         danger
         pending={remove.isPending}
         onOpenChange={(open) => !open && setPendingDelete(null)}
@@ -486,12 +489,11 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
 
 import { SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 function MissingService({ loading }: { loading: boolean }) {
+  const { t } = useI18n();
   return (
     <SheetHeader>
-      <SheetTitle>{loading ? "正在读取服务…" : "服务不可用"}</SheetTitle>
-      <SheetDescription>
-        {loading ? "稍候重试。" : "此服务可能已删除或数据读取失败，请关闭面板后刷新。"}
-      </SheetDescription>
+      <SheetTitle>{loading ? t("services.reading") : t("services.unavailable")}</SheetTitle>
+      <SheetDescription>{loading ? t("services.waitRetry") : t("services.gone")}</SheetDescription>
     </SheetHeader>
   );
 }

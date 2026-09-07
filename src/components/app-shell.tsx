@@ -10,12 +10,13 @@ import { cn } from "@/lib/utils";
 import { getOwnerStatus, getOverview, logoutOwnerSession } from "@/lib/umbra/api";
 import { formatBps } from "@/lib/umbra/format";
 import { useLiveStatus } from "@/lib/umbra/live";
+import { useI18n } from "@/lib/i18n";
 
 const nav = [
-  { to: "/nodes", label: "节点", icon: Radio, paths: ["/", "/nodes"] },
-  { to: "/mappings", label: "全部服务", icon: Layers, paths: ["/mappings"] },
-  { to: "/traffic", label: "观测", icon: Activity, paths: ["/traffic", "/audit"] },
-  { to: "/deploy", label: "系统", icon: Settings2, paths: ["/deploy"] },
+  { to: "/nodes", labelKey: "nav.nodes", icon: Radio, paths: ["/", "/nodes"] },
+  { to: "/mappings", labelKey: "nav.services", icon: Layers, paths: ["/mappings"] },
+  { to: "/traffic", labelKey: "nav.observe", icon: Activity, paths: ["/traffic", "/audit"] },
+  { to: "/deploy", labelKey: "nav.system", icon: Settings2, paths: ["/deploy"] },
 ] as const;
 
 export function AppShell({
@@ -33,6 +34,7 @@ export function AppShell({
   action?: ReactNode;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const owner = useQuery({ queryKey: ["umbra", "owner"], queryFn: () => getOwnerStatus() });
 
@@ -46,7 +48,7 @@ export function AppShell({
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-card focus:p-3"
       >
-        跳到主要内容
+        {t("nav.skip")}
       </a>
       <header className="network-masthead">
         <div className="network-masthead-inner">
@@ -96,25 +98,26 @@ function Brand() {
 }
 
 function LiveSummary() {
+  const { t } = useI18n();
   const overview = useQuery({ queryKey: ["umbra", "overview"], queryFn: () => getOverview() });
   const o = overview.data;
   return (
-    <div className="network-telemetry" aria-label="网络实时概况">
+    <div className="network-telemetry" aria-label={t("shell.liveRegion")}>
       {o ? (
         <>
           <span>
             <i className="telemetry-dot" />
-            {o.nodesOnline}/{o.nodesTotal} 节点在线
+            {t("shell.nodesOnline", { online: o.nodesOnline, total: o.nodesTotal })}
           </span>
           <span className="font-mono">
-            ↓ {formatBps(o.bpsIn)} <span className="sr-only">入站</span>
+            ↓ {formatBps(o.bpsIn)} <span className="sr-only">{t("shell.inbound")}</span>
           </span>
           <span className="font-mono">
-            ↑ {formatBps(o.bpsOut)} <span className="sr-only">出站</span>
+            ↑ {formatBps(o.bpsOut)} <span className="sr-only">{t("shell.outbound")}</span>
           </span>
         </>
       ) : (
-        <span>正在读取网络状态…</span>
+        <span>{t("shell.readingNetwork")}</span>
       )}
     </div>
   );
@@ -122,16 +125,17 @@ function LiveSummary() {
 
 function LiveBadge() {
   const { connected } = useLiveStatus();
+  const { t } = useI18n();
   return (
     <span
       className={cn(
         "hidden items-center gap-1.5 rounded-full px-2 py-1 text-xs tracking-wide uppercase sm:inline-flex",
         connected ? "text-ink-soft" : "text-stone",
       )}
-      title={connected ? "流量与状态正在推送" : "实时通道未连接，显示上次快照"}
+      title={connected ? t("shell.liveOnTitle") : t("shell.liveOffTitle")}
     >
       <span className={cn("size-1.5 rounded-full", connected ? "bg-pine live-dot" : "bg-stone")} />
-      {connected ? "实时更新" : "快照"}
+      {connected ? t("shell.liveOn") : t("shell.liveOff")}
     </span>
   );
 }
@@ -145,8 +149,9 @@ function Nav({
   onNavigate?: () => void;
   className?: string;
 }) {
+  const { t } = useI18n();
   return (
-    <nav aria-label="主导航" className={cn("network-nav", className)}>
+    <nav aria-label={t("nav.main")} className={cn("network-nav", className)}>
       {nav.map((item) => {
         const active =
           (item.paths as readonly string[]).includes(pathname) ||
@@ -161,7 +166,7 @@ function Nav({
             className={cn("network-nav-item", active && "is-active")}
           >
             <Icon className="size-4 opacity-70" />
-            <span>{item.label}</span>
+            <span>{t(item.labelKey)}</span>
           </Link>
         );
       })}
@@ -170,6 +175,7 @@ function Nav({
 }
 
 function SignOut() {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const out = useMutation({
     mutationFn: () => logoutOwnerSession(),
@@ -185,20 +191,21 @@ function SignOut() {
       onClick={() => out.mutate()}
       disabled={out.isPending}
     >
-      退出
+      {t("shell.signOut")}
     </Button>
   );
 }
 
 function SnapshotNotice() {
   const { connected } = useLiveStatus();
+  const { t } = useI18n();
   if (connected) return null;
   return (
     <p
       role="status"
       className="border-b border-line bg-paper-2 px-4 py-2 text-xs text-ink-soft md:px-8"
     >
-      实时状态尚未连接，当前为上次快照。通道正在自动重连；操作前请确认最新状态。
+      {t("shell.snapshotNotice")}
     </p>
   );
 }

@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import type { Mapping, Node } from "./types.ts";
 
 export type TrafficSearch = {
@@ -24,11 +25,11 @@ export function resolveTrafficScope(search: TrafficSearch, nodes: Node[], mappin
   const node = nodeId ? nodes.find((n) => n.id === nodeId) : undefined;
   const error =
     search.service && !service
-      ? "该服务已不存在。"
+      ? t("traffic.missingService")
       : nodeId && !node
-        ? "该节点已不存在。"
+        ? t("traffic.missingNode")
         : service && service.nodeId !== nodeId
-          ? "该服务不属于所选节点。"
+          ? t("traffic.serviceWrongNode")
           : undefined;
   return { node, nodeId, service, error };
 }

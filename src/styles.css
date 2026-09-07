@@ -318,27 +318,7 @@ html[data-theme="moye"] {
 .node-signal.is-revoked {
   background: var(--rose);
 }
-.node-os-switch {
-  display: flex;
-  padding: 4px;
-  gap: 2px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-}
-.node-os-switch button {
-  padding: 7px 10px;
-  border-radius: 4px;
-  color: var(--stone);
-  font-size: 12px;
-}
-.node-os-switch button[aria-pressed="true"] {
-  background: var(--ink);
-  color: var(--paper);
-}
-.node-os-switch button:focus-visible {
-  outline: 2px solid var(--pine);
-  outline-offset: 2px;
-}
+
 .service-sheet {
   border-left: 1px solid var(--line);
 }

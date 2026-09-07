@@ -7,18 +7,15 @@ import { AppShell } from "@/components/app-shell";
 import { SelectField } from "@/components/field";
 import { Input } from "@/components/ui/input";
 import { Pager } from "@/components/ui/pager";
+import { useI18n } from "@/lib/i18n";
 import { queryAudit } from "@/lib/umbra/api";
 import { formatClock, formatRelative } from "@/lib/umbra/format";
 import { actionLabel } from "@/lib/umbra/labels";
 import { emptyPage, PAGE_SIZE } from "@/lib/umbra/page";
 import type { AuditItem } from "@/lib/umbra/types";
 
-const actionOptions = [
-  { value: "all", label: "全部操作" },
-  ...Object.entries(actionLabel).map(([value, label]) => ({ value, label })),
-];
-
 export function AuditPage() {
+  const { t } = useI18n();
   const [q, setQ] = useState("");
   const [action, setAction] = useState("all");
   const [page, setPage] = useState(1);
@@ -36,6 +33,11 @@ export function AuditPage() {
   const pageData = audit.data ?? emptyPage<AuditItem>(page);
   const list = pageData.items;
   const empty = !audit.isLoading && pageData.total === 0 && !q && action === "all";
+  const labels = actionLabel();
+  const actionOptions = [
+    { value: "all", label: t("audit.all") },
+    ...Object.entries(labels).map(([value, label]) => ({ value, label })),
+  ];
 
   useEffect(() => {
     setPage(1);
@@ -47,11 +49,11 @@ export function AuditPage() {
   }, [audit.data, page]);
 
   return (
-    <AppShell title="观测" description="查看服务流量与操作记录。">
+    <AppShell title={t("audit.title")} description={t("audit.description")}>
       <ObservabilityNav active="audit" />
       {empty ? (
         <p className="rounded-xl bg-card px-4 py-10 text-center text-sm text-stone shadow-border">
-          还没有审计记录。
+          {t("audit.empty")}
         </p>
       ) : (
         <>
@@ -59,12 +61,12 @@ export function AuditPage() {
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="搜索操作、对象、详情"
-              aria-label="搜索审计记录"
+              placeholder={t("audit.searchPh")}
+              aria-label={t("audit.search")}
               className="max-w-sm"
             />
             <SelectField
-              label="操作"
+              label={t("audit.action")}
               className="w-44"
               value={action}
               onValueChange={setAction}
@@ -73,7 +75,7 @@ export function AuditPage() {
           </div>
           {pageData.total === 0 ? (
             <p className="rounded-xl bg-card px-4 py-10 text-center text-sm text-stone shadow-border">
-              没有匹配的记录。
+              {t("audit.none")}
             </p>
           ) : (
             <>
@@ -82,7 +84,7 @@ export function AuditPage() {
                   <article key={item.id} className="rounded-xl bg-card px-4 py-3 shadow-border">
                     <div className="flex items-baseline justify-between gap-3">
                       <p className="text-sm font-medium text-ink">
-                        {actionLabel[item.action] ?? item.action}
+                        {labels[item.action] ?? item.action}
                       </p>
                       <span className="shrink-0 font-mono text-xs text-stone">
                         {formatRelative(item.ts)}
@@ -104,11 +106,11 @@ export function AuditPage() {
                 <table className="w-full min-w-[720px] text-left text-sm">
                   <thead>
                     <tr className="border-b border-line text-xs text-stone">
-                      <th className="px-4 py-3 font-medium">时间</th>
-                      <th className="px-4 py-3 font-medium">操作</th>
-                      <th className="px-4 py-3 font-medium">对象</th>
-                      <th className="px-4 py-3 font-medium">详情</th>
-                      <th className="px-4 py-3 font-medium">操作者</th>
+                      <th className="px-4 py-3 font-medium">{t("audit.time")}</th>
+                      <th className="px-4 py-3 font-medium">{t("audit.action")}</th>
+                      <th className="px-4 py-3 font-medium">{t("audit.target")}</th>
+                      <th className="px-4 py-3 font-medium">{t("audit.detail")}</th>
+                      <th className="px-4 py-3 font-medium">{t("audit.actor")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -124,7 +126,7 @@ export function AuditPage() {
                           <div className="text-xs text-stone">{formatRelative(item.ts)}</div>
                         </td>
                         <td className="px-4 py-3 align-top font-medium">
-                          {actionLabel[item.action] ?? item.action}
+                          {labels[item.action] ?? item.action}
                         </td>
                         <td className="px-4 py-3 align-top text-ink-soft">
                           {item.targetName || item.target || "—"}

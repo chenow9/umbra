@@ -1,5 +1,6 @@
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { TriangleAlert } from "lucide-react";
+import { t } from "@/lib/i18n";
 
 export function AppErrorComponent({ error }: ErrorComponentProps) {
   return (
@@ -7,9 +8,9 @@ export function AppErrorComponent({ error }: ErrorComponentProps) {
       <span className="text-rose" aria-hidden="true">
         <TriangleAlert className="size-10" strokeWidth={2} />
       </span>
-      <h1 className="text-lg font-medium">出了点问题</h1>
+      <h1 className="text-lg font-medium">{t("error.title")}</h1>
       <p className="max-w-md text-sm break-words text-stone">
-        {error.message || "发生了意外错误。请刷新后重试。"}
+        {error.message || t("error.fallback")}
       </p>
     </main>
   );

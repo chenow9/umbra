@@ -1,3 +1,5 @@
+import { dateLocale, getLocale, t } from "../i18n/index.ts";
+
 export function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -18,29 +20,29 @@ export function formatBps(n: number): string {
 }
 
 export function formatRelative(iso: string | null | undefined): string {
-  if (!iso) return "从未";
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return "从未";
-  const diff = Date.now() - t;
+  if (!iso) return t("time.never");
+  const at = new Date(iso).getTime();
+  if (Number.isNaN(at)) return t("time.never");
+  const diff = Date.now() - at;
   if (diff < 0) {
     const ahead = -diff;
-    if (ahead < 60_000) return "即将";
-    if (ahead < 3_600_000) return `${Math.floor(ahead / 60_000)} 分钟后`;
-    if (ahead < 86_400_000) return `${Math.floor(ahead / 3_600_000)} 小时后`;
-    return `${Math.floor(ahead / 86_400_000)} 天后`;
+    if (ahead < 60_000) return t("time.soon");
+    if (ahead < 3_600_000) return t("time.minutesAhead", { n: Math.floor(ahead / 60_000) });
+    if (ahead < 86_400_000) return t("time.hoursAhead", { n: Math.floor(ahead / 3_600_000) });
+    return t("time.daysAhead", { n: Math.floor(ahead / 86_400_000) });
   }
-  if (diff < 15_000) return "刚刚";
-  if (diff < 60_000) return `${Math.floor(diff / 1000)} 秒前`;
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  return `${Math.floor(diff / 86_400_000)} 天前`;
+  if (diff < 15_000) return t("time.justNow");
+  if (diff < 60_000) return t("time.secondsAgo", { n: Math.floor(diff / 1000) });
+  if (diff < 3_600_000) return t("time.minutesAgo", { n: Math.floor(diff / 60_000) });
+  if (diff < 86_400_000) return t("time.hoursAgo", { n: Math.floor(diff / 3_600_000) });
+  return t("time.daysAgo", { n: Math.floor(diff / 86_400_000) });
 }
 
 export function formatClock(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString("zh-CN", {
+  return d.toLocaleString(dateLocale(getLocale()), {
     month: "numeric",
     day: "numeric",
     hour: "2-digit",
@@ -98,7 +100,7 @@ function trimRate(s: string) {
 }
 
 export function formatRateHint(kbps: number): string {
-  if (!Number.isFinite(kbps) || kbps <= 0) return "0 不限制";
+  if (!Number.isFinite(kbps) || kbps <= 0) return t("rate.unlimited");
   const mb = formatRateDisplay(kbps, "MBps");
   const mbps = formatRateDisplay(kbps, "Mbps");
   return `${kbps} KB/s · ${mb} MB/s · ${mbps} Mbps`;

@@ -11,6 +11,7 @@ import { ConfirmDialog } from "@/components/ui/confirm";
 import { SheetHeader, SheetTitle, SheetDescription, SheetBody } from "@/components/ui/sheet";
 import { StatusDot } from "@/components/status-dot";
 import { CopyButton } from "./copy-button";
+import { dateLocale, statusText, useI18n } from "@/lib/i18n";
 import {
   caDownloadURL,
   issueVisitor,
@@ -70,6 +71,7 @@ export function ServiceConnectSession({
 }
 
 export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdit: () => void }) {
+  const { t, locale } = useI18n();
   const qc = useQueryClient();
   const busy = useIsMutating({ mutationKey: ["umbra", "service-operation", m.id] }) > 0;
   const state = serviceState(m);
@@ -130,31 +132,34 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
     onError: (e: Error) => toast.error(e.message),
   });
   const ready = serviceCanConnect(m);
-  const access = accessOptions.find((option) => option.mode === m.mode)!;
+  const access = accessOptions().find((option) => option.mode === m.mode)!;
   const grants = (m.grants ?? []).filter((grant) => Date.parse(grant.until) > Date.now());
+  const ticketName = revokeTarget?.label || t("connect.unnamed");
 
   return (
     <>
       <SheetHeader className="service-sheet-heading">
-        <p className="sheet-eyebrow">SERVICE / 连接工作区</p>
+        <p className="sheet-eyebrow">{t("connect.eyebrow")}</p>
         <SheetTitle>{m.name}</SheetTitle>
-        <SheetDescription>连接服务、检查链路与管理访问权限。</SheetDescription>
+        <SheetDescription>{t("connect.hint")}</SheetDescription>
         <Link
           to="/traffic"
           search={{ node: m.nodeId, service: m.id }}
           className="mt-3 inline-flex items-center gap-1.5 text-xs text-pine"
         >
           <Activity className="size-3.5" />
-          查看此服务流量
+          {t("connect.viewTraffic")}
         </Link>
       </SheetHeader>
       <Tabs.Root value={task} onValueChange={setTask} className="flex min-h-0 flex-1 flex-col">
-        <Tabs.List className="connection-task-tabs" aria-label="服务操作">
-          <Tabs.Trigger value="connect">连接服务</Tabs.Trigger>
-          <Tabs.Trigger value="diagnose">诊断链路</Tabs.Trigger>
+        <Tabs.List className="connection-task-tabs" aria-label={t("connect.tabs")}>
+          <Tabs.Trigger value="connect">{t("connect.connect")}</Tabs.Trigger>
+          <Tabs.Trigger value="diagnose">{t("connect.diagnose")}</Tabs.Trigger>
           {m.mode === "visitor" ? (
             <Tabs.Trigger value="credentials">
-              访问凭证{tickets.data?.length ? ` · ${tickets.data.length}` : ""}
+              {tickets.data?.length
+                ? t("connect.ticketsN", { n: tickets.data.length })
+                : t("connect.tickets")}
             </Tabs.Trigger>
           ) : null}
         </Tabs.List>
@@ -165,7 +170,7 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
             <p className="mt-1 text-sm font-medium">{state.next}</p>
             {state.kind === "attention" || state.kind === "disabled" ? (
               <Button variant="outline" size="sm" className="mt-3" onClick={onEdit}>
-                检查配置
+                {t("connect.check")}
               </Button>
             ) : null}
           </section>
@@ -177,12 +182,10 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
             </h3>
             {m.mode === "visitor" ? (
               <>
-                <p className="text-sm leading-relaxed text-ink-soft">
-                  公网不开放业务端口。签发后，在需要访问服务的电脑上运行命令，然后把业务客户端连到本机端口。
-                </p>
+                <p className="text-sm leading-relaxed text-ink-soft">{t("connect.visitorHint")}</p>
                 <div className="grid grid-cols-2 gap-3">
                   <SelectField
-                    label="访问方系统"
+                    label={t("connect.clientOs")}
                     value={platform}
                     onValueChange={(v) => setPlatform(v as Platform)}
                     options={PLATFORMS.filter((p) => p.id !== "docker").map((p) => ({
@@ -191,42 +194,42 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
                     }))}
                   />
                   <SelectField
-                    label="访问方架构"
+                    label={t("connect.clientArch")}
                     value={arch}
                     onValueChange={(v) => setArch(v as Arch)}
                     options={ARCHS.map((a) => ({ value: a.id, label: a.label }))}
                   />
                 </div>
                 <p className="text-xs leading-relaxed text-stone">
-                  从发行页下载 <code>{visitBinary}</code>，将它与下载的 <code>ca.crt</code>{" "}
-                  放在同一目录，再在该目录运行签发的命令。
+                  {t("connect.downloadHintPrefix")} <code>{visitBinary}</code>
+                  {t("connect.downloadHintMid")} <code>ca.crt</code>
+                  {t("connect.downloadHintSuffix")}
                 </p>
                 <TextField
-                  label="访问凭证备注（可选）"
-                  placeholder="例如：笔记本、临时协作"
+                  label={t("connect.ticketLabel")}
+                  placeholder={t("connect.ticketPh")}
                   value={label}
                   onChange={(e) => setLabel(e.target.value)}
                 />
                 <Button onClick={() => issue.mutate()} disabled={!ready || busy || Boolean(issued)}>
-                  {issue.isPending ? "正在签发…" : "签发 24 小时访问命令"}
+                  {issue.isPending ? t("connect.issuing") : t("connect.issue")}
                 </Button>
                 {issued ? (
                   <div className="space-y-3 rounded-lg border border-pine/30 bg-paper-2 p-3">
-                    <p className="text-sm font-medium">请保存命令，关闭面板后无法再次查看</p>
+                    <p className="text-sm font-medium">{t("connect.saveCmd")}</p>
                     <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-relaxed">
                       {visitCommand}
                     </pre>
                     <p className="text-xs text-stone">
-                      {formatRelative(issued.expiresAt)}到期。命令中的 --local
-                      指定业务客户端连接的本机端口。
+                      {t("connect.expires", { when: formatRelative(issued.expiresAt) })}
                     </p>
-                    <CopyButton text={visitCommand} label="复制访问命令" />
+                    <CopyButton text={visitCommand} label={t("connect.copyCmd")} />
                   </div>
                 ) : null}
                 <div className="flex flex-wrap gap-2">
                   <Button asChild variant="outline" size="sm">
                     <a href={caDownloadURL()} target="_blank" rel="noreferrer">
-                      下载入口 CA
+                      {t("connect.downloadCa")}
                     </a>
                   </Button>
                   <Button asChild variant="ghost" size="sm">
@@ -235,53 +238,56 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
                       target="_blank"
                       rel="noreferrer"
                     >
-                      下载访问客户端 <ArrowUpRight className="ml-1 size-3.5" />
+                      {t("connect.downloadClient")} <ArrowUpRight className="ml-1 size-3.5" />
                     </a>
                   </Button>
                 </div>
                 <p className="text-xs leading-relaxed text-stone">
-                  {platform === "windows" ? "在 PowerShell 中运行命令。" : "在终端中运行命令。"}
-                  停掉访问端进程即关闭本机端口。
+                  {platform === "windows" ? t("connect.runWin") : t("connect.runUnix")}{" "}
+                  {t("connect.stopHint")}
                 </p>
               </>
             ) : (
               <>
                 <p className="text-sm text-ink-soft">
-                  {m.mode === "spa"
-                    ? "先放行当前来源 IP，再用原有客户端连接下方地址。授权只影响有效期内的新连接。"
-                    : "用对应协议的业务客户端连接此地址；目标服务仍需自己的身份验证。"}
+                  {m.mode === "spa" ? t("connect.spaHint") : t("connect.publicHint")}
                 </p>
                 {m.entryAddress ? (
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-paper-2 p-3">
                     <code className="break-all text-sm">{m.entryAddress}</code>
-                    <CopyButton text={m.entryAddress} label="复制连接地址" />
+                    <CopyButton text={m.entryAddress} label={t("connect.copyAddr")} />
                   </div>
                 ) : (
                   <p className="rounded-lg bg-paper-2 p-3 text-sm">
-                    入口地址尚未提供。请检查入口的 advertise 配置；业务端口为 {m.entryPort}
-                    。这里不会把控制台地址误当作业务入口。
+                    {t("connect.noAdvertise", { port: m.entryPort ?? "" })}
                   </p>
                 )}
                 {m.mode === "spa" ? (
                   <>
                     <Button onClick={() => knock.mutate()} disabled={!ready || busy}>
-                      {knock.isPending ? "正在放行…" : "临时放行我的 IP"}
+                      {knock.isPending ? t("connect.knocking") : t("connect.knock")}
                     </Button>
                     {knock.data ? (
                       <p role="status" className="text-sm text-live">
-                        已放行 {knock.data.ip}，截至{" "}
-                        {new Date(knock.data.until).toLocaleTimeString()}
-                        。请在有效期内建立连接。
+                        {t("connect.knocked", {
+                          ip: knock.data.ip,
+                          until: new Date(knock.data.until).toLocaleTimeString(dateLocale(locale), {
+                            hour12: false,
+                          }),
+                        })}
                       </p>
                     ) : null}
                     {grants.length ? (
                       <details className="text-xs text-stone">
                         <summary className="cursor-pointer py-2">
-                          当前放行记录 · {grants.length}
+                          {t("connect.grants", { n: grants.length })}
                         </summary>
                         {grants.map((g) => (
                           <p key={g.ip}>
-                            {g.ip} · {formatRelative(g.until)}到期
+                            {t("connect.grantLine", {
+                              ip: g.ip,
+                              until: formatRelative(g.until),
+                            })}
                           </p>
                         ))}
                       </details>
@@ -291,70 +297,64 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
               </>
             )}
             <p className="break-all text-xs text-stone">
-              来源限制：{m.allowCidrs || "未设置 CIDR 白名单"}
+              {t("connect.cidr", { cidr: m.allowCidrs || t("connect.noCidr") })}
             </p>
           </Tabs.Content>
 
           <Tabs.Content value="diagnose" className="space-y-4 focus-visible:outline-none">
             <h3 className="flex items-center gap-2 text-sm font-semibold">
               <Activity className="size-4" />
-              连接诊断
+              {t("connect.diag")}
             </h3>
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 text-sm">
-              <dt className="text-stone">节点</dt>
+              <dt className="text-stone">{t("connect.node")}</dt>
               <dd>
                 <Link to="/nodes" className="underline underline-offset-4">
                   {m.nodeName}
                 </Link>{" "}
-                ·{" "}
-                {m.nodeStatus === "online"
-                  ? "在线"
-                  : m.nodeStatus === "revoked"
-                    ? "已吊销"
-                    : "离线"}
+                · {statusText(m.nodeStatus)}
               </dd>
-              <dt className="text-stone">配置</dt>
-              <dd>{pushLabel[m.pushState] ?? m.pushState}</dd>
-              <dt className="text-stone">入口</dt>
+              <dt className="text-stone">{t("connect.config")}</dt>
+              <dd>{pushLabel()[m.pushState] ?? m.pushState}</dd>
+              <dt className="text-stone">{t("connect.entry")}</dt>
               <dd>
                 {m.mode === "visitor"
-                  ? "不监听公网业务端口"
-                  : (listenLabel[m.listenState] ?? m.listenState)}
+                  ? t("connect.noListen")
+                  : (listenLabel()[m.listenState] ?? m.listenState)}
               </dd>
-              <dt className="text-stone">内网目标</dt>
+              <dt className="text-stone">{t("connect.target")}</dt>
               <dd className="break-all font-mono text-xs">
                 {targetAddress(m.localHost, m.localPort)} · {m.proto.toUpperCase()}
               </dd>
-              <dt className="text-stone">最近探测</dt>
+              <dt className="text-stone">{t("connect.lastProbe")}</dt>
               <dd>
                 {m.lastProbeAt
-                  ? `${formatRelative(m.lastProbeAt)}${m.lastProbeError ? " · 未取得响应" : " · 历史记录"}`
-                  : "尚未验证"}
+                  ? m.lastProbeError
+                    ? t("connect.probeNoReply", { when: formatRelative(m.lastProbeAt) })
+                    : t("connect.probeHistory", { when: formatRelative(m.lastProbeAt) })
+                  : t("connect.neverProbed")}
               </dd>
             </dl>
-            <p className="text-xs leading-relaxed text-stone">
-              探测会向真实目标发送少量测试数据，计入流量。收到响应也不代表应用健康或外部网络一定可达；不响应测试报文的服务可能仍能正常使用。
-            </p>
+            <p className="text-xs leading-relaxed text-stone">{t("connect.probeHint")}</p>
             <Button variant="outline" disabled={!ready || busy} onClick={() => probe.mutate()}>
-              {probe.isPending ? "正在验证响应…" : "发送探测"}
+              {probe.isPending ? t("connect.probing") : t("connect.probe")}
             </Button>
             {probe.error ? (
               <div role="alert" className="rounded-lg bg-paper-2 p-3 text-sm">
-                <p className="font-medium text-rose">未验证目标响应</p>
+                <p className="font-medium text-rose">{t("connect.unverified")}</p>
                 <p className="mt-1 break-all">{probe.error.message}</p>
-                <p className="mt-2 text-xs text-stone">
-                  检查节点是否能访问目标、服务是否监听以及协议是否匹配。目标也可能不支持测试报文，请再用业务客户端验证。
-                </p>
+                <p className="mt-2 text-xs text-stone">{t("connect.unverifiedHint")}</p>
               </div>
             ) : probe.data ? (
               <div role="status" className="rounded-lg bg-paper-2 p-3 text-sm">
                 <p className="font-medium">
-                  {probe.data.bytesIn > 0
-                    ? "本次探测收到响应"
-                    : "本次探测未收到响应，不能确认目标可达"}
+                  {probe.data.bytesIn > 0 ? t("connect.probeOk") : t("connect.probeFail")}
                 </p>
                 <p className="mt-1 text-xs text-stone">
-                  入 {formatBytes(probe.data.bytesIn)} / 出 {formatBytes(probe.data.bytesOut)}
+                  {t("connect.io", {
+                    in: formatBytes(probe.data.bytesIn),
+                    out: formatBytes(probe.data.bytesOut),
+                  })}
                 </p>
                 {probe.data.preview ? (
                   <pre className="mt-2 whitespace-pre-wrap break-all font-mono text-xs">
@@ -363,26 +363,37 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
                 ) : null}
               </div>
             ) : m.lastProbeError ? (
-              <p className="break-all text-sm text-rose">上次探测：{m.lastProbeError}</p>
+              <p className="break-all text-sm text-rose">
+                {t("connect.lastError", { error: m.lastProbeError })}
+              </p>
             ) : null}
             <details className="rounded-lg border border-line p-3 text-xs">
-              <summary className="cursor-pointer font-medium">运行与策略详情</summary>
+              <summary className="cursor-pointer font-medium">{t("connect.details")}</summary>
               <div className="mt-3 space-y-2 text-ink-soft">
                 <p>
-                  活跃连接 {m.proto === "udp" ? (m.udpActive ?? m.activeConns) : m.activeConns} /
-                  上限 {m.maxConns}
+                  {t("connect.active", {
+                    active: m.proto === "udp" ? (m.udpActive ?? m.activeConns) : m.activeConns,
+                    max: m.maxConns,
+                  })}
                 </p>
                 <p>
-                  累计入站 {formatBytes(m.bytesIn)} · 出站 {formatBytes(m.bytesOut)}
+                  {t("connect.bytes", {
+                    in: formatBytes(m.bytesIn),
+                    out: formatBytes(m.bytesOut),
+                  })}
                 </p>
                 <p>
-                  限速 {m.rateKbps ? `${m.rateKbps} KB/s` : "不限"} · 空闲超时{" "}
-                  {m.proto === "udp" ? (m.udpIdleTimeoutSec ?? 60) : (m.idleTimeoutSec ?? 0)} 秒
+                  {t("connect.rateIdle", {
+                    rate: m.rateKbps ? `${m.rateKbps} KB/s` : t("connect.unlimited"),
+                    idle: m.proto === "udp" ? (m.udpIdleTimeoutSec ?? 60) : (m.idleTimeoutSec ?? 0),
+                  })}
                 </p>
                 {m.lastDrop ? (
                   <p>
-                    最近丢弃：{dropReasonLabel[m.lastDrop] ?? m.lastDrop} ·{" "}
-                    {formatRelative(m.lastDropAt ?? null)}
+                    {t("connect.lastDrop", {
+                      reason: dropReasonLabel()[m.lastDrop] ?? m.lastDrop,
+                      when: formatRelative(m.lastDropAt ?? null),
+                    })}
                   </p>
                 ) : null}
               </div>
@@ -391,33 +402,33 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
 
           {m.mode === "visitor" ? (
             <Tabs.Content value="credentials" className="space-y-4 focus-visible:outline-none">
-              <h3 className="text-sm font-semibold">已签发凭证</h3>
-              <p className="text-xs text-stone">
-                无需签发新凭证即可查看或撤销。撤销后不能再建立新连接。
-              </p>
+              <h3 className="text-sm font-semibold">{t("connect.issuedTitle")}</h3>
+              <p className="text-xs text-stone">{t("connect.issuedHint")}</p>
               {tickets.isPending ? (
                 <p role="status" className="text-sm text-stone">
-                  正在读取凭证…
+                  {t("connect.readingTickets")}
                 </p>
               ) : tickets.isError ? (
                 <Button variant="outline" onClick={() => tickets.refetch()}>
-                  读取失败，重试
+                  {t("connect.ticketsFail")}
                 </Button>
               ) : !tickets.data?.length ? (
-                <p className="text-sm text-stone">此服务尚未签发凭证。</p>
+                <p className="text-sm text-stone">{t("connect.noTickets")}</p>
               ) : (
                 <ul className="divide-y divide-line">
-                  {tickets.data.map((t) => (
-                    <li key={t.id} className="flex items-center justify-between gap-3 py-3">
+                  {tickets.data.map((ticket) => (
+                    <li key={ticket.id} className="flex items-center justify-between gap-3 py-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm">{t.label || "未命名凭证"}</p>
+                        <p className="truncate text-sm">{ticket.label || t("connect.unnamed")}</p>
                         <p className="text-xs text-stone">
-                          {t.expired ? "已过期" : `${formatRelative(t.expiresAt)}到期`} ·{" "}
-                          {t.id.slice(-8)}
+                          {ticket.expired
+                            ? t("connect.expired")
+                            : t("connect.expiresAt", { when: formatRelative(ticket.expiresAt) })}{" "}
+                          · {ticket.id.slice(-8)}
                         </p>
                       </div>
-                      <Button variant="ghost" size="sm" onClick={() => setRevokeTarget(t)}>
-                        撤销
+                      <Button variant="ghost" size="sm" onClick={() => setRevokeTarget(ticket)}>
+                        {t("connect.revoke")}
                       </Button>
                     </li>
                   ))}
@@ -430,9 +441,9 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
       <ConfirmDialog
         open={revokeTarget !== null}
         onOpenChange={(open) => !open && setRevokeTarget(null)}
-        title="撤销访问凭证"
-        description={`撤销「${revokeTarget?.label || "未命名凭证"}」后，持有者将无法用它建立新连接。`}
-        confirmLabel="撤销凭证"
+        title={t("connect.revokeTitle")}
+        description={t("connect.revokeBody", { name: ticketName })}
+        confirmLabel={t("connect.revokeConfirm")}
         danger
         pending={busy}
         onConfirm={() => revokeTarget && revoke.mutate(revokeTarget.id)}

@@ -2,6 +2,7 @@
 
 import { ArrowUpRight } from "lucide-react";
 import type { ReactNode } from "react";
+import { useI18n } from "@/lib/i18n";
 import type { Mapping } from "@/lib/umbra/types";
 import { serviceState, targetAddress } from "@/lib/umbra/service";
 import { cn } from "@/lib/utils";
@@ -17,18 +18,21 @@ export function ServiceList({
   onSelect: (id: string) => void;
   renderMenu: (mapping: Mapping) => ReactNode;
 }) {
+  const { t } = useI18n();
   return (
-    <ul className="service-directory" aria-label="服务列表">
+    <ul className="service-directory" aria-label={t("services.list")}>
       {mappings.map((m) => {
         const state = serviceState(m);
         const action =
           state.kind === "attention"
-            ? "诊断"
+            ? t("services.diagnose")
             : state.kind === "pending"
-              ? "查看进度"
+              ? t("services.progress")
               : state.kind === "disabled"
-                ? "查看"
-                : "连接";
+                ? t("services.view")
+                : t("services.connect");
+        const port =
+          m.mode === "visitor" ? t("services.publicClosed") : (m.entryPort ?? t("services.publicNone"));
         return (
           <li
             key={m.id}
@@ -47,9 +51,9 @@ export function ServiceList({
                 </small>
               </span>
               <span className="service-directory-target">
-                <code>对外端口 {m.mode === "visitor" ? "不开放" : (m.entryPort ?? "未分配")}</code>
+                <code>{t("services.publicPort", { port })}</code>
                 <code title={targetAddress(m.localHost, m.localPort)}>
-                  目标 {targetAddress(m.localHost, m.localPort)}
+                  {t("services.target", { addr: targetAddress(m.localHost, m.localPort) })}
                 </code>
               </span>
               <span className="service-directory-state" title={`${state.detail} ${state.next}`}>

@@ -3,6 +3,7 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import type { ComponentProps } from "react";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export const Dialog = DialogPrimitive.Root;
@@ -26,6 +27,7 @@ export function DialogContent({
   children,
   ...props
 }: ComponentProps<typeof DialogPrimitive.Content>) {
+  const { t } = useI18n();
   return (
     <DialogPrimitive.Portal>
       <DialogOverlay />
@@ -39,7 +41,7 @@ export function DialogContent({
         {children}
         <DialogPrimitive.Close className="absolute top-3.5 right-3.5 rounded-sm p-1 text-stone hover:bg-paper-2 hover:text-ink">
           <X className="size-4" />
-          <span className="sr-only">关闭</span>
+          <span className="sr-only">{t("common.close")}</span>
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>

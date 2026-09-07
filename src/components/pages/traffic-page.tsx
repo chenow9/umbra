@@ -11,6 +11,7 @@ import { RateChart } from "@/components/rate-chart";
 import { Pager } from "@/components/ui/pager";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { statusText, useI18n } from "@/lib/i18n";
 import { getTraffic, listNodes, listMappings } from "@/lib/umbra/api";
 import { formatBps, formatBytes } from "@/lib/umbra/format";
 import { peakBpsFromSeries } from "@/lib/umbra/live";
@@ -19,6 +20,7 @@ import { resolveTrafficScope, type TrafficSearch } from "@/lib/umbra/traffic-sco
 import { cn } from "@/lib/utils";
 
 export function TrafficPage() {
+  const { t } = useI18n();
   const search = useSearch({ from: "/traffic" });
   const navigate = useNavigate({ from: "/traffic" });
   const range = search.range ?? "24h";
@@ -44,8 +46,8 @@ export function TrafficPage() {
     placeholderData: (previous, query) =>
       query?.queryKey[3] === nodeId && query?.queryKey[4] === mappingId ? previous : undefined,
   });
-  const t = !invalid && catalogReady ? traffic.data : undefined;
-  const peak = peakBpsFromSeries(t?.series ?? []);
+  const stats = !invalid && catalogReady ? traffic.data : undefined;
+  const peak = peakBpsFromSeries(stats?.series ?? []);
   const update = (change: Partial<TrafficSearch>) =>
     void navigate({ search: { ...search, ...change } });
   useEffect(() => {
@@ -70,7 +72,10 @@ export function TrafficPage() {
             bytesIn: m.bytesIn,
             bytesOut: m.bytesOut,
             rate: (m.bpsIn ?? 0) + (m.bpsOut ?? 0),
-            activity: `${m.proto === "udp" ? "活跃会话" : "连接"} ${m.proto === "udp" ? (m.udpActive ?? m.activeConns) : m.activeConns}`,
+            activity:
+              m.proto === "udp"
+                ? t("traffic.sessions", { n: m.udpActive ?? m.activeConns })
+                : t("traffic.conns", { n: m.activeConns }),
             drops:
               m.proto === "udp"
                 ? (m.udpDropMaxConns ?? 0) + (m.udpDropPerIP ?? 0) + (m.udpDropRate ?? 0)
@@ -79,11 +84,11 @@ export function TrafficPage() {
       : (nodes.data ?? []).map((n) => ({
           id: n.id,
           name: n.name,
-          detail: n.status === "online" ? "在线" : n.status === "revoked" ? "已吊销" : "离线",
+          detail: statusText(n.status),
           bytesIn: n.bytesIn,
           bytesOut: n.bytesOut,
           rate: (n.bpsIn ?? 0) + (n.bpsOut ?? 0),
-          activity: `${n.mappingCount} 项服务`,
+          activity: t("traffic.serviceCount", { n: n.mappingCount }),
           drops: 0,
         }))
   )
@@ -93,13 +98,13 @@ export function TrafficPage() {
   const problem =
     invalid ||
     (catalogError
-      ? "无法读取节点或服务，请重试。"
+      ? t("traffic.nodesFail")
       : traffic.isError
-        ? "流量读取失败，请重试。"
+        ? t("traffic.trafficFail")
         : undefined);
 
   return (
-    <AppShell title="观测" description="查看节点与服务的流量。" showTelemetry={false}>
+    <AppShell title={t("traffic.title")} description={t("traffic.description")} showTelemetry={false}>
       <ObservabilityNav
         active="traffic"
         trafficSearch={search}
@@ -115,7 +120,7 @@ export function TrafficPage() {
             />
             <div
               role="group"
-              aria-label="流量时间范围"
+              aria-label={t("traffic.range")}
               className="flex w-fit rounded-md bg-paper-2 p-0.5 shadow-border"
             >
               {(["1h", "24h", "7d"] as const).map((r) => (
@@ -129,7 +134,7 @@ export function TrafficPage() {
                     range === r ? "bg-paper text-ink" : "text-stone hover:text-ink",
                   )}
                 >
-                  {r === "1h" ? "1 小时" : r === "24h" ? "24 小时" : "7 天"}
+                  {r === "1h" ? t("traffic.h1") : r === "24h" ? t("traffic.h24") : t("traffic.d7")}
                 </button>
               ))}
             </div>
@@ -138,22 +143,22 @@ export function TrafficPage() {
       />
       <div className="flex flex-col gap-5">
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-          <nav aria-label="流量范围" className="flex min-w-0 flex-wrap items-center gap-2">
+          <nav aria-label={t("traffic.scope")} className="flex min-w-0 flex-wrap items-center gap-2">
             <Link to="/traffic" search={{ range, chart }}>
-              全部节点
+              {t("traffic.allNodes")}
             </Link>
             {nodeId ? (
               <>
                 <span className="text-stone">/</span>
                 <Link to="/traffic" search={{ node: nodeId, range, chart }} className="break-all">
-                  {scope.node?.name ?? "所选节点"}
+                  {scope.node?.name ?? t("traffic.selectedNode")}
                 </Link>
               </>
             ) : null}
             {mappingId ? (
               <>
                 <span className="text-stone">/</span>
-                <span className="break-all">{scope.service?.name ?? "所选服务"}</span>
+                <span className="break-all">{scope.service?.name ?? t("traffic.selectedService")}</span>
               </>
             ) : null}
           </nav>
@@ -164,7 +169,7 @@ export function TrafficPage() {
               search={{ service: mappingId || undefined }}
               className="text-xs text-pine"
             >
-              {mappingId ? "打开服务" : "返回节点服务"} →
+              {mappingId ? t("traffic.openService") : t("traffic.backNode")} →
             </Link>
           ) : null}
         </div>
@@ -177,7 +182,7 @@ export function TrafficPage() {
                 className="mt-2"
                 onClick={() => update({ node: undefined, service: undefined })}
               >
-                返回全部节点
+                {t("traffic.backAll")}
               </Button>
             ) : (
               <Button
@@ -189,47 +194,55 @@ export function TrafficPage() {
                   void traffic.refetch();
                 }}
               >
-                重新加载
+                {t("common.retry")}
               </Button>
             )}
           </div>
         ) : null}
         <section
-          aria-label="流量指标"
+          aria-label={t("traffic.metrics")}
           aria-busy={traffic.isFetching}
           className="grid grid-cols-2 gap-3 lg:grid-cols-4"
         >
           <Mini
-            label="当前入站速率"
-            value={t ? formatBps(t.bpsIn) : "—"}
-            hint={t && t.series.length > 1 ? `时段采样峰值 ${formatBps(peak.in)}` : "等待时段采样"}
+            label={t("traffic.inRate")}
+            value={stats ? formatBps(stats.bpsIn) : "—"}
+            hint={
+              stats && stats.series.length > 1
+                ? t("traffic.peak", { v: formatBps(peak.in) })
+                : t("traffic.waitSample")
+            }
           />
           <Mini
-            label="当前出站速率"
-            value={t ? formatBps(t.bpsOut) : "—"}
-            hint={t && t.series.length > 1 ? `时段采样峰值 ${formatBps(peak.out)}` : "等待时段采样"}
+            label={t("traffic.outRate")}
+            value={stats ? formatBps(stats.bpsOut) : "—"}
+            hint={
+              stats && stats.series.length > 1
+                ? t("traffic.peak", { v: formatBps(peak.out) })
+                : t("traffic.waitSample")
+            }
           />
           <Mini
-            label="历史累计入站"
-            value={t ? formatBytes(t.bytesIn) : "—"}
-            hint="不随时间范围切换"
+            label={t("traffic.histIn")}
+            value={stats ? formatBytes(stats.bytesIn) : "—"}
+            hint={t("traffic.histHint")}
           />
           <Mini
-            label="历史累计出站"
-            value={t ? formatBytes(t.bytesOut) : "—"}
-            hint="不随时间范围切换"
+            label={t("traffic.histOut")}
+            value={stats ? formatBytes(stats.bytesOut) : "—"}
+            hint={t("traffic.histHint")}
           />
         </section>
-        <section className="min-w-0 rounded-xl bg-card p-4 shadow-border" aria-label="流量趋势">
+        <section className="min-w-0 rounded-xl bg-card p-4 shadow-border" aria-label={t("traffic.trend")}>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <div role="group" aria-label="图表类型" className="flex gap-1">
+            <div role="group" aria-label={t("traffic.chartType")} className="flex gap-1">
               <Button
                 size="sm"
                 variant={chart === "rate" ? "secondary" : "ghost"}
                 aria-pressed={chart === "rate"}
                 onClick={() => update({ chart: "rate" })}
               >
-                速率趋势
+                {t("traffic.rate")}
               </Button>
               <Button
                 size="sm"
@@ -237,40 +250,43 @@ export function TrafficPage() {
                 aria-pressed={chart === "bytes"}
                 onClick={() => update({ chart: "bytes" })}
               >
-                累计流量
+                {t("traffic.bytes")}
               </Button>
             </div>
             <span className="min-h-4 text-xs text-stone" role="status">
-              {traffic.isFetching ? "更新中…" : ""}
+              {traffic.isFetching ? t("traffic.updating") : ""}
             </span>
           </div>
           <p className="mb-2 min-h-8 text-xs leading-4 text-stone">
-            {chart === "rate"
-              ? "曲线显示所选时段的采样平均速率；上方显示当前速率。"
-              : "曲线显示所选时段内的历史累计读数，不是该时段新增流量。"}
+            {chart === "rate" ? t("traffic.rateHint") : t("traffic.bytesHint")}
           </p>
           <RateChart
             kind={chart}
             range={range}
-            data={t?.series ?? []}
+            data={stats?.series ?? []}
             loading={!catalogReady || traffic.isPending}
             updating={traffic.isPlaceholderData}
             error={Boolean(problem)}
           />
         </section>
         {!mappingId && !invalid ? (
-          <section className="space-y-3" aria-label={nodeId ? "服务流量明细" : "节点流量明细"}>
+          <section
+            className="space-y-3"
+            aria-label={nodeId ? t("traffic.serviceDetail") : t("traffic.nodeDetail")}
+          >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-sm font-medium">{nodeId ? "服务流量" : "节点流量"}</h2>
+                <h2 className="text-sm font-medium">
+                  {nodeId ? t("traffic.serviceTraffic") : t("traffic.nodeTraffic")}
+                </h2>
                 <p className="mt-1 text-xs text-stone">
-                  历史累计与当前速率 · 选择{nodeId ? "服务" : "节点"}查看趋势
+                  {nodeId ? t("traffic.detailHintService") : t("traffic.detailHintNode")}
                 </p>
               </div>
               <Input
                 className="w-full bg-card sm:w-56"
-                aria-label="搜索流量明细"
-                placeholder={nodeId ? "搜索服务" : "搜索节点"}
+                aria-label={t("traffic.searchDetail")}
+                placeholder={nodeId ? t("traffic.searchService") : t("traffic.searchNode")}
                 value={q}
                 onChange={(e) => {
                   setQ(e.target.value);
@@ -280,7 +296,7 @@ export function TrafficPage() {
             </div>
             {!catalogReady ? (
               <p role="status" className="py-6 text-sm text-stone">
-                {catalogError ? "明细读取失败。" : "正在读取明细…"}
+                {catalogError ? t("traffic.catalogFail") : t("traffic.catalogLoading")}
               </p>
             ) : rows.length ? (
               <ul className="traffic-breakdown">
@@ -294,23 +310,23 @@ export function TrafficPage() {
                         range,
                         chart,
                       }}
-                      aria-label={`查看 ${row.name} 的流量`}
+                      aria-label={t("traffic.viewRow", { name: row.name })}
                     >
                       <span className="min-w-0">
                         <strong className="block truncate text-sm font-medium">{row.name}</strong>
                         <small className="mt-1 block text-xs text-stone">
                           {row.detail} · {row.activity}
-                          {row.drops > 0 ? ` · UDP 累计丢弃 ${row.drops}` : ""}
+                          {row.drops > 0 ? t("traffic.udpDrops", { n: row.drops }) : ""}
                         </small>
                       </span>
                       <span className="traffic-breakdown-totals">
-                        <small>累计入 / 出</small>
+                        <small>{t("traffic.cumIo")}</small>
                         <span>
                           {formatBytes(row.bytesIn)} / {formatBytes(row.bytesOut)}
                         </span>
                       </span>
                       <span className="traffic-breakdown-rate">
-                        <small>当前总速率</small>
+                        <small>{t("traffic.nowRate")}</small>
                         <span>{formatBps(row.rate)}</span>
                       </span>
                       <ArrowRight className="size-4 shrink-0 text-stone" />
@@ -320,7 +336,7 @@ export function TrafficPage() {
               </ul>
             ) : (
               <p className="rounded-xl border border-dashed border-line p-6 text-sm text-stone">
-                {q ? "没有匹配结果，请调整搜索。" : nodeId ? "此节点还没有服务。" : "还没有节点。"}
+                {q ? t("traffic.noMatch") : nodeId ? t("traffic.noServices") : t("traffic.noNodes")}
               </p>
             )}
             {rows.length > PAGE_SIZE ? (

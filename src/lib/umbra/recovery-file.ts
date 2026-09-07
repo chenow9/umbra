@@ -1,5 +1,7 @@
+import { t } from "../i18n/index.ts";
+
 export function downloadRecoveryCodes(codes: string[]) {
-  const blob = new Blob([`Umbra 控制台恢复码\n\n${codes.join("\n")}\n`], {
+  const blob = new Blob([`${t("recoveryFile.heading")}\n\n${codes.join("\n")}\n`], {
     type: "text/plain;charset=utf-8",
   });
   const url = URL.createObjectURL(blob);

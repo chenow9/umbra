@@ -16,6 +16,7 @@ import {
   DialogDescription,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { statusText, useI18n } from "@/lib/i18n";
 
 export function NodeScopePicker({
   nodes,
@@ -28,6 +29,7 @@ export function NodeScopePicker({
   nodeId?: string;
   onSelect: (id?: string) => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -40,23 +42,23 @@ export function NodeScopePicker({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="w-full justify-between" aria-label="筛选节点">
+        <Button variant="outline" className="w-full justify-between" aria-label={t("scope.filter")}>
           <span className="truncate">
             {nodeId
-              ? (nodes.find((node) => node.id === nodeId)?.name ?? "节点已不存在")
-              : "全部节点"}
+              ? (nodes.find((node) => node.id === nodeId)?.name ?? t("services.missingNodeName"))
+              : t("scope.all")}
           </span>
           <ChevronDown className="size-4 shrink-0 text-stone" />
         </Button>
       </DialogTrigger>
       <DialogContent className="flex max-h-[85dvh] max-w-lg flex-col">
         <DialogHeader>
-          <DialogTitle>选择节点</DialogTitle>
-          <DialogDescription>查看该节点的服务。需处理的服务越多，节点越靠前。</DialogDescription>
+          <DialogTitle>{t("scope.title")}</DialogTitle>
+          <DialogDescription>{t("scope.hint")}</DialogDescription>
         </DialogHeader>
         <Input
-          aria-label="搜索节点或其服务"
-          placeholder="搜索节点、服务或端口"
+          aria-label={t("scope.search")}
+          placeholder={t("scope.searchPh")}
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
@@ -66,31 +68,29 @@ export function NodeScopePicker({
         />
         <div className="min-h-0 overflow-y-auto">
           <Button variant="ghost" className="mb-2 w-full justify-between" onClick={() => select()}>
-            全部节点 {!nodeId ? <Check className="size-4" /> : null}
+            {t("scope.all")} {!nodeId ? <Check className="size-4" /> : null}
           </Button>
           {groups.length ? (
-            <ul className="node-scope-list" aria-label="节点列表">
+            <ul className="node-scope-list" aria-label={t("scope.list")}>
               {result.items.map(({ node, summary }) => (
                 <li key={node.id}>
                   <button
-                    aria-label={`选择 ${node.name}`}
+                    aria-label={t("scope.pick", { name: node.name })}
                     aria-pressed={nodeId === node.id}
                     onClick={() => select(node.id)}
                   >
                     <span className="min-w-0 flex-1">
                       <strong className="block break-all text-sm font-medium">{node.name}</strong>
                       <span className="mt-1 block text-xs text-stone">
-                        {node.status === "online"
-                          ? "在线"
-                          : node.status === "revoked"
-                            ? "已吊销"
-                            : "离线"}{" "}
-                        · {summary.total} 项服务
+                        {t("scope.line", {
+                          status: statusText(node.status),
+                          count: summary.total,
+                        })}
                       </span>
                     </span>
                     {summary.attention > 0 ? (
                       <span className="shrink-0 text-xs text-rose">
-                        {summary.attention} 项需处理
+                        {t("scope.attention", { n: summary.attention })}
                       </span>
                     ) : null}
                     {nodeId === node.id ? <Check className="size-4 shrink-0" /> : null}
@@ -99,7 +99,7 @@ export function NodeScopePicker({
               ))}
             </ul>
           ) : (
-            <p className="py-8 text-center text-sm text-stone">没有匹配的节点。</p>
+            <p className="py-8 text-center text-sm text-stone">{t("scope.empty")}</p>
           )}
         </div>
         {groups.length > PAGE_SIZE ? (

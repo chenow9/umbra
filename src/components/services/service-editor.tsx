@@ -15,6 +15,7 @@ import {
   SheetFooter,
   SheetClose,
 } from "@/components/ui/sheet";
+import { useI18n } from "@/lib/i18n";
 import { listNodes, createMapping, updateMapping } from "@/lib/umbra/api";
 import {
   formatRateDisplay,
@@ -27,6 +28,7 @@ import {
 import type { Mapping, MappingMode, Proto } from "@/lib/umbra/types";
 import { accessOptions, validateService } from "@/lib/umbra/service";
 function RateLimitField({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+  const { t } = useI18n();
   const id = useId();
   const hintId = `${id}-hint`;
   const kbps = Number(value) || 0;
@@ -49,7 +51,7 @@ function RateLimitField({ value, onChange }: { value: string; onChange: (next: s
 
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <Label htmlFor={id}>限速</Label>
+      <Label htmlFor={id}>{t("editor.rate")}</Label>
       <div className="flex h-11 min-w-0 overflow-hidden rounded-md bg-paper shadow-border focus-within:ring-2 focus-within:ring-pine/35">
         <Input
           id={id}
@@ -61,7 +63,7 @@ function RateLimitField({ value, onChange }: { value: string; onChange: (next: s
           onChange={(e) => commit(e.target.value, unit)}
         />
         <Select
-          aria-label="限速单位"
+          aria-label={t("editor.rateUnit")}
           value={unit}
           onValueChange={(v) => {
             const next = v as RateUnit;
@@ -88,6 +90,7 @@ export function ServiceEditor({
   defaultNodeId?: string;
   onDone: (mapping: Mapping) => void;
 }) {
+  const { t } = useI18n();
   const nodes = useQuery({ queryKey: ["umbra", "nodes"], queryFn: () => listNodes() });
   const usable = (nodes.data ?? []).filter((a) => a.status !== "revoked");
   const [nodeId, setNodeId] = useState(mapping?.nodeId ?? defaultNodeId ?? "");
@@ -129,11 +132,11 @@ export function ServiceEditor({
   };
 
   const validation = !usable.some((node) => node.id === selected)
-    ? "请选择有效的节点。"
+    ? t("editor.invalidNode")
     : validateService(payload);
 
   const targetValidation = !usable.some((node) => node.id === selected)
-    ? "请选择有效的节点。"
+    ? t("editor.invalidNode")
     : validateService({
         ...payload,
         mode: "visitor",
@@ -145,7 +148,7 @@ export function ServiceEditor({
         rateKbps: 0,
       });
   const stepValidation = !editing && step === 0 ? targetValidation : validation;
-  const stepTitles = ["服务在哪里", "谁可以访问", "确认并接入"];
+  const stepTitles = [t("editor.where"), t("editor.who"), t("editor.confirm")];
 
   const save = useMutation({
     mutationFn: () =>
@@ -153,7 +156,7 @@ export function ServiceEditor({
         ? updateMapping({ data: { id: mapping.id, ...payload } })
         : createMapping({ data: payload }),
     onSuccess: (m) => {
-      toast.success(editing ? "服务配置已保存" : "服务已添加，接下来查看连接方式");
+      toast.success(editing ? t("editor.saved") : t("editor.added"));
       onDone(m);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -162,16 +165,12 @@ export function ServiceEditor({
   return (
     <>
       <SheetHeader className="service-sheet-heading">
-        <p className="sheet-eyebrow">SERVICE / 服务配置</p>
-        <SheetTitle>{editing ? "编辑服务" : "添加服务"}</SheetTitle>
-        <SheetDescription>
-          {editing
-            ? "配置会动态下发；修改访问方式会改变连接方法。"
-            : "告诉 Umbra 服务在哪里，以及谁可以访问。"}
-        </SheetDescription>
+        <p className="sheet-eyebrow">{t("editor.eyebrow")}</p>
+        <SheetTitle>{editing ? t("editor.edit") : t("editor.add")}</SheetTitle>
+        <SheetDescription>{editing ? t("editor.editHint") : t("editor.addHint")}</SheetDescription>
       </SheetHeader>
       {!editing ? (
-        <nav className="service-steps" aria-label="添加服务步骤">
+        <nav className="service-steps" aria-label={t("editor.steps")}>
           {stepTitles.map((title, index) => (
             <button
               type="button"
@@ -208,31 +207,34 @@ export function ServiceEditor({
             <>
               <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {editing ? (
-                  <h3 className="text-sm font-semibold sm:col-span-2">01 · 服务在哪里</h3>
+                  <h3 className="text-sm font-semibold sm:col-span-2">01 · {t("editor.where")}</h3>
                 ) : null}
                 <div className="sm:col-span-2">
                   <TextField
-                    label="服务名称"
+                    label={t("editor.name")}
                     required
                     autoFocus={editing}
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="例如：工作电脑 SSH"
+                    placeholder={t("editor.namePh")}
                   />
                 </div>
                 <div className="sm:col-span-2">
                   <SelectField
-                    label="节点"
+                    label={t("editor.node")}
                     value={selected}
                     onValueChange={setNodeId}
                     options={usable.map((a) => ({
                       value: a.id,
-                      label: `${a.name} · ${a.status === "online" ? "在线" : "离线"}`,
+                      label:
+                        a.status === "online"
+                          ? t("editor.nodeOnline", { name: a.name })
+                          : t("editor.nodeOffline", { name: a.name }),
                     }))}
                   />
                 </div>
                 <SelectField
-                  label="协议"
+                  label={t("editor.proto")}
                   value={proto}
                   onValueChange={(v) => setProto(v as Proto)}
                   options={[
@@ -241,17 +243,17 @@ export function ServiceEditor({
                   ]}
                 />
                 <TextField
-                  label="目标地址"
+                  label={t("editor.host")}
                   value={localHost}
                   onChange={(e) => setLocalHost(e.target.value)}
                   required
                 />
                 <TextField
-                  label="目标端口"
+                  label={t("editor.port")}
                   type="number"
                   min={1}
                   max={65535}
-                  placeholder="例如：22"
+                  placeholder={t("editor.portPh")}
                   value={localPort}
                   onChange={(e) => setLocalPort(e.target.value)}
                   required
@@ -263,9 +265,9 @@ export function ServiceEditor({
             <>
               <fieldset className="space-y-3">
                 <legend className={editing ? "mb-3 text-sm font-semibold" : "sr-only"}>
-                  02 · 谁可以访问
+                  02 · {t("editor.who")}
                 </legend>
-                {accessOptions.map((option) => (
+                {accessOptions().map((option) => (
                   <label
                     key={option.mode}
                     className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${mode === option.mode ? "border-pine bg-paper-2" : "border-line"}`}
@@ -287,58 +289,58 @@ export function ServiceEditor({
                 ))}
                 {mode !== "visitor" ? (
                   <TextField
-                    label="公网入口端口"
+                    label={t("editor.entry")}
                     type="number"
                     min={1}
                     max={65535}
                     value={entryPort}
                     onChange={(e) => setEntryPort(e.target.value)}
                     required
-                    placeholder="例如：22022"
+                    placeholder={t("editor.entryPh")}
                   />
                 ) : null}
                 <TextField
-                  label="允许的来源网段（可选）"
+                  label={t("editor.cidr")}
                   value={allowCidrs}
                   onChange={(e) => setAllowCidrs(e.target.value)}
-                  placeholder="例如：10.0.0.0/8，留空不限制来源 IP"
+                  placeholder={t("editor.cidrPh")}
                 />
               </fieldset>
               <details className="rounded-lg border border-line">
                 <summary className="cursor-pointer p-3 text-sm font-medium">
-                  高级设置 · 连接数、超时与限速
+                  {t("editor.advanced")}
                 </summary>
                 <div className="grid gap-4 p-3 pt-0 sm:grid-cols-2">
                   <TextField
-                    label="最大连接"
+                    label={t("editor.maxConns")}
                     inputMode="numeric"
                     value={maxConns}
                     onChange={(e) => setMaxConns(e.target.value)}
                   />
                   {mode === "spa" ? (
                     <TextField
-                      label="敲门窗口"
+                      label={t("editor.spaWindow")}
                       inputMode="numeric"
                       value={spaTtl}
                       onChange={(e) => setSpaTtl(e.target.value)}
-                      placeholder="秒，只限制新建"
+                      placeholder={t("editor.spaPh")}
                     />
                   ) : null}
                   {proto === "tcp" ? (
                     <TextField
-                      label="TCP 空闲"
+                      label={t("editor.tcpIdle")}
                       inputMode="numeric"
                       value={idleTimeout}
                       onChange={(e) => setIdleTimeout(e.target.value)}
-                      placeholder="秒，0 不断开"
+                      placeholder={t("editor.tcpIdlePh")}
                     />
                   ) : (
                     <TextField
-                      label="UDP 空闲"
+                      label={t("editor.udpIdle")}
                       inputMode="numeric"
                       value={udpIdle}
                       onChange={(e) => setUdpIdle(e.target.value)}
-                      placeholder="秒，无报文后回收"
+                      placeholder={t("editor.udpIdlePh")}
                     />
                   )}
                   <RateLimitField value={rateKbps} onChange={setRateKbps} />
@@ -349,24 +351,27 @@ export function ServiceEditor({
           {editing || step === 2 ? (
             <>
               <section className="rounded-lg bg-paper-2 p-5 text-sm leading-relaxed">
-                <h3 className="text-xl font-semibold">{name || "服务配置"}</h3>
+                <h3 className="text-xl font-semibold">{name || t("editor.untitled")}</h3>
                 <p className="mt-2 text-xs text-stone">
-                  {accessOptions.find((option) => option.mode === mode)?.label}
-                  {mode !== "visitor" ? ` · 入口端口 ${entryPort}` : " · 不占用公网业务端口"}
+                  {accessOptions().find((option) => option.mode === mode)?.label}
+                  {mode !== "visitor"
+                    ? t("editor.entryPort", { port: entryPort })
+                    : t("editor.noPublic")}
                 </p>
                 <p className="mt-1 break-all text-ink-soft">
-                  {usable.find((node) => node.id === selected)?.name ?? "选择节点"} →{" "}
-                  {localHost || "目标地址"}:{localPort || "目标端口"} · {proto.toUpperCase()}
+                  {usable.find((node) => node.id === selected)?.name ?? t("editor.pickNode")} →{" "}
+                  {localHost || t("editor.hostPh")}:{localPort || t("editor.portWord")} ·{" "}
+                  {proto.toUpperCase()}
                 </p>
                 <p className="mt-1 text-xs text-stone">
                   {mode === "visitor"
-                    ? "入口不开放业务端口。添加后签发访问命令，在访问方电脑运行。"
+                    ? t("editor.visitorNext")
                     : mode === "spa"
-                      ? "入口监听业务端口，访问前需临时放行来源 IP。"
-                      : "入口会监听公网业务端口。请确认目标服务自身具备所需的身份验证。"}
+                      ? t("editor.spaNext")
+                      : t("editor.publicNext")}
                 </p>
                 {usable.find((node) => node.id === selected)?.status !== "online" ? (
-                  <p className="mt-2 text-xs text-amber">节点尚未在线，配置会在重连后下发。</p>
+                  <p className="mt-2 text-xs text-amber">{t("editor.nodeOfflineHint")}</p>
                 ) : null}
                 {save.error ? (
                   <p role="alert" className="mt-2 text-rose">
@@ -375,38 +380,40 @@ export function ServiceEditor({
                 ) : null}
               </section>
               <p className="text-xs text-stone">
-                来源限制：{allowCidrs || "未设置 CIDR 白名单"}。最大连接 {maxConns}，
-                {Number(rateKbps) ? `限速 ${rateKbps} KB/s` : "不限速"}。
+                {t("editor.cidrLine", {
+                  cidr: allowCidrs || t("editor.noCidr"),
+                  max: maxConns,
+                })}
+                {Number(rateKbps) ? t("editor.rateLine", { n: rateKbps }) : t("editor.noRate")}.
               </p>
             </>
           ) : null}
         </SheetBody>
         <SheetFooter className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-stone" aria-live="polite">
-            {stepValidation ??
-              (!editing && step < 2 ? "下一步前可随时返回修改。" : "保存后进入连接与诊断。")}
+            {stepValidation ?? (!editing && step < 2 ? t("editor.nextHint") : t("editor.saveHint"))}
           </p>
           <div className="flex shrink-0 gap-2">
             <SheetClose asChild>
               <Button type="button" variant="ghost">
-                取消
+                {t("common.cancel")}
               </Button>
             </SheetClose>
             {!editing && step > 0 ? (
               <Button type="button" variant="outline" onClick={() => setStep(step - 1)}>
-                上一步
+                {t("editor.back")}
               </Button>
             ) : null}
             <Button type="submit" disabled={Boolean(stepValidation) || save.isPending}>
               {save.isPending
                 ? editing
-                  ? "保存中…"
-                  : "下发中…"
+                  ? t("common.saving")
+                  : t("editor.pushing")
                 : editing
-                  ? "保存配置"
+                  ? t("editor.save")
                   : step < 2
-                    ? "下一步"
-                    : "确认接入并连接"}
+                    ? t("editor.next")
+                    : t("editor.confirmConnect")}
             </Button>
           </div>
         </SheetFooter>

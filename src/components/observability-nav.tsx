@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 import type { TrafficSearch } from "@/lib/umbra/traffic-scope";
 import type { ReactNode } from "react";
 export function ObservabilityNav({
@@ -11,13 +12,14 @@ export function ObservabilityNav({
   actions?: ReactNode;
   trafficSearch?: TrafficSearch;
 }) {
+  const { t } = useI18n();
   return (
     <div className="observation-viewbar">
-      <nav aria-label="观测视图" className="flex shrink-0 gap-1">
+      <nav aria-label={t("observe.views")} className="flex shrink-0 gap-1">
         {(
           [
-            { key: "traffic", to: "/traffic", label: "流量" },
-            { key: "audit", to: "/audit", label: "审计记录" },
+            { key: "traffic", to: "/traffic", label: t("observe.traffic") },
+            { key: "audit", to: "/audit", label: t("observe.audit") },
           ] as const
         ).map((item) => (
           <Link

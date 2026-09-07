@@ -21,5 +21,5 @@ export function NameDotHint({
 }
 
 export function ModeName({ mode, className }: { mode: MappingMode; className?: string }) {
-  return <NameDotHint name={mode} hint={modeHint[mode]} className={className} />;
+  return <NameDotHint name={mode} hint={modeHint()[mode]} className={className} />;
 }
