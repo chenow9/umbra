@@ -46,8 +46,8 @@ export function LanguageSelect() {
       onValueChange={(value) => setPreference(value as Locale)}
       options={OPTIONS.map((item) => ({ value: item.id, label: t(item.labelKey) }))}
       aria-label={t("locale.group")}
-      triggerClassName="auth-language-control"
-      contentClassName="border border-line shadow-lg"
+      triggerClassName="auth-language-control w-auto bg-transparent shadow-none text-ink-soft"
+      contentClassName="auth-language-menu"
     />
   );
 }

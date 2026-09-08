@@ -43,7 +43,6 @@ export function Select({
           "disabled:cursor-not-allowed disabled:opacity-50",
           "data-[placeholder]:text-stone",
           triggerClassName,
-          contentClassName,
         )}
       >
         <span className="min-w-0 flex-1 truncate">
