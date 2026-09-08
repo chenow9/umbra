@@ -9,6 +9,7 @@
 <p align="center">
   <a href="https://github.com/chenow9/umbra/actions/workflows/ci.yml"><img src="https://github.com/chenow9/umbra/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/chenow9/umbra/releases/latest"><img src="https://img.shields.io/github/v/release/chenow9/umbra" alt="Release"></a>
+  <a href="https://github.com/chenow9/umbra/releases"><img src="https://img.shields.io/github/downloads/chenow9/umbra/total?label=Release%20Downloads" alt="Release Downloads" title="Total asset downloads across all releases (includes binaries and checksums; excludes temporary Actions artifacts)"></a>
   <a href="https://hub.docker.com/r/chenow9/umbrad"><img src="https://img.shields.io/docker/pulls/chenow9/umbrad?label=Docker%20Pulls" alt="Docker Pulls"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/chenow9/umbra" alt="License"></a>
 </p>
