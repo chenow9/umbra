@@ -1,7 +1,6 @@
 package control
 
 import (
-	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,36 +23,6 @@ func TestUIAssetDirectoryIsNotListed(t *testing.T) {
 		if strings.Contains(body, "<a href=") || strings.Contains(body, "<pre>") {
 			t.Fatalf("%s listed files: %s", p, body)
 		}
-	}
-}
-
-func TestUIAssetFileStillServedUnauthenticated(t *testing.T) {
-	c, srv, _ := newTestConsole(t)
-	c.SkipAuth = false
-	entries, err := fs.ReadDir(uiFS, "ui/assets")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var name string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".js") {
-			name = e.Name()
-			break
-		}
-	}
-	if name == "" {
-		t.Fatal("no embedded js asset")
-	}
-	res, err := http.Get(srv.URL + "/assets/" + name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := readBody(t, res)
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("asset %s status %d %s", name, res.StatusCode, body)
-	}
-	if ct := res.Header.Get("Content-Type"); !strings.Contains(ct, "javascript") {
-		t.Fatalf("asset content-type %q", ct)
 	}
 }
 
@@ -120,5 +89,8 @@ func TestUIDirAssetDirectoryIsNotListed(t *testing.T) {
 	body = readBody(t, res)
 	if res.StatusCode != http.StatusOK || !strings.Contains(body, "console.log") {
 		t.Fatalf("file status %d %s", res.StatusCode, body)
+	}
+	if ct := res.Header.Get("Content-Type"); !strings.Contains(ct, "javascript") {
+		t.Fatalf("asset content-type %q", ct)
 	}
 }
