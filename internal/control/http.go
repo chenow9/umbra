@@ -137,31 +137,37 @@ func (c *Console) serveUI(w http.ResponseWriter, r *http.Request) {
 	if p == "." || p == "" {
 		p = "/"
 	}
+	var fsys fs.FS = uiFS
+	root := "ui"
 	if c.UIDir != "" {
-		fp := path.Join(c.UIDir, p)
-		if p == "/" {
-			fp = path.Join(c.UIDir, "index.html")
-		}
-		if st, err := os.Stat(fp); err == nil && !st.IsDir() {
-			http.ServeFile(w, r, fp)
-			return
-		}
-		http.ServeFile(w, r, path.Join(c.UIDir, "index.html"))
-		return
+		fsys = os.DirFS(c.UIDir)
+		root = "."
 	}
-	sub, err := fs.Sub(uiFS, "ui")
+	sub, err := fs.Sub(fsys, root)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	rel := strings.TrimPrefix(p, "/")
-	if rel == "" || rel == "." || strings.HasSuffix(rel, "/") {
-		rel = "index.html"
+	serveUIFile(w, r, sub, p)
+}
+
+func serveUIFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, p string) {
+	name := strings.TrimPrefix(p, "/")
+	if name == "" || name == "." {
+		name = "index.html"
 	}
-	if _, err := fs.Stat(sub, rel); err != nil {
-		rel = "index.html"
+	st, err := fs.Stat(fsys, name)
+	switch {
+	case err == nil && st.IsDir():
+		http.NotFound(w, r)
+		return
+	case err != nil && (p == "/assets" || strings.HasPrefix(p, "/assets/")):
+		http.NotFound(w, r)
+		return
+	case err != nil:
+		name = "index.html"
 	}
-	http.ServeFileFS(w, r, sub, rel)
+	http.ServeFileFS(w, r, fsys, name)
 }
 
 func (c *Console) need(h http.HandlerFunc) http.HandlerFunc {
