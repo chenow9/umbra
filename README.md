@@ -1,4 +1,4 @@
-# Umbra
+<h1 align="center">Umbra</h1>
 
 <p align="center">
   <img src="public/og.jpg" alt="Umbra" width="900">
