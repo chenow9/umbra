@@ -142,6 +142,8 @@ func (c *Console) postDeleteNode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	prevRevoked := c.snapshotRevoked()
+	prevNodeOrigins := append([]importNodeOrigin(nil), c.nodeOrigins...)
+	prevMapOrigins := append([]importMapOrigin(nil), c.mapOrigins...)
 
 	c.revokeHash(a.TokenHash)
 	c.revokeHash(a.PrevHash)
@@ -152,6 +154,7 @@ func (c *Console) postDeleteNode(w http.ResponseWriter, r *http.Request) {
 		delete(c.maps, mid)
 	}
 	delete(c.nodes, id)
+	c.pruneOriginsForNodeLocked(id)
 	c.logAudit("node.delete", id, prevNode.Name)
 
 	if err := c.save(); err != nil {
@@ -163,6 +166,8 @@ func (c *Console) postDeleteNode(w http.ResponseWriter, r *http.Request) {
 			c.tickets[tid] = t
 		}
 		c.revoked = prevRevoked
+		c.nodeOrigins = prevNodeOrigins
+		c.mapOrigins = prevMapOrigins
 		c.mu.Unlock()
 		persistFail(w)
 		return

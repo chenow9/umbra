@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+在多台独立公网入口之间批量导出 / 导入节点和服务配置。
+
+- 控制台可导出选中节点及其服务为带 `schemaVersion` 的 JSON；不含节点凭证、证书私钥、管理认证、访问票据或运行状态
+- 导入先预览再写入：每个来源节点可新建（独立身份与一次性凭证）或绑定已有节点；已导入服务默认识别并跳过，更新需查看差异
+- 端口冲突沿用入口级监听规则并检查批次内部冲突；持久化失败回滚；保存成功后走现有配置下发与 ACK，离线或监听失败不记为导入失败
+- 停用服务保持停用；复制配置不会自动建立内网隧道，新节点仍需部署并连接对应公网入口
+
+Export and import node/service configuration across independent public gateways.
+
+- Export selected nodes and services as versioned JSON without credentials, private keys, console auth, tickets, or runtime status
+- Import previews before writing; create a new node identity or bind an existing one; matched services default to skip, with explicit update
+- Port conflicts use gateway listen rules and in-batch checks; persist failures roll back; push/ACK after save; offline or listen errors are not import failures
+- Disabled services stay disabled; copying config does not create an intranet tunnel
+
 ## 0.2.0
 
 节点优先的控制台重构、完整认证入口与服务访问流程。

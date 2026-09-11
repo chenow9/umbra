@@ -16,6 +16,7 @@ import { ServiceList } from "@/components/services/service-list";
 import { NodeScopePicker } from "@/components/services/node-scope-picker";
 import { ServiceEditor } from "@/components/services/service-editor";
 import { ServiceConnect, ServiceConnectSession } from "@/components/services/service-connect";
+import { ConfigTransfer } from "@/components/config-transfer";
 import { statusText, useI18n } from "@/lib/i18n";
 import { listNodes, listMappings, deleteMapping, setMappingEnabled } from "@/lib/umbra/api";
 import { PAGE_SIZE, pageOf } from "@/lib/umbra/page";
@@ -59,6 +60,7 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
   const [page, setPage] = useState(1);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Mapping | null>(null);
+  const [transfer, setTransfer] = useState<"export" | "import" | null>(null);
   const all = mappings.data ?? [];
   const hasNode = nodes.data?.some((node) => node.status !== "revoked") ?? false;
   const scoped = nodeId ? all.filter((m) => m.nodeId === nodeId) : all;
@@ -159,17 +161,30 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
       showTelemetry={false}
       action={
         hasNode ? (
-          <Button
-            disabled={Boolean(nodeId && (!scopedNode || scopedNode.status === "revoked"))}
-            onClick={() => setEditor({ mode: "create", nodeId: search.node })}
-          >
-            <Plus className="mr-1.5 size-4" />
-            {t("services.add")}
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setTransfer("import")}>
+              {t("transfer.import")}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => setTransfer("export")}>
+              {t("transfer.export")}
+            </Button>
+            <Button
+              disabled={Boolean(nodeId && (!scopedNode || scopedNode.status === "revoked"))}
+              onClick={() => setEditor({ mode: "create", nodeId: search.node })}
+            >
+              <Plus className="mr-1.5 size-4" />
+              {t("services.add")}
+            </Button>
+          </div>
         ) : (
-          <Button asChild>
-            <Link to="/nodes">{t("services.enrollNode")}</Link>
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setTransfer("import")}>
+              {t("transfer.import")}
+            </Button>
+            <Button asChild>
+              <Link to="/nodes">{t("services.enrollNode")}</Link>
+            </Button>
+          </div>
         )
       }
     >
@@ -473,6 +488,14 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
           ) : null}
         </SheetContent>
       </Sheet>
+      <ConfigTransfer
+        mode={transfer}
+        nodes={nodes.data ?? []}
+        mappings={all}
+        preselectNodeId={nodeId}
+        onClose={() => setTransfer(null)}
+        onApplied={refresh}
+      />
       <ConfirmDialog
         open={pendingDelete !== null}
         title={t("services.deleteTitle")}

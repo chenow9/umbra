@@ -74,6 +74,9 @@ func (c *Console) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/frames", c.need(c.getFrames))
 	mux.HandleFunc("GET /v1/traffic", c.need(c.getTraffic))
 	mux.HandleFunc("POST /v1/demo", c.need(c.postDemo))
+	mux.HandleFunc("POST /v1/export", c.need(c.postExport))
+	mux.HandleFunc("POST /v1/import/preview", c.need(c.postImportPreview))
+	mux.HandleFunc("POST /v1/import", c.need(c.postImport))
 
 	mux.HandleFunc("GET /v1/status", c.need(c.getStatus))
 	mux.HandleFunc("PUT /v1/tokens/{token}", c.need(c.putToken))
@@ -1217,7 +1220,9 @@ func (c *Console) postDeleteMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	aid := m.NodeID
+	prevMapOrigins := append([]importMapOrigin(nil), c.mapOrigins...)
 	delete(c.maps, id)
+	c.pruneOriginsForMapLocked(id)
 	for tid, t := range c.tickets {
 		if t.MappingID == id {
 			delete(c.tickets, tid)
@@ -1227,6 +1232,7 @@ func (c *Console) postDeleteMap(w http.ResponseWriter, r *http.Request) {
 	c.logAudit("mapping.delete", id, "")
 	if err := c.save(); err != nil {
 		c.maps[id] = m
+		c.mapOrigins = prevMapOrigins
 		c.mu.Unlock()
 		persistFail(w)
 		return

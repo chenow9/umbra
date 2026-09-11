@@ -123,6 +123,17 @@ On **Mappings**, select an online node and configure the protocol, public entry 
 
 > Probe sends a small payload to the real target. It checks path and response behavior; it is not an application-level health check.
 
+**5. Copy nodes and services between public gateways**
+
+When the same application hostname is routed to several independent `umbrad` instances, export selected nodes and services from a configured gateway and import them on the others instead of recreating port mappings by hand. Export and import are available on **Nodes** and on a node’s service view.
+
+- The JSON file includes `schemaVersion`. Nodes carry reusable fields such as name and note; services carry protocol, public port, intranet host/port, access mode, enabled state, allowlists, rate limits, connection caps, and timeouts.
+- Node credentials, certificate private keys, console authentication material, visitor tickets, and runtime status are **not** exported. Portable origin IDs identify repeats; source database IDs are not reused as destination entity IDs.
+- Import parses and previews before writing. Each source node can create a new node (the existing enrollment flow, with a distinct identity and a once-shown credential) or bind an existing node on the destination. Matched services default to skip; update requires a visible diff. Unrelated local services are not taken over, and local services missing from the file are not deleted.
+- Public-port conflicts follow this gateway’s listen rules, including conflicts inside the import batch—not per-node uniqueness only.
+- After a successful save, the existing push, generation, and ACK path still applies. An offline node or pending ack is reported as waiting to sync, not as a failed import. Disabled services stay disabled.
+- Copying configuration does **not** create an intranet tunnel. New nodes must still be deployed on the private network and connected to **this** public gateway.
+
 ### Reverse proxies and client IP addresses
 
 `UMBRA_HTTP_TRUST_PROXY` (or `-http-trust-proxy`) specifies which **reverse proxies directly connected to `umbrad`** may supply the real client address. Configure it with the proxy IP address or CIDR, not a visitor's public IP and not an access allowlist for mapped services.

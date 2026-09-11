@@ -75,6 +75,9 @@ type Console struct {
 	frames         []frameRec
 	samples        []sampleRec
 	seq            int64
+	instanceID     string
+	nodeOrigins    []importNodeOrigin
+	mapOrigins     []importMapOrigin
 
 	rateIn, rateOut int64
 	rateTs          time.Time
@@ -216,18 +219,21 @@ type persistMigration struct {
 }
 
 type persistFile struct {
-	OwnerEpoch  int64            `json:"owner_epoch,omitempty"`
-	AuthEpoch   int64            `json:"auth_epoch,omitempty"`
-	OwnerHash   string           `json:"owner_hash"`
-	OwnerSecret string           `json:"owner_secret"`
-	TwoFactor   persistTwoFactor `json:"two_factor"`
-	Migration   persistMigration `json:"migration,omitempty"`
-	Nodes       []*nodeRec       `json:"nodes"`
-	LegacyNodes []*nodeRec       `json:"agents,omitempty"`
-	Maps        []*mapRec        `json:"maps"`
-	Tickets     []*ticketRec     `json:"tickets"`
-	Sessions    []persistSess    `json:"sessions,omitempty"`
-	Audit       []auditRec       `json:"audit"`
+	OwnerEpoch  int64              `json:"owner_epoch,omitempty"`
+	AuthEpoch   int64              `json:"auth_epoch,omitempty"`
+	OwnerHash   string             `json:"owner_hash"`
+	OwnerSecret string             `json:"owner_secret"`
+	TwoFactor   persistTwoFactor   `json:"two_factor"`
+	Migration   persistMigration   `json:"migration,omitempty"`
+	Nodes       []*nodeRec         `json:"nodes"`
+	LegacyNodes []*nodeRec         `json:"agents,omitempty"`
+	Maps        []*mapRec          `json:"maps"`
+	Tickets     []*ticketRec       `json:"tickets"`
+	Sessions    []persistSess      `json:"sessions,omitempty"`
+	Audit       []auditRec         `json:"audit"`
+	InstanceID  string             `json:"instance_id,omitempty"`
+	NodeOrigins []importNodeOrigin `json:"node_origins,omitempty"`
+	MapOrigins  []importMapOrigin  `json:"map_origins,omitempty"`
 }
 
 type persistBox struct {
@@ -600,6 +606,10 @@ func (c *Console) load() error {
 		c.Gate.PutMappings(id, maps)
 	}
 	c.audit = p.Audit
+	c.instanceID = p.InstanceID
+	c.nodeOrigins = p.NodeOrigins
+	c.mapOrigins = p.MapOrigins
+	c.pruneDanglingOriginsLocked()
 	now := time.Now()
 	if !fromPrev {
 		for _, t := range p.Tickets {
@@ -779,6 +789,9 @@ func (c *Console) saveMain() error {
 	if len(p.Audit) > 200 {
 		p.Audit = p.Audit[len(p.Audit)-200:]
 	}
+	p.InstanceID = c.instanceID
+	p.NodeOrigins = c.nodeOrigins
+	p.MapOrigins = c.mapOrigins
 	payload, err := json.Marshal(p)
 	if err != nil {
 		log.Printf("persist marshal: %v", err)

@@ -1,5 +1,11 @@
 import type { ServiceInput } from "./service";
 import type {
+  ConfigBundle,
+  ImportBinding,
+  ImportPreview,
+  ImportResult,
+} from "./transfer";
+import type {
   Node,
   AuditItem,
   ControlFrameRow,
@@ -16,6 +22,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
+    public readonly body?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
@@ -42,8 +49,12 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
   }
   if (!r.ok) {
-    const err = data as { error?: string };
-    throw new ApiError(err?.error || text || r.statusText, r.status);
+    const err = data as { error?: string; errors?: string[] };
+    throw new ApiError(
+      err?.error || err?.errors?.[0] || text || r.statusText,
+      r.status,
+      data,
+    );
   }
   return data as T;
 }
@@ -374,4 +385,31 @@ export function revokeTicket({ data }: { data: { id: string } }) {
 
 export function caDownloadURL() {
   return "/v1/ca";
+}
+
+export function exportConfig({
+  data,
+}: {
+  data: { nodes: { id: string; serviceIds?: string[] }[] };
+}) {
+  return api<ConfigBundle>("/v1/export", { method: "POST", body: JSON.stringify(data) });
+}
+
+export function previewConfigImport({
+  data,
+}: {
+  data: { bundle: ConfigBundle; bindings?: ImportBinding[] };
+}) {
+  return api<ImportPreview>("/v1/import/preview", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function applyConfigImport({
+  data,
+}: {
+  data: { bundle: ConfigBundle; bindings: ImportBinding[] };
+}) {
+  return api<ImportResult>("/v1/import", { method: "POST", body: JSON.stringify(data) });
 }

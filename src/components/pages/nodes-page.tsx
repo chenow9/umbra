@@ -9,14 +9,9 @@ import { AppShell } from "@/components/app-shell";
 import { StatusDot } from "@/components/status-dot";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { ActionMenu } from "@/components/ui/menu";
+import { IssuedDialog, type Issued } from "@/components/nodes/issued-dialog";
+import { ConfigTransfer } from "@/components/config-transfer";
 import {
   Sheet,
   SheetBody,
@@ -48,30 +43,10 @@ import { cn } from "@/lib/utils";
 import { Pager } from "@/components/ui/pager";
 import { formatBytes, formatBps, formatRelative } from "@/lib/umbra/format";
 import type { Node } from "@/lib/umbra/types";
-import {
-  ARCHS,
-  PLATFORMS,
-  nodeEnrollDockerCmd,
-  nodeEnrollServiceCmd,
-  platformLabel,
-  type Arch,
-  type Platform,
-} from "@/lib/umbra/units";
+import { ARCHS, PLATFORMS, platformLabel, type Arch, type Platform } from "@/lib/umbra/units";
 
-type Issued = {
-  id: string;
-  token: string;
-  os: Platform;
-  arch: Arch;
-  installCmd?: string;
-  dockerCmd?: string;
-  listen?: string;
-  caPem?: string;
-  note?: string;
-  expiresAt?: string;
-  neverExpire?: boolean;
-};
 type Editor = { mode: "create" } | { mode: "edit"; node: Node };
+type TransferMode = "export" | "import" | null;
 
 export function NodesPage() {
   const { t } = useI18n();
@@ -106,6 +81,8 @@ export function NodesPage() {
   const [issued, setIssued] = useState<Issued | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Node | null>(null);
   const [pendingRotate, setPendingRotate] = useState<Node | null>(null);
+  const [transfer, setTransfer] = useState<TransferMode>(null);
+  const [exportNodeId, setExportNodeId] = useState<string | undefined>();
   const pageData = nodes.data ?? emptyPage<Node>(page);
   const list = pageData.items;
   const empty =
@@ -162,9 +139,24 @@ export function NodesPage() {
       title={t("nodes.title")}
       action={
         empty ? null : (
-          <Button type="button" onClick={() => setEditor({ mode: "create" })}>
-            {t("nodes.enroll")}
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setTransfer("import")}>
+              {t("transfer.import")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setExportNodeId(undefined);
+                setTransfer("export");
+              }}
+            >
+              {t("transfer.export")}
+            </Button>
+            <Button type="button" onClick={() => setEditor({ mode: "create" })}>
+              {t("nodes.enroll")}
+            </Button>
+          </div>
         )
       }
     >
@@ -181,7 +173,10 @@ export function NodesPage() {
           {t("nodes.loading")}
         </p>
       ) : empty ? (
-        <EmptyNodes onCreate={() => setEditor({ mode: "create" })} />
+        <EmptyNodes
+          onCreate={() => setEditor({ mode: "create" })}
+          onImport={() => setTransfer("import")}
+        />
       ) : nodes.isError && !nodes.data ? null : (
         <>
           <NodeFleetBar
@@ -213,6 +208,10 @@ export function NodesPage() {
                     onEdit={() => setEditor({ mode: "edit", node })}
                     onDelete={() => setPendingDelete(node)}
                     onRotate={() => setPendingRotate(node)}
+                    onExport={() => {
+                      setExportNodeId(node.id);
+                      setTransfer("export");
+                    }}
                   />
                 ))}
               </div>
@@ -249,6 +248,17 @@ export function NodesPage() {
         </SheetContent>
       </Sheet>
 
+      <ConfigTransfer
+        mode={transfer}
+        nodes={catalog.data ?? []}
+        mappings={services.data ?? []}
+        preselectNodeId={exportNodeId}
+        onClose={() => {
+          setTransfer(null);
+          setExportNodeId(undefined);
+        }}
+        onApplied={() => void qc.invalidateQueries({ queryKey: ["umbra"] })}
+      />
       <IssuedDialog issued={issued} onClose={() => setIssued(null)} />
 
       <ConfirmDialog
@@ -357,7 +367,7 @@ function NodeFleetBar({
   );
 }
 
-function EmptyNodes({ onCreate }: { onCreate: () => void }) {
+function EmptyNodes({ onCreate, onImport }: { onCreate: () => void; onImport: () => void }) {
   const { t } = useI18n();
   return (
     <div className="mx-auto flex max-w-md flex-col items-start gap-5 py-8">
@@ -368,6 +378,9 @@ function EmptyNodes({ onCreate }: { onCreate: () => void }) {
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={onCreate}>
           {t("nodes.enroll")}
+        </Button>
+        <Button type="button" variant="outline" onClick={onImport}>
+          {t("transfer.import")}
         </Button>
       </div>
     </div>
@@ -380,12 +393,14 @@ function NodeCard({
   onEdit,
   onDelete,
   onRotate,
+  onExport,
 }: {
   node: Node;
   attention?: number;
   onEdit: () => void;
   onDelete: () => void;
   onRotate: () => void;
+  onExport: () => void;
 }) {
   const { t } = useI18n();
   return (
@@ -409,7 +424,13 @@ function NodeCard({
         </span>
         <ArrowRight className="size-4 text-stone" />
       </Link>
-      <NodeMenu node={node} onEdit={onEdit} onDelete={onDelete} onRotate={onRotate} />
+      <NodeMenu
+        node={node}
+        onEdit={onEdit}
+        onDelete={onDelete}
+        onRotate={onRotate}
+        onExport={onExport}
+      />
     </article>
   );
 }
@@ -419,11 +440,13 @@ function NodeMenu({
   onEdit,
   onDelete,
   onRotate,
+  onExport,
 }: {
   node: Node;
   onEdit: () => void;
   onDelete: () => void;
   onRotate: () => void;
+  onExport: () => void;
 }) {
   const { t } = useI18n();
   const qc = useQueryClient();
@@ -449,6 +472,7 @@ function NodeMenu({
       label={t("nodes.more", { name: node.name })}
       items={[
         { label: t("common.edit"), onSelect: onEdit },
+        { label: t("transfer.exportNode"), onSelect: onExport },
         {
           label: t("nodes.rotate"),
           hidden: node.status === "revoked",
@@ -699,166 +723,4 @@ function EditNodeForm({ node, onDone }: { node: Node; onDone: () => void }) {
   );
 }
 
-function IssuedDialog({ issued, onClose }: { issued: Issued | null; onClose: () => void }) {
-  const { t } = useI18n();
-  return (
-    <Dialog open={issued !== null} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{t("nodes.issuedTitle")}</DialogTitle>
-          <DialogDescription>
-            {t("nodes.issuedBody")}
-            {issued?.listen?.startsWith("127.0.0.1") ? t("nodes.issuedLoopback") : ""}
-            {issued?.note ? ` ${issued.note}` : ""}
-            {issued?.neverExpire ? t("nodes.issuedNever") : ""}
-          </DialogDescription>
-        </DialogHeader>
-        {issued ? <IssuedBody key={issued.token} issued={issued} onClose={onClose} /> : null}
-      </DialogContent>
-    </Dialog>
-  );
-}
 
-function defaultEnrollKind(os: Platform): "docker" | "bin" {
-  return os === "darwin" || os === "windows" ? "bin" : "docker";
-}
-
-function IssuedBody({ issued, onClose }: { issued: Issued; onClose: () => void }) {
-  const { t } = useI18n();
-  const liveNodes = useQuery({ queryKey: ["umbra", "nodes"], queryFn: listNodes });
-  const online = liveNodes.data?.find((node) => node.id === issued.id)?.status === "online";
-  const [kind, setKind] = useState<"docker" | "bin">(defaultEnrollKind(issued.os));
-  const [fetchedPem, setFetchedPem] = useState(issued.caPem ?? "");
-  useEffect(() => {
-    if (issued.caPem) return;
-    const ac = new AbortController();
-    fetch(caDownloadURL(), { credentials: "include", signal: ac.signal })
-      .then((r) => (r.ok ? r.text() : ""))
-      .then((pem) => {
-        if (pem.includes("BEGIN CERTIFICATE")) setFetchedPem(pem);
-      })
-      .catch(() => undefined);
-    return () => ac.abort();
-  }, [issued.caPem]);
-
-  const server = issued.listen?.trim() || t("nodes.fallbackServer");
-  const pem = (issued.caPem || fetchedPem).trim();
-  const dockerCmd =
-    issued.dockerCmd && (issued.dockerCmd.includes("BEGIN CERTIFICATE") || !pem)
-      ? issued.dockerCmd
-      : nodeEnrollDockerCmd(issued.token, server, pem || undefined);
-  const servicePlatform = issued.os === "docker" ? "linux" : issued.os;
-  const binCmd = nodeEnrollServiceCmd(
-    servicePlatform,
-    issued.arch,
-    issued.token,
-    server,
-    pem || undefined,
-  );
-  const cmd = (kind === "docker" ? dockerCmd : binCmd).trim();
-  const hasCA = cmd.includes("BEGIN CERTIFICATE");
-
-  return (
-    <>
-      <div role="status" className="mb-3 rounded-lg border border-line bg-paper-2 p-4">
-        <p className="text-sm font-medium">{online ? t("nodes.onlineReady") : t("nodes.waitingOnline")}</p>
-        <p className="mt-1 text-xs text-stone">
-          {online ? t("nodes.onlineReadyHint") : t("nodes.waitingOnlineHint")}
-        </p>
-        {online ? (
-          <Button asChild className="mt-3">
-            <Link
-              to="/nodes/$nodeId"
-              params={{ nodeId: issued.id }}
-              search={{ create: true }}
-              onClick={onClose}
-            >
-              {t("nodes.addServiceFor")}
-            </Link>
-          </Button>
-        ) : null}
-      </div>
-      <div
-        role="tablist"
-        aria-label={t("nodes.installKind")}
-        className="mt-1 flex rounded-md bg-paper-2 p-0.5 shadow-border"
-      >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={kind === "docker"}
-          className={`h-9 flex-1 rounded-sm px-2.5 text-sm font-medium ${
-            kind === "docker" ? "bg-paper text-ink" : "text-stone hover:text-ink"
-          }`}
-          onClick={() => setKind("docker")}
-        >
-          {t("nodes.docker")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={kind === "bin"}
-          className={`h-9 flex-1 rounded-sm px-2.5 text-sm font-medium ${
-            kind === "bin" ? "bg-paper text-ink" : "text-stone hover:text-ink"
-          }`}
-          onClick={() => setKind("bin")}
-        >
-          {t("nodes.binary")}
-        </button>
-      </div>
-      <div className="mt-3 rounded-md bg-paper-2 p-4 shadow-border">
-        <p className="text-sm font-medium text-ink">
-          {kind === "docker" ? t("nodes.dockerReady") : t("nodes.binaryReady")}
-        </p>
-        <p className="mt-1 text-xs leading-relaxed text-stone">
-          {hasCA
-            ? kind === "docker"
-              ? t("nodes.dockerHasCa")
-              : t("nodes.binaryHasCa")
-            : t("nodes.missingCa")}
-        </p>
-        <Button
-          type="button"
-          className="mt-3"
-          onClick={() => {
-            void navigator.clipboard.writeText(cmd);
-            toast.success(t("nodes.cmdCopied"));
-          }}
-        >
-          {t("nodes.copyCmd")}
-        </Button>
-      </div>
-
-      <details className="mt-3 rounded-md bg-paper-2 shadow-border">
-        <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-ink">
-          {t("nodes.viewCmd")}
-        </summary>
-        <pre className="max-h-64 overflow-y-auto border-t border-line whitespace-pre-wrap break-all p-3 font-mono text-xs leading-relaxed text-ink">
-          {cmd}
-        </pre>
-      </details>
-
-      <p className="mt-2 text-xs leading-relaxed text-stone">
-        {kind === "docker"
-          ? t("nodes.dockerNote")
-          : issued.os === "windows"
-            ? t("nodes.windowsNote")
-            : t("nodes.unixNote")}
-      </p>
-      <div className="mt-4 flex flex-wrap justify-end gap-2">
-        {!hasCA ? (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => window.open(caDownloadURL(), "_blank", "noopener")}
-          >
-            {t("nodes.downloadGateCa")}
-          </Button>
-        ) : null}
-        <Button type="button" variant="outline" onClick={onClose}>
-          {t("common.close")}
-        </Button>
-      </div>
-    </>
-  );
-}
