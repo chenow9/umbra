@@ -161,7 +161,7 @@ describe("mappingFacets", () => {
     );
     assert.equal(facets.modes.find((m) => m.value === "spa")?.count, 2);
     assert.equal(facets.modes.find((m) => m.value === "spa")?.label, "spa");
-    assert.equal(facets.modes.find((m) => m.value === "spa")?.hint, "敲门访问");
+    assert.equal(facets.modes.find((m) => m.value === "spa")?.hint, "来源 IP 临时授权");
     assert.equal(facets.modes.find((m) => m.value === "public")?.label, "public");
     assert.equal(facets.modes.find((m) => m.value === "public")?.hint, "公开访问");
     assert.equal(facets.nodes[0].status, "online");

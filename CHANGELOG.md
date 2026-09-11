@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-09-11
 
 在多台独立公网入口之间批量导出 / 导入节点和服务配置。
 
@@ -8,6 +8,13 @@
 - 导入先预览再写入：每个来源节点可新建（独立身份与一次性凭证）或绑定已有节点；已导入服务默认识别并跳过，更新需查看差异
 - 端口冲突沿用入口级监听规则并检查批次内部冲突；持久化失败回滚；保存成功后走现有配置下发与 ACK，离线或监听失败不记为导入失败
 - 停用服务保持停用；复制配置不会自动建立内网隧道，新节点仍需部署并连接对应公网入口
+- 修复切换导入目标节点后沿用旧的跳过操作导致漏导入服务，以及导入无服务节点时的空列表崩溃
+- 导入的空闲超时、连接数和限速校验与创建 / 更新对齐，合法的大数值配置可完整导出再导入
+- 修复内嵌控制台静态资源目录可被列出的问题；相关测试不再依赖 Git 忽略的构建资源
+- 调整登录页语言控件的背景与布局，将登录中心标识改为圆形月食图案
+- 中英文 README 与控制台统一使用节点、服务、凭证访问、临时放行和公开访问；保留 API / 协议技术名称对照
+- README 加入三种访问方式的本地循环 GIF 和 Release 下载量徽章，部署示例更新为 0.3.0
+- 增加 GitHub Linguist 配置，将配套 UI 源码排除出语言占比并标记内嵌 UI 构建产物，突出 Go 核心
 
 Export and import node/service configuration across independent public gateways.
 
@@ -15,6 +22,27 @@ Export and import node/service configuration across independent public gateways.
 - Import previews before writing; create a new node identity or bind an existing one; matched services default to skip, with explicit update
 - Port conflicts use gateway listen rules and in-batch checks; persist failures roll back; push/ACK after save; offline or listen errors are not import failures
 - Disabled services stay disabled; copying config does not create an intranet tunnel
+- Fix stale skip actions omitting services after changing import targets, and empty service lists crashing the import preview
+- Align import validation for idle timeouts, connection limits, and rate limits with create/update rules so valid large values round-trip intact
+- Prevent directory listings for embedded console assets; remove test dependencies on Git-ignored build assets
+- Refine the login language control's background and layout, and use a circular eclipse mark at the center of the login screen
+- Align both READMEs and console wording around nodes, services, Ticket access, Temporary allow, and Public access, with API/protocol terminology references
+- Add local looping GIFs for all three access flows and release download badges to the READMEs; update deployment examples to 0.3.0
+- Configure GitHub Linguist to exclude companion UI sources from language statistics and mark embedded UI build output as generated, highlighting the Go core
+
+### 升级说明 / Upgrade notes
+
+升级前备份完整 `tls-dir` 并继续使用原目录。配置导出仅用于复制节点和服务，不是完整备份，不包含身份凭证或认证状态；新建的目标节点需要独立部署。API 路径、协议名称和 `visitor` / `spa` / `public` 配置值不变。
+
+Back up the complete `tls-dir` and reuse it when upgrading. Configuration exports copy nodes and services; they are not full backups and omit credentials and authentication state. Newly created target nodes require separate deployment. API paths, protocol names, and the `visitor` / `spa` / `public` mode values are unchanged.
+
+### 验证说明 / Validation notes
+
+本地 Go 全量测试、vet、race、TypeScript 类型检查、100 项前端测试与内嵌控制台构建通过。服务冒烟覆盖节点登记、TCP / UDP、三种访问方式、探测失败、访问凭证生命周期、服务启停删除，以及真实停机重启后的流量持久化。全仓 `npm test` 的脚本阶段仍有 18 项模板测试失败；已独立运行 v0.2.0 对照，失败项完全一致，后续前端测试已单独运行通过。
+
+Local Go tests, vet/race, TypeScript type checking, all 100 frontend tests, and the embedded console build passed. Service smoke checks cover node enrollment, TCP/UDP, all three access modes, probe failures, ticket lifecycle, service enable/disable/delete, and traffic persistence across an actual shutdown and restart. The script stage of the full `npm test` command still has 18 template failures, identical to an independently tested v0.2.0 baseline; the subsequent frontend tests were run separately and passed.
+
+[完整改动 / Full diff](https://github.com/chenow9/umbra/compare/v0.2.0...v0.3.0)
 
 ## 0.2.0
 

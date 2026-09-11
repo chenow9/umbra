@@ -1,0 +1,5 @@
+# Exclude the companion Web UI from repository language statistics.
+src/** linguist-detectable=false
+
+# The embedded console is generated from the UI sources.
+internal/control/ui/** linguist-generated=true
