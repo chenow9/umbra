@@ -1209,9 +1209,21 @@ html[data-theme="moye"] {
 .auth-intro h2 { margin-top: 30px; white-space: pre-line; font-size: clamp(32px, 3.5vw, 46px); line-height: 1.25; letter-spacing: -1.4px; font-weight: 500; }
 .auth-intro-copy { margin-top: 18px; max-width: 340px; color: #b6c0ac; font-size: 14px; line-height: 1.8; }
 .auth-network { position: relative; min-height: 148px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; margin: 10px 0; }
-.auth-network-line { position: absolute; inset: 50% 30px auto; border-top: 1px dashed #647052; }
+.auth-network-line { position: absolute; z-index: 0; inset: 50% 30px auto; border-top: 1px dashed #647052; }
 .auth-network-node, .auth-network-hub { z-index: 1; display: grid; place-items: center; width: 54px; height: 54px; border: 1px solid #46523c; border-radius: 14px; background: #2a3225; color: #bac9a7; }
-.auth-network-hub { width: 82px; height: 82px; background: #d6f467; border-color: #d6f467; box-shadow: 0 0 0 12px #d6f46708, 0 0 0 24px #d6f46704; }
+.auth-network-hub {
+  position: relative;
+  z-index: 2;
+  width: 82px;
+  height: 82px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 50%;
+  background: #d6f467;
+  box-shadow: 0 0 0 12px #d6f46714, 0 0 0 24px #d6f4670a;
+}
+.auth-network-hub img { display: block; width: 82px; height: 82px; }
 .auth-network-pulse { position: absolute; left: 28%; top: calc(50% - 3px); width: 6px; height: 6px; border-radius: 50%; background: #d6f467; }
 .auth-features { margin-top: auto; }
 .auth-features > div { display: flex; align-items: center; gap: 13px; padding: 15px 0; border-top: 1px solid #3a4333; font-size: 12px; color: #d8e0cf; }

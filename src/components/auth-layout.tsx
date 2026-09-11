@@ -57,7 +57,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
               <Radio size={23} />
             </div>
             <div className="auth-network-hub">
-              <img src="/favicon.svg" width={44} height={44} alt="" />
+              <img src="/favicon.svg?v=umbra-eclipse-1" width={82} height={82} alt="" />
             </div>
             <div className="auth-network-node">
               <Layers size={23} />
