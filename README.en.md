@@ -75,19 +75,25 @@ These recordings of the [website's access mode demos](https://umbrad.grok.me/#mo
 
 The visitor runs `umbra-visit` (shown as `visit`) and connects through a ticketed tunnel. `closed` means no public service port is open; the gateway still accepts tunnel connections.
 
-<img src="docs/images/access-modes/visitor.gif" alt="Ticket access: the visitor client connects through the gateway tunnel and node to the target service, without a public service port" width="640">
+<p align="center">
+  <img src="docs/images/access-modes/visitor.gif" alt="Ticket access: the visitor client connects through the gateway tunnel and node to the target service, without a public service port" width="640">
+</p>
 
 **Temporary allow (`spa`)**
 
 Unauthorized source traffic is dropped (`drop`). After a temporary authorization request (`knock`), the allowed source IP can connect with the original client during the authorization window.
 
-<img src="docs/images/access-modes/spa.gif" alt="Temporary allow: unauthorized traffic is dropped; after source IP authorization, the client connects through the gateway and node to the target service" width="640">
+<p align="center">
+  <img src="docs/images/access-modes/spa.gif" alt="Temporary allow: unauthorized traffic is dropped; after source IP authorization, the client connects through the gateway and node to the target service" width="640">
+</p>
 
 **Public access (`public`)**
 
 The gateway opens a public service port (`open`). The original client (`client`) connects directly to that port, and the gateway forwards traffic through the node to the target service.
 
-<img src="docs/images/access-modes/public.gif" alt="Public access: the client connects to the open public service port, and traffic is forwarded through the gateway and node to the target service" width="640">
+<p align="center">
+  <img src="docs/images/access-modes/public.gif" alt="Public access: the client connects to the open public service port, and traffic is forwarded through the gateway and node to the target service" width="640">
+</p>
 
 ## How it works
 

@@ -73,19 +73,25 @@ Umbra 适合家庭实验室、远程开发、私有服务、游戏 UDP 和临时
 
 访问者运行 `umbra-visit`（图中的 `visit`），通过带访问凭证的隧道连接服务。`closed` 表示没有开放公网业务端口，入口仍接收隧道连接。
 
-<img src="docs/images/access-modes/visitor.gif" alt="凭证访问：访问端通过公网入口的隧道，经节点连接目标服务，无需开放公网业务端口" width="640">
+<p align="center">
+  <img src="docs/images/access-modes/visitor.gif" alt="凭证访问：访问端通过公网入口的隧道，经节点连接目标服务，无需开放公网业务端口" width="640">
+</p>
 
 **临时放行（Temporary allow，`spa`）**
 
 未授权的来源流量被丢弃（`drop`）；发起临时放行请求（`knock`）后，获准的来源 IP 可在授权窗口内使用原有客户端连接服务。
 
-<img src="docs/images/access-modes/spa.gif" alt="临时放行：未授权流量被丢弃，来源 IP 获得临时授权后，经公网入口和节点连接目标服务" width="640">
+<p align="center">
+  <img src="docs/images/access-modes/spa.gif" alt="临时放行：未授权流量被丢弃，来源 IP 获得临时授权后，经公网入口和节点连接目标服务" width="640">
+</p>
 
 **公开访问（Public access，`public`）**
 
 公网入口开放业务端口（`open`），访问者使用原有客户端（`client`）直接连接，再由入口经节点转发到目标服务。
 
-<img src="docs/images/access-modes/public.gif" alt="公开访问：客户端连接已开放的公网业务端口，经公网入口和节点转发到目标服务" width="640">
+<p align="center">
+  <img src="docs/images/access-modes/public.gif" alt="公开访问：客户端连接已开放的公网业务端口，经公网入口和节点转发到目标服务" width="640">
+</p>
 
 ## 工作原理
 
