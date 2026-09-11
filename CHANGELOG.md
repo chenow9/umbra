@@ -11,6 +11,7 @@
 - 修复切换导入目标节点后沿用旧的跳过操作导致漏导入服务，以及导入无服务节点时的空列表崩溃
 - 导入的空闲超时、连接数和限速校验与创建 / 更新对齐，合法的大数值配置可完整导出再导入
 - 修复内嵌控制台静态资源目录可被列出的问题；相关测试不再依赖 Git 忽略的构建资源
+- 将 CI 漏洞扫描工具固定为兼容 Go 1.25 的 govulncheck v1.7.0，修复上游 latest 升级要求 Go 1.26 后的安装失败
 - 调整登录页语言控件的背景与布局，将登录中心标识改为圆形月食图案
 - 中英文 README 与控制台统一使用节点、服务、凭证访问、临时放行和公开访问；保留 API / 协议技术名称对照
 - README 加入三种访问方式的本地循环 GIF 和 Release 下载量徽章，部署示例更新为 0.3.0
@@ -25,6 +26,7 @@ Export and import node/service configuration across independent public gateways.
 - Fix stale skip actions omitting services after changing import targets, and empty service lists crashing the import preview
 - Align import validation for idle timeouts, connection limits, and rate limits with create/update rules so valid large values round-trip intact
 - Prevent directory listings for embedded console assets; remove test dependencies on Git-ignored build assets
+- Pin the CI vulnerability scanner to govulncheck v1.7.0 for Go 1.25 compatibility, fixing installation after upstream latest began requiring Go 1.26
 - Refine the login language control's background and layout, and use a circular eclipse mark at the center of the login screen
 - Align both READMEs and console wording around nodes, services, Ticket access, Temporary allow, and Public access, with API/protocol terminology references
 - Add local looping GIFs for all three access flows and release download badges to the READMEs; update deployment examples to 0.3.0
