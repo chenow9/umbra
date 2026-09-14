@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 — 2026-09-14
+
+安全加固与数据面性能优化：堵住临时放行、凭证访问与登录限流上的若干口子，降低控制台与 UDP 路径的锁竞争与分配开销。
 
 - 安全：临时放行不再把空来源 IP 退化为“任意来源”。管理口绑定 Unix socket 或反代未传来源 IP 时，敲门接口返回 400 并要求显式指定 `ip`；nftables 与用户态检查都不再接受通配放行；热升级不再回放旧版无来源 IP 的放行记录
 - 限速改为令牌桶节流：TCP 连接超出 `rateKbps` 时按速率延后发送而不是直接断开，且上下行都受限；UDP 两个方向超出预算时丢包并计入 `traffic_limit` 丢弃统计
@@ -17,6 +19,8 @@
 - 安全：凭证访问的 TCP 流转发到节点时，`peer_ip` / `peer_port` 改为公网入口实际接受访问端连接的地址，不再透传访问端自报（可伪造）的值；UDP 保留访问端提供的值作为流标识
 - 文档：安全模型一节补充 CA 私钥不落盘的事实与轮换流程、登录退避在反代配置错误时的可用性风险、临时放行对 IPv6 来源只做用户态拒绝及对应的规避方式；修正此前“`tls-dir` 含 CA 私钥”的不准确描述；节点凭证传递方式改为环境变量 / `--token-file`
 
+Security hardening and data-plane performance work: close gaps around Temporary allow, Ticket access and login rate limiting, and cut lock contention and allocations on the console and UDP paths.
+
 - Security: Temporary allow no longer widens an empty source IP into an any-source grant. When the console is bound to a Unix socket or a proxy passes no client IP, the knock API returns 400 and requires an explicit `ip`; neither the nftables nor the userspace check accepts a wildcard grant; hot upgrades no longer replay legacy grants that lack a source IP
 - Rate limiting is now a token-bucket shaper: TCP streams exceeding `rateKbps` are paced instead of torn down, and both directions are limited; UDP drops over-budget packets in both directions and counts them under `traffic_limit`
 - Security: Revoking a ticket, ticket expiry, and disabling / deleting a service or moving it out of Ticket access now immediately disconnect the visitor sessions admitted under it instead of waiting for the client to drop
@@ -31,6 +35,20 @@
 - Security: The console's reachability probe opens the Temporary allow service to 127.0.0.1 for 3 seconds instead of the service's full allow TTL; a knock never shortens an existing longer grant for the same address
 - Security: TCP streams admitted through Ticket access are forwarded to the node with `peer_ip` / `peer_port` set to the address the gateway actually accepted the visitor from, instead of the visitor's self-reported and spoofable values; UDP keeps the visitor-supplied values as a flow key
 - Docs: The security model section now covers the fact that the CA private key is never stored and how to rotate, the availability risk of the login backoff behind a misconfigured proxy, and that Temporary allow only rejects IPv6 sources in user space along with how to avoid that; corrects the earlier inaccurate statement that `tls-dir` contains the CA private key; node credential examples use the environment / `--token-file`
+
+### 升级说明 / Upgrade notes
+
+升级前备份完整 `tls-dir` 并继续使用原目录。控制数据与流量历史 schema 不变。隧道每流窗口从 256 KiB 提到 2 MiB，公网入口、节点与访问端需同时升级才能吃到吞吐提升。Windows / Docker 节点若仍用旧安装脚本，请重新执行控制台生成的安装命令，使凭证改走文件而不是命令行；已在跑的 Linux / macOS 节点凭证本来就不在 argv 上，可按需轮换。`umbra-node` 的 `--token` 仍可用，但推荐 `--token-file` 或 `UMBRA_TOKEN`。
+
+Back up the complete `tls-dir` and reuse it when upgrading. Control and traffic schemas are unchanged. The per-stream tunnel window rises from 256 KiB to 2 MiB, so gateway, nodes and visitor clients must all be upgraded to benefit. Windows / Docker nodes still installed with the old scripts should re-run the console-generated install command so the credential moves into a file instead of the command line; Linux / macOS nodes already kept the credential off argv and only need a rotate if desired. `umbra-node --token` still works; prefer `--token-file` or `UMBRA_TOKEN`.
+
+### 验证说明 / Validation notes
+
+本地 `go vet ./...` 与 `go test -race ./...` 通过；控制台安全头相关用例、登录退避、登记脚本、访问端 PeerIP 覆盖与敲门不缩短已有放行等回归通过；前端 `units.test.ts` 通过。内嵌控制台在浏览器中完成了初始化、2FA 绑定（含 QR）、恢复码、节点页与流量图，CSP 无违规。
+
+Local `go vet ./...` and `go test -race ./...` passed, including regressions for console security headers, login backoff, enrollment scripts, visitor PeerIP override, and knocks that must not shorten an existing grant. Frontend `units.test.ts` passed. The embedded console completed setup, 2FA enrollment (including the QR code), recovery codes, the node list and the traffic charts in a browser with no CSP violations.
+
+[完整改动 / Full diff](https://github.com/chenow9/umbra/compare/v0.3.0...v0.3.1)
 
 ## 0.3.0 — 2026-09-11
 
