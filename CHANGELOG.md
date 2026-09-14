@@ -5,10 +5,12 @@
 - 安全：临时放行不再把空来源 IP 退化为“任意来源”。管理口绑定 Unix socket 或反代未传来源 IP 时，敲门接口返回 400 并要求显式指定 `ip`；nftables 与用户态检查都不再接受通配放行；热升级不再回放旧版无来源 IP 的放行记录
 - 限速改为令牌桶节流：TCP 连接超出 `rateKbps` 时按速率延后发送而不是直接断开，且上下行都受限；UDP 两个方向超出预算时丢包并计入 `traffic_limit` 丢弃统计
 - 安全：吊销票据、票据到期、服务停用 / 删除或退出凭证访问模式时，立即断开该票据 / 服务下已建立的访问端会话，不再等待客户端自行断线
+- 安全：审计记录区分 `owner` 与 `gateway` 两类来源；环满时优先淘汰网关自动产生的事件，未认证流量（ACL 拒绝、节点抖动）无法把管理员操作挤出审计历史。ACL 拒绝每个服务每分钟最多写一条审计并折叠计数，TCP 拒绝日志每服务每秒最多一条
 
 - Security: Temporary allow no longer widens an empty source IP into an any-source grant. When the console is bound to a Unix socket or a proxy passes no client IP, the knock API returns 400 and requires an explicit `ip`; neither the nftables nor the userspace check accepts a wildcard grant; hot upgrades no longer replay legacy grants that lack a source IP
 - Rate limiting is now a token-bucket shaper: TCP streams exceeding `rateKbps` are paced instead of torn down, and both directions are limited; UDP drops over-budget packets in both directions and counts them under `traffic_limit`
 - Security: Revoking a ticket, ticket expiry, and disabling / deleting a service or moving it out of Ticket access now immediately disconnect the visitor sessions admitted under it instead of waiting for the client to drop
+- Security: Audit records now distinguish `owner` from `gateway` actors; when the ring is full, gateway-generated events are evicted first so unauthenticated traffic (ACL drops, node flapping) cannot push administrator actions out of the history. ACL drops produce at most one audit record per service per minute with a folded count, and TCP drop log lines are limited to one per service per second
 
 ## 0.3.0 — 2026-09-11
 

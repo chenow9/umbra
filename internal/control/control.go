@@ -276,9 +276,13 @@ func New(g *gate.Server, persist string) (*Console, error) {
 	return c, nil
 }
 
+// Audit records an event reported by the gateway data plane. These are
+// attributed to the gateway rather than the owner and are the first to be
+// evicted when the ring fills, so unauthenticated traffic (ACL drops, node
+// flapping) cannot push administrator actions out of the audit history.
 func (c *Console) Audit(action, target, detail string) {
 	c.mu.Lock()
-	c.logAudit(action, target, detail)
+	c.logAuditAs(auditActorGateway, action, target, detail)
 	c.mu.Unlock()
 }
 
@@ -891,13 +895,45 @@ func (c *Console) next() int64 {
 	return c.seq
 }
 
+const (
+	auditActorOwner   = "owner"
+	auditActorGateway = "gateway"
+	// maxAudit bounds the persisted ring. Gateway-attributed events are
+	// evicted before owner actions when the ring is full.
+	maxAudit = 200
+)
+
 func (c *Console) logAudit(action, target, detail string) {
+	c.logAuditAs(auditActorOwner, action, target, detail)
+}
+
+func (c *Console) logAuditAs(actor, action, target, detail string) {
 	c.audit = append(c.audit, auditRec{
-		ID: c.next(), Ts: time.Now(), Actor: "owner", Action: action, Target: target, Detail: detail,
+		ID: c.next(), Ts: time.Now(), Actor: actor, Action: action, Target: target, Detail: detail,
 	})
-	if len(c.audit) > 200 {
-		c.audit = c.audit[len(c.audit)-200:]
+	c.trimAudit()
+}
+
+// trimAudit keeps the ring within maxAudit. Oldest gateway events go first;
+// only when every remaining record is an owner action do owner records age
+// out.
+func (c *Console) trimAudit() {
+	over := len(c.audit) - maxAudit
+	if over <= 0 {
+		return
 	}
+	kept := make([]auditRec, 0, maxAudit)
+	for _, a := range c.audit {
+		if over > 0 && a.Actor == auditActorGateway {
+			over--
+			continue
+		}
+		kept = append(kept, a)
+	}
+	if len(kept) > maxAudit {
+		kept = kept[len(kept)-maxAudit:]
+	}
+	c.audit = kept
 }
 
 func (c *Console) logFrame(nodeID, dir, typ, body string) {

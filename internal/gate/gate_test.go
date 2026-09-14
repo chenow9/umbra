@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -1309,6 +1310,69 @@ func TestSPAGrantBindsSourceIP(t *testing.T) {
 	s.Knock("map_spa", "127.0.0.1", time.Second)
 	if !echoTCP(t, dst, "ok", 2*time.Second) {
 		t.Fatal("knocker IP should be admitted")
+	}
+}
+
+type auditSink struct {
+	mu   sync.Mutex
+	recs []string
+}
+
+func (a *auditSink) Audit(action, target, detail string) {
+	a.mu.Lock()
+	a.recs = append(a.recs, action+" "+target+" "+detail)
+	a.mu.Unlock()
+}
+
+func (a *auditSink) Frame(string, string, string, string) {}
+
+func (a *auditSink) count(prefix string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	n := 0
+	for _, r := range a.recs {
+		if strings.HasPrefix(r, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+// A peer outside AllowCidrs can connect as fast as it likes; the audit ring
+// must see at most one record per mapping per interval while the counter
+// keeps the exact total.
+func TestACLDropAuditIsThrottled(t *testing.T) {
+	s, addr := startGate(t)
+	sink := &auditSink{}
+	s.SetObserver(sink)
+	s.SetToken("tok", "nde1")
+	pub := pickPort(t)
+	port := pub
+	s.PutMappings("nde1", []wire.Mapping{{
+		ID: "map_acl", Name: "t", Proto: "tcp", Mode: "public",
+		EntryPort: &port, LocalHost: "127.0.0.1", LocalPort: 9,
+		Enabled: true, MaxConns: 8, AllowCidrs: "198.51.100.0/24",
+	}})
+	go func() { _ = node.Run(addr, "tok", nil) }()
+	waitOnline(t, s, "nde1")
+	dst := net.JoinHostPort("127.0.0.1", itoa(pub))
+	const tries = 40
+	for i := 0; i < tries; i++ {
+		c, err := net.DialTimeout("tcp", dst, time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = c.Close()
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && s.MappingStats()["map_acl"].TCPDropACL < tries {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := s.MappingStats()["map_acl"].TCPDropACL; got != tries {
+		t.Fatalf("acl counter %d, want %d", got, tries)
+	}
+	if n := sink.count("acl.drop map_acl"); n != 1 {
+		t.Fatalf("acl.drop audit records %d, want 1: %v", n, sink.recs)
 	}
 }
 

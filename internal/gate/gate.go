@@ -176,6 +176,9 @@ type entry struct {
 	udpLogNSMaxConns    atomic.Int64
 	udpLogNSPerIP       atomic.Int64
 	udpLogNSRate        atomic.Int64
+	tcpLogNS            atomic.Int64
+	aclAuditNS          atomic.Int64
+	aclAuditedAt        atomic.Int64
 	udpIPSweepNS        atomic.Int64
 	stopCh              chan struct{}
 	stopOnce            sync.Once
@@ -1358,14 +1361,20 @@ func (s *Server) handleTCP(e *entry, c net.Conn, via string) {
 	}
 	if !policy.CidrAllowed(ip, e.spec.AllowCidrs) {
 		e.noteTCPDrop("acl")
-		slog.Info("acl drop", "mapping", e.spec.ID, "ip", ip)
-		s.noteAudit("acl.drop", e.spec.ID, ip)
+		if e.tcpLogOK() {
+			slog.Info("acl drop", "mapping", e.spec.ID, "ip", ip)
+		}
+		if detail, ok := e.aclAuditDetail(ip); ok {
+			s.noteAudit("acl.drop", e.spec.ID, detail)
+		}
 		_ = c.Close()
 		return
 	}
 	if !e.reserve() {
 		e.noteTCPDrop("maxconns")
-		slog.Info("maxconns drop", "mapping", e.spec.ID, "ip", ip)
+		if e.tcpLogOK() {
+			slog.Info("maxconns drop", "mapping", e.spec.ID, "ip", ip)
+		}
 		_ = c.Close()
 		return
 	}
@@ -1412,6 +1421,45 @@ func (s *Server) handleTCP(e *entry, c net.Conn, via string) {
 	dst := xfer.WithLimit(st, e.pace)
 	pub = xfer.WithLimit(pub, e.pace)
 	xfer.CopyBidirectional(dst, pub, &e.in, &e.out)
+}
+
+// Unauthenticated peers can open connections at will, so both the log line
+// and the audit record for a rejected TCP connection are rate limited per
+// mapping. Per-reason counters keep the exact totals.
+const (
+	tcpDropLogInterval   = time.Second
+	tcpDropAuditInterval = time.Minute
+)
+
+// tcpLogOK reports whether a drop log line may be emitted for this entry.
+func (e *entry) tcpLogOK() bool {
+	now := time.Now().UnixNano()
+	last := e.tcpLogNS.Load()
+	if last != 0 && now-last < int64(tcpDropLogInterval) {
+		return false
+	}
+	return e.tcpLogNS.CompareAndSwap(last, now)
+}
+
+// aclAuditDetail decides whether an ACL rejection from ip becomes an audit
+// record. At most one record per mapping per tcpDropAuditInterval is
+// written; it names the triggering IP and how many rejections were folded
+// into it since the previous record.
+func (e *entry) aclAuditDetail(ip string) (string, bool) {
+	now := time.Now().UnixNano()
+	last := e.aclAuditNS.Load()
+	if last != 0 && now-last < int64(tcpDropAuditInterval) {
+		return "", false
+	}
+	if !e.aclAuditNS.CompareAndSwap(last, now) {
+		return "", false
+	}
+	total := e.tcpDropACL.Load()
+	folded := total - e.aclAuditedAt.Swap(total)
+	if folded <= 1 {
+		return ip, true
+	}
+	return fmt.Sprintf("%s (+%d more in the last %s)", ip, folded-1, tcpDropAuditInterval), true
 }
 
 func (e *entry) noteTCPDrop(reason string) {

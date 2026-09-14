@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1561,5 +1562,48 @@ func TestDeleteNodePersistFail(t *testing.T) {
 	defer c.mu.Unlock()
 	if c.nodes[n.ID] == nil {
 		t.Fatal("node vanished after failed delete")
+	}
+}
+
+// Gateway-reported events (ACL drops, node flapping) are triggerable by
+// unauthenticated peers and must not evict administrator actions.
+func TestAuditRingKeepsOwnerActionsUnderGatewayFlood(t *testing.T) {
+	c, _, _ := newTestConsole(t)
+	c.mu.Lock()
+	for i := 0; i < 5; i++ {
+		c.logAudit("mapping.create", "map_"+strconv.Itoa(i), "svc")
+	}
+	c.mu.Unlock()
+	for i := 0; i < maxAudit*3; i++ {
+		c.Audit("acl.drop", "map_x", "203.0.113."+strconv.Itoa(i%250))
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.audit) != maxAudit {
+		t.Fatalf("ring size %d, want %d", len(c.audit), maxAudit)
+	}
+	owner := 0
+	for _, a := range c.audit {
+		switch a.Actor {
+		case auditActorOwner:
+			owner++
+			if a.Action != "mapping.create" {
+				t.Fatalf("unexpected owner record %+v", a)
+			}
+		case auditActorGateway:
+		default:
+			t.Fatalf("unknown actor %q", a.Actor)
+		}
+	}
+	if owner != 5 {
+		t.Fatalf("owner records survived: %d, want 5", owner)
+	}
+	// Owner actions still age out among themselves once they fill the ring.
+	c.audit = nil
+	for i := 0; i < maxAudit+10; i++ {
+		c.logAudit("node.update", "n", strconv.Itoa(i))
+	}
+	if len(c.audit) != maxAudit || c.audit[0].Detail != "10" {
+		t.Fatalf("owner-only ring: len=%d first=%q", len(c.audit), c.audit[0].Detail)
 	}
 }
