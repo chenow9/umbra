@@ -218,7 +218,19 @@ func (c *Console) enrollWindowsScript(token, arch string) string {
 	b.WriteString("  }\n")
 	b.WriteString("}\n")
 	fmt.Fprintf(&b, "Copy-Item -Force %s $exe\n", psQuote(`.\`+bin))
-	fmt.Fprintf(&b, "$arguments = '--server ' + %s + ' --tls-ca \"' + $ca + '\" --token ' + %s\n", server, tok)
+	// The credential lives in a file readable only by SYSTEM and
+	// Administrators and is passed by path. Anything in the service
+	// command line is readable by every local user via sc qc.
+	b.WriteString("$tokenFile = Join-Path $data 'node.token'\n")
+	fmt.Fprintf(&b, "Set-Content -LiteralPath $tokenFile -Value %s -NoNewline -Encoding ascii\n", tok)
+	b.WriteString("$acl = Get-Acl -LiteralPath $tokenFile\n")
+	b.WriteString("$acl.SetAccessRuleProtection($true, $false)\n")
+	b.WriteString("foreach ($rule in @($acl.Access)) { $acl.RemoveAccessRule($rule) | Out-Null }\n")
+	b.WriteString("foreach ($id in 'NT AUTHORITY\\SYSTEM', 'BUILTIN\\Administrators') {\n")
+	b.WriteString("  $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($id, 'FullControl', 'Allow')))\n")
+	b.WriteString("}\n")
+	b.WriteString("Set-Acl -LiteralPath $tokenFile -AclObject $acl\n")
+	fmt.Fprintf(&b, "$arguments = '--server ' + %s + ' --tls-ca \"' + $ca + '\" --token-file \"' + $tokenFile + '\"'\n", server)
 	b.WriteString("$binPath = '\"' + $exe + '\" ' + $arguments\n")
 	b.WriteString("Unblock-File -LiteralPath $exe -ErrorAction SilentlyContinue\n")
 	b.WriteString("New-Service -Name 'UmbraNode' -BinaryPathName $binPath -DisplayName 'Umbra Node' -Description 'Umbra Node' -StartupType Automatic | Out-Null\n")
@@ -248,27 +260,39 @@ func (c *Console) enrollDockerScript(token string) string {
 	tok := shQuote(token)
 	pem := c.caPEM()
 	var b strings.Builder
-	b.WriteString("# --network host 让映射目标 127.0.0.1 指向这台机器。\n")
+	// The credential is written to a 0600 file and bind-mounted rather
+	// than passed as a container argument or environment variable, both
+	// of which are visible through docker inspect and the host's ps.
 	if pem == "" {
+		b.WriteString("# --network host 让映射目标 127.0.0.1 指向这台机器。\n")
 		b.WriteString("# 把入口 ca.crt 放到当前目录后执行：\n")
+		b.WriteString("umask 077\n")
+		b.WriteString("mkdir -p \"$HOME/.umbra\"\n")
+		b.WriteString("if [ -d \"$HOME/.umbra/node.token\" ]; then rm -rf \"$HOME/.umbra/node.token\"; fi\n")
+		fmt.Fprintf(&b, "printf '%%s' %s >\"$HOME/.umbra/node.token\"\n", tok)
 		b.WriteString("docker rm -f umbra-node >/dev/null 2>&1 || true\n")
 		fmt.Fprintf(&b, "docker run -d --name umbra-node --network host --restart unless-stopped \\\n")
 		fmt.Fprintf(&b, "  -v \"$PWD/ca.crt\":/etc/umbra/ca.crt:ro \\\n")
+		fmt.Fprintf(&b, "  -v \"$HOME/.umbra/node.token\":/etc/umbra/node.token:ro \\\n")
 		fmt.Fprintf(&b, "  %s \\\n", nodeDockerImage)
-		fmt.Fprintf(&b, "  --server %s --tls-ca /etc/umbra/ca.crt --token %s\n", server, tok)
+		fmt.Fprintf(&b, "  --server %s --tls-ca /etc/umbra/ca.crt --token-file /etc/umbra/node.token\n", server)
 		return b.String()
 	}
 	b.WriteString("# 入口 CA 已包含在命令中，不必再下载或 scp。\n")
+	b.WriteString("# --network host 让映射目标 127.0.0.1 指向这台机器。\n")
 	b.WriteString("umask 077\n")
 	b.WriteString("mkdir -p \"$HOME/.umbra\"\n")
 	b.WriteString("if [ -d \"$HOME/.umbra/ca.crt\" ]; then rm -rf \"$HOME/.umbra/ca.crt\"; fi\n")
 	b.WriteString("cat >\"$HOME/.umbra/ca.crt\" <<'UMBRA_CA'\n")
 	writeHeredoc(&b, pem)
+	b.WriteString("if [ -d \"$HOME/.umbra/node.token\" ]; then rm -rf \"$HOME/.umbra/node.token\"; fi\n")
+	fmt.Fprintf(&b, "printf '%%s' %s >\"$HOME/.umbra/node.token\"\n", tok)
 	b.WriteString("docker rm -f umbra-node >/dev/null 2>&1 || true\n")
 	fmt.Fprintf(&b, "docker run -d --name umbra-node --network host --restart unless-stopped \\\n")
 	fmt.Fprintf(&b, "  -v \"$HOME/.umbra/ca.crt\":/etc/umbra/ca.crt:ro \\\n")
+	fmt.Fprintf(&b, "  -v \"$HOME/.umbra/node.token\":/etc/umbra/node.token:ro \\\n")
 	fmt.Fprintf(&b, "  %s \\\n", nodeDockerImage)
-	fmt.Fprintf(&b, "  --server %s --tls-ca /etc/umbra/ca.crt --token %s\n", server, tok)
+	fmt.Fprintf(&b, "  --server %s --tls-ca /etc/umbra/ca.crt --token-file /etc/umbra/node.token\n", server)
 	return b.String()
 }
 

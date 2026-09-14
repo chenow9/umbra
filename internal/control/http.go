@@ -24,6 +24,10 @@ import (
 
 const jsonBodyLimit = 256 << 10
 
+// probeGrantTTL bounds the loopback SPA opening used by the console's
+// reachability probe: 50 ms settle plus a 2 s dial, with headroom.
+const probeGrantTTL = 3 * time.Second
+
 //go:embed all:ui
 var uiFS embed.FS
 
@@ -1355,7 +1359,11 @@ func (c *Console) probe(w http.ResponseWriter, r *http.Request, visit bool) {
 	}
 	payload := []byte("umbra-probe " + id + "\n")
 	if spec.Mode == "spa" {
-		_, _ = c.Gate.Knock(id, "127.0.0.1", policy.SPATimeout(spec.SpaTTLSec))
+		// The probe needs the loopback opening only for the dial below;
+		// the grant covers just that, not the service's full allow TTL,
+		// so it does not leave a minute-long window for other local
+		// processes. Knock never shortens an existing longer grant.
+		_, _ = c.Gate.Knock(id, "127.0.0.1", probeGrantTTL)
 		time.Sleep(50 * time.Millisecond)
 	}
 	var reply []byte

@@ -1019,7 +1019,14 @@ func (s *Server) Knock(mappingID, ip string, ttl time.Duration) (time.Time, bool
 	if s.grant[mappingID] == nil {
 		s.grant[mappingID] = map[string]time.Time{}
 	}
-	s.grant[mappingID][ip] = until
+	// A knock never shortens an existing grant: the console's short-lived
+	// probe grant for 127.0.0.1 must not clip an administrator's earlier
+	// full-TTL allow for the same address.
+	if cur, ok := s.grant[mappingID][ip]; !ok || until.After(cur) {
+		s.grant[mappingID][ip] = until
+	} else {
+		until = cur
+	}
 	e := s.ent[mappingID]
 	s.mu.Unlock()
 	if e != nil && e.spec().EntryPort != nil {

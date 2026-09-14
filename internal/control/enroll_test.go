@@ -188,6 +188,48 @@ func TestEnrollBinaryScriptsUseNativeSystemServices(t *testing.T) {
 			if !strings.Contains(cmd, testCAPEM) || !strings.Contains(cmd, "umbra_boot_abc") {
 				t.Fatalf("command must embed CA and token:\n%s", cmd)
 			}
+			assertTokenNotOnCommandLine(t, cmd)
 		})
+	}
+}
+
+// The install scripts may embed the credential so it can be written to a
+// protected file, but the resulting service or container must never carry
+// it on its command line, where any local user can read it.
+func assertTokenNotOnCommandLine(t *testing.T, cmd string) {
+	t.Helper()
+	if strings.Contains(cmd, "--token ") || strings.Contains(cmd, "--token '") {
+		t.Fatalf("credential passed as a command-line argument:\n%s", cmd)
+	}
+}
+
+func TestEnrollScriptsKeepCredentialOffCommandLine(t *testing.T) {
+	c, _, dir := newTestConsole(t)
+	c.Listen = "114.55.129.94:4400"
+	caPath := filepath.Join(dir, "ca.crt")
+	if err := os.WriteFile(caPath, []byte(testCAPEM+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c.CAFile = caPath
+
+	win := c.enrollBinScript("umbra_boot_abc", "windows", "amd64")
+	assertTokenNotOnCommandLine(t, win)
+	for _, want := range []string{"node.token", "--token-file", "SetAccessRuleProtection($true, $false)", "NT AUTHORITY\\SYSTEM", "BUILTIN\\Administrators"} {
+		if !strings.Contains(win, want) {
+			t.Fatalf("windows script missing %q:\n%s", want, win)
+		}
+	}
+
+	for _, withCA := range []bool{true, false} {
+		if !withCA {
+			c.CAFile = ""
+		}
+		dk := c.enrollDockerScript("umbra_boot_abc")
+		assertTokenNotOnCommandLine(t, dk)
+		for _, want := range []string{"umask 077", `printf '%s' 'umbra_boot_abc' >"$HOME/.umbra/node.token"`, `-v "$HOME/.umbra/node.token":/etc/umbra/node.token:ro`, "--token-file /etc/umbra/node.token"} {
+			if !strings.Contains(dk, want) {
+				t.Fatalf("docker script (ca=%v) missing %q:\n%s", withCA, want, dk)
+			}
+		}
 	}
 }

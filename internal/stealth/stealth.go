@@ -104,7 +104,11 @@ func (e *Engine) Knock(p Port, ip string, ttl time.Duration) {
 	if e.open[k] == nil {
 		e.open[k] = map[string]time.Time{}
 	}
-	e.open[k][ip] = time.Now().Add(ttl)
+	until := time.Now().Add(ttl)
+	// Never shorten an existing opening; see gate.Server.Knock.
+	if cur, ok := e.open[k][ip]; !ok || until.After(cur) {
+		e.open[k][ip] = until
+	}
 	e.mu.Unlock()
 	e.rebuild()
 	time.AfterFunc(ttl+50*time.Millisecond, func() {

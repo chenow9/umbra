@@ -1195,11 +1195,14 @@ func (c *Console) spawnNode(token string) {
 	if _, err := os.Stat(c.NodeBin); err != nil {
 		return
 	}
-	args := []string{"--server", c.Listen, "--token", token}
+	args := []string{"--server", c.Listen}
 	if c.CAFile != "" {
 		args = append(args, "--tls-ca", c.CAFile)
 	}
 	cmd := exec.Command(c.NodeBin, args...)
+	// The credential goes through the environment, not argv, so it is
+	// not visible to other local users via ps / procfs cmdline.
+	cmd.Env = append(os.Environ(), "UMBRA_TOKEN="+token)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	_ = cmd.Start()

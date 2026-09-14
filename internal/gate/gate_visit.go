@@ -94,11 +94,14 @@ func (s *Server) runVisitor(raw net.Conn, sess *yamux.Session, wc *wire.Conn, fi
 		if err != nil {
 			return
 		}
-		go s.handleVisitStream(st, m, nodeID)
+		go s.handleVisitStream(st, m, nodeID, ip, portOf(raw.RemoteAddr()))
 	}
 }
 
-func (s *Server) handleVisitStream(st net.Conn, m wire.Mapping, nodeID string) {
+// handleVisitStream forwards one visitor-opened stream to the node. visIP
+// and visPort are the address the gateway accepted the visitor session
+// from; they are what the node is told the peer is.
+func (s *Server) handleVisitStream(st net.Conn, m wire.Mapping, nodeID, visIP string, visPort int) {
 	defer st.Close()
 	_ = st.SetDeadline(time.Now().Add(8 * time.Second))
 	o, err := wire.ReadOpen(st)
@@ -128,6 +131,14 @@ func (s *Server) handleVisitStream(st net.Conn, m wire.Mapping, nodeID string) {
 		s.bridgeUDP(e, nodeID, st, o)
 		return
 	}
+	// The visitor fills PeerIP/PeerPort with its own local client's
+	// address, which is attacker-controlled and meaningless to the node.
+	// Replace it with the address the gateway actually accepted the
+	// visitor from so node-side logs and any future peer-based policy see
+	// the real source. UDP keeps the visitor-supplied values: there they
+	// are a flow key that the node echoes back and the visitor uses to
+	// route replies to the right local client.
+	o.PeerIP, o.PeerPort = visIP, visPort
 	s.spliceToNode(e, st, o)
 }
 

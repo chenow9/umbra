@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"umbra/internal/node"
 	"umbra/internal/retry"
@@ -39,12 +40,20 @@ func main() {
 
 func loadConfig() (config, error) {
 	server := flag.String("server", env("UMBRA_SERVER", "127.0.0.1:4400"), "入口控制通道")
-	token := flag.String("token", os.Getenv("UMBRA_TOKEN"), "登记时签发的凭证")
+	token := flag.String("token", os.Getenv("UMBRA_TOKEN"), "登记时签发的凭证（优先用 --token-file 或 UMBRA_TOKEN，避免出现在进程参数中）")
+	tokenFile := flag.String("token-file", env("UMBRA_TOKEN_FILE", ""), "从文件读取凭证，内容为单行凭证")
 	caFile := flag.String("tls-ca", env("UMBRA_TLS_CA", ""), "入口 CA 证书")
 	plain := flag.Bool("plain", false, "不加密（仅调试）")
 	flag.Parse()
+	if *tokenFile != "" {
+		b, err := os.ReadFile(*tokenFile)
+		if err != nil {
+			return config{}, fmt.Errorf("read --token-file: %w", err)
+		}
+		*token = strings.TrimSpace(string(b))
+	}
 	if *token == "" {
-		return config{}, fmt.Errorf("missing --token / UMBRA_TOKEN")
+		return config{}, fmt.Errorf("missing --token / --token-file / UMBRA_TOKEN")
 	}
 	var tlsConf *tls.Config
 	if !*plain {

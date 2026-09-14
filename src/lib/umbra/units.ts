@@ -372,20 +372,31 @@ export function nodeEnrollDockerCmd(token: string, server?: string, caPem?: stri
   const tok = shSingleQuote(token);
   const pem = caPem?.trim();
   const head = `# --network host 让映射目标 127.0.0.1 指向这台机器。`;
-  const run = `docker rm -f umbra-node >/dev/null 2>&1 || true
+  // The credential is written to a 0600 file and bind-mounted rather than
+  // passed as a container argument or environment variable, both of which
+  // are visible through docker inspect and the host's ps.
+  const writeToken = `if [ -d "$HOME/.umbra/node.token" ]; then rm -rf "$HOME/.umbra/node.token"; fi
+printf '%s' ${tok} >"$HOME/.umbra/node.token"`;
+  const run = `${writeToken}
+docker rm -f umbra-node >/dev/null 2>&1 || true
 docker run -d --name umbra-node --network host --restart unless-stopped \\
   -v "$HOME/.umbra/ca.crt":/etc/umbra/ca.crt:ro \\
+  -v "$HOME/.umbra/node.token":/etc/umbra/node.token:ro \\
   ${DOCKERHUB_NODE}:latest \\
-  --server ${srv} --tls-ca /etc/umbra/ca.crt --token ${tok}
+  --server ${srv} --tls-ca /etc/umbra/ca.crt --token-file /etc/umbra/node.token
 `;
   if (!pem) {
     return `${head}
 # 把入口 ca.crt 放到当前目录后执行：
+umask 077
+mkdir -p "$HOME/.umbra"
+${writeToken}
 docker rm -f umbra-node >/dev/null 2>&1 || true
 docker run -d --name umbra-node --network host --restart unless-stopped \\
   -v "$PWD/ca.crt":/etc/umbra/ca.crt:ro \\
+  -v "$HOME/.umbra/node.token":/etc/umbra/node.token:ro \\
   ${DOCKERHUB_NODE}:latest \\
-  --server ${srv} --tls-ca /etc/umbra/ca.crt --token ${tok}
+  --server ${srv} --tls-ca /etc/umbra/ca.crt --token-file /etc/umbra/node.token
 `;
   }
   return withCAHeredoc(
@@ -445,7 +456,16 @@ if ($service) {
   }
 }
 Copy-Item -Force ${bin} $exe
-$arguments = '--server ' + ${srv} + ' --tls-ca "' + $ca + '" --token ' + ${tok}
+$tokenFile = Join-Path $data 'node.token'
+Set-Content -LiteralPath $tokenFile -Value ${tok} -NoNewline -Encoding ascii
+$acl = Get-Acl -LiteralPath $tokenFile
+$acl.SetAccessRuleProtection($true, $false)
+foreach ($rule in @($acl.Access)) { $acl.RemoveAccessRule($rule) | Out-Null }
+foreach ($id in 'NT AUTHORITY\\SYSTEM', 'BUILTIN\\Administrators') {
+  $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($id, 'FullControl', 'Allow')))
+}
+Set-Acl -LiteralPath $tokenFile -AclObject $acl
+$arguments = '--server ' + ${srv} + ' --tls-ca "' + $ca + '" --token-file "' + $tokenFile + '"'
 $binPath = '"' + $exe + '" ' + $arguments
 Unblock-File -LiteralPath $exe -ErrorAction SilentlyContinue
 New-Service -Name 'UmbraNode' -BinaryPathName $binPath -DisplayName 'Umbra Node' -Description 'Umbra Node' -StartupType Automatic | Out-Null

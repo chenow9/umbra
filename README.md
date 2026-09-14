@@ -293,17 +293,18 @@ sudo ./dist/umbrad_linux_amd64 \
 - `ca.crt` / `gate.crt` / `gate.key`：入口 CA 与证书
 - `control.json`：管理员口令、TOTP 绑定、登录会话、节点凭证、服务配置与累计流量
 - `2fa-bootstrap`：旧版本升级或本机重置 2FA 后的一次性迁移码，绑定成功后删除
-- `traffic`：速率曲线采样（约每 10 秒写一次）
+- `traffic`：速率曲线采样（约每分钟写一次，正常退出时完整刷盘）
 - `state.json`：热升级时的恢复状态
 
 手动启动节点：
 
 ```bash
-./umbra-node \
+UMBRA_TOKEN=umbra_boot_… ./umbra-node \
   --server gate.example.com:4400 \
-  --tls-ca /etc/umbra/ca.crt \
-  --token umbra_boot_…
+  --tls-ca /etc/umbra/ca.crt
 ```
+
+凭证通过环境变量 `UMBRA_TOKEN` 或 `--token-file <路径>` 传入；`--token` 仍可用，但会出现在进程参数里，本机其他用户可通过 `ps` 读到。控制台生成的安装命令都不会把凭证放进服务或容器的命令行。
 
 节点凭证默认 90 天，也可设为永不过期；过期前轮换，或随时吊销。轮换后旧凭证大约 90 秒内仍可用。
 
@@ -511,7 +512,7 @@ deploy/             入口 / 节点 Docker Compose
 | `-stealth`   | `auto`            | `nft` / `off` / `auto`                    |
 | `-udp`       | `auto`            | UDP 数据面：`auto` / `required` / `yamux` |
 
-节点：`--server`、`--token`、`--tls-ca`。访问端另加 `--ticket`、`--local`。
+节点：`--server`、`--tls-ca`、`--token-file`（或环境变量 `UMBRA_TOKEN`）。访问端另加 `--ticket`、`--local`。
 
 ### 入口认证、容量与 UDP 准入环境变量
 

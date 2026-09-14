@@ -43,6 +43,20 @@ describe("nodeEnrollDockerCmd", () => {
     assert.match(cmd, /\$PWD\/ca\.crt/);
     assert.equal(cmd.includes("BEGIN CERTIFICATE"), false);
   });
+
+  it("mounts the credential as a file instead of passing it on the command line", () => {
+    for (const cmd of [
+      nodeEnrollDockerCmd("umbra_boot_abc", "gate.example.com:4400", pem),
+      nodeEnrollDockerCmd("umbra_boot_abc", "gate.example.com:4400"),
+    ]) {
+      assert.match(cmd, /umask 077/);
+      assert.match(cmd, /printf '%s' 'umbra_boot_abc' >"\$HOME\/\.umbra\/node\.token"/);
+      assert.match(cmd, /-v "\$HOME\/\.umbra\/node\.token":\/etc\/umbra\/node\.token:ro/);
+      assert.match(cmd, /--token-file \/etc\/umbra\/node\.token/);
+      assert.doesNotMatch(cmd, /--token ['\s]/);
+      assert.doesNotMatch(cmd, /UMBRA_TOKEN/);
+    }
+  });
 });
 
 describe("gateInstall", () => {
@@ -108,6 +122,17 @@ describe("nodeEnrollWindowsCmd", () => {
     assert.match(cmd, /\$LASTEXITCODE -ne 0/);
     assert.match(cmd, /Start-Service -Name 'UmbraNode'/);
     assert.doesNotMatch(cmd, /sc\.exe create UmbraNode/);
+  });
+
+  it("stores the credential in an ACL-protected file rather than the service command line", () => {
+    const cmd = nodeEnrollWindowsCmd("umbra_boot_abc", "114.55.129.94:4400", "amd64", pem);
+    assert.match(cmd, /\$tokenFile = Join-Path \$data 'node\.token'/);
+    assert.match(cmd, /Set-Content -LiteralPath \$tokenFile -Value 'umbra_boot_abc' -NoNewline/);
+    assert.match(cmd, /SetAccessRuleProtection\(\$true, \$false\)/);
+    assert.match(cmd, /NT AUTHORITY\\SYSTEM/);
+    assert.match(cmd, /BUILTIN\\Administrators/);
+    assert.match(cmd, /--token-file "' \+ \$tokenFile \+ '"/);
+    assert.doesNotMatch(cmd, /--token ['\s]/);
   });
 });
 

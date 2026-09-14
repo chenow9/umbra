@@ -476,6 +476,125 @@ func TestVisitorRevokeDisconnectsLiveSession(t *testing.T) {
 	t.Fatal("visitor session still registered after revoke")
 }
 
+// The StreamOpen a visitor sends carries whatever PeerIP/PeerPort the
+// client chose (its own local client address in practice). The node must
+// instead be told the address the gateway accepted the visitor from.
+func TestVisitorStreamPeerIsGatewayObservedAddress(t *testing.T) {
+	s, addr := startGate(t)
+	s.SetToken("tok", "nde1")
+	s.PutMappings("nde1", []wire.Mapping{{
+		ID: "map_peer", Name: "v", Proto: "tcp", Mode: "visitor",
+		LocalHost: "127.0.0.1", LocalPort: 1,
+		Enabled: true, MaxConns: 8, IdleTimeoutSec: 30,
+	}})
+	ticket := "umbra_vis_peer"
+	s.SetTicket(TicketHash(ticket), "map_peer", time.Now().Add(time.Hour))
+
+	// Fake node: enrol, say hello, then record the StreamOpen of every
+	// stream the gateway opens towards it.
+	opens := make(chan wire.StreamOpen, 4)
+	raw, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if err := preface.Write(raw, preface.KindNode, "tok"); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := yamux.Client(raw, muxcfg.Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	ctl, err := sess.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wc := wire.NewConn(ctl)
+	if err := wc.SendJSON("Enroll", map[string]string{"hostname": "x", "os": "linux", "arch": "amd64"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wc.Read(); err != nil {
+		t.Fatal(err)
+	}
+	if err := wc.SendJSON("Hello", map[string]string{"node_id": "nde1", "version": "test"}); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for {
+			if _, err := wc.Read(); err != nil {
+				return
+			}
+		}
+	}()
+	go func() {
+		for {
+			st, err := sess.AcceptStream()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer st.Close()
+				o, err := wire.ReadOpen(st)
+				if err == nil {
+					opens <- o
+				}
+			}()
+		}
+	}()
+	waitOnline(t, s, "nde1")
+
+	// Hand-rolled visitor that lies about its peer.
+	vraw, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vraw.Close()
+	if err := preface.Write(vraw, preface.KindVisit, ticket); err != nil {
+		t.Fatal(err)
+	}
+	vsess, err := yamux.Client(vraw, muxcfg.Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vsess.Close()
+	vctl, err := vsess.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vwc := wire.NewConn(vctl)
+	if err := vwc.SendJSON("Visit", map[string]string{"ticket": ticket}); err != nil {
+		t.Fatal(err)
+	}
+	if env, err := vwc.Read(); err != nil || env.Type != "VisitOk" {
+		t.Fatalf("visit handshake: %v %+v", err, env)
+	}
+	vst, err := vsess.OpenStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vst.Close()
+	if err := wire.WriteOpen(vst, wire.StreamOpen{
+		MappingID: "map_peer", Proto: "tcp", PeerIP: "203.0.113.9", PeerPort: 4444, Via: "visitor",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var o wire.StreamOpen
+	select {
+	case o = <-opens:
+	case <-time.After(3 * time.Second):
+		t.Fatal("node did not receive a stream open")
+	}
+	if o.Via != "visitor" || o.MappingID != "map_peer" {
+		t.Fatalf("unexpected open %+v", o)
+	}
+	_, vport, _ := net.SplitHostPort(vraw.LocalAddr().String())
+	if o.PeerIP != "127.0.0.1" || itoa(o.PeerPort) != vport {
+		t.Fatalf("node told peer %s:%d, want the gateway-observed visitor address 127.0.0.1:%s", o.PeerIP, o.PeerPort, vport)
+	}
+}
+
 func TestVisitorTicketExpiryDisconnects(t *testing.T) {
 	echo, echoPort := startEchoTCP(t)
 	defer echo.Close()
@@ -1430,6 +1549,31 @@ func TestRateLimitThrottlesTCPWithoutClosing(t *testing.T) {
 	st := s.MappingStats()["map_rate"]
 	if st.In != int64(len(payload)) || st.Out != int64(len(payload)) {
 		t.Fatalf("counters in=%d out=%d", st.In, st.Out)
+	}
+}
+
+// A later knock with a shorter TTL (the console's probe) must not clip an
+// administrator's earlier, longer grant for the same address.
+func TestSPAKnockNeverShortensExistingGrant(t *testing.T) {
+	s, _ := startGate(t)
+	long, ok := s.Knock("map_k", "127.0.0.1", time.Minute)
+	if !ok {
+		t.Fatal("knock rejected")
+	}
+	short, ok := s.Knock("map_k", "127.0.0.1", 3*time.Second)
+	if !ok {
+		t.Fatal("knock rejected")
+	}
+	if !short.Equal(long) {
+		t.Fatalf("shorter knock returned %v, want the existing %v", short, long)
+	}
+	grants := s.MappingGrants("map_k")
+	if len(grants) != 1 || !grants[0].Until.Equal(long) {
+		t.Fatalf("grant clipped: %+v", grants)
+	}
+	longer, _ := s.Knock("map_k", "127.0.0.1", 2*time.Minute)
+	if !longer.After(long) {
+		t.Fatalf("longer knock must extend: %v <= %v", longer, long)
 	}
 }
 
