@@ -15,6 +15,7 @@
 - 安全：节点凭证不再出现在任何命令行上。`umbra-node` 新增 `--token-file` / `UMBRA_TOKEN_FILE`；Windows 安装脚本把凭证写入仅 SYSTEM 与 Administrators 可读的 `ProgramData\Umbra\node.token` 并以路径传给服务，不再放进 `sc qc` 可见的服务命令行；Docker 安装脚本把凭证写入 0600 文件并只读挂载，不再作为容器参数出现在 `docker inspect` 中；控制台本地拉起节点时凭证走环境变量而非 argv
 - 安全：控制台探测临时放行服务时只为 127.0.0.1 开 3 秒窗口，而不是服务的完整放行时长；敲门不再缩短同一地址已有的更长放行
 - 安全：凭证访问的 TCP 流转发到节点时，`peer_ip` / `peer_port` 改为公网入口实际接受访问端连接的地址，不再透传访问端自报（可伪造）的值；UDP 保留访问端提供的值作为流标识
+- 文档：安全模型一节补充 CA 私钥不落盘的事实与轮换流程、登录退避在反代配置错误时的可用性风险、临时放行对 IPv6 来源只做用户态拒绝及对应的规避方式；修正此前“`tls-dir` 含 CA 私钥”的不准确描述；节点凭证传递方式改为环境变量 / `--token-file`
 
 - Security: Temporary allow no longer widens an empty source IP into an any-source grant. When the console is bound to a Unix socket or a proxy passes no client IP, the knock API returns 400 and requires an explicit `ip`; neither the nftables nor the userspace check accepts a wildcard grant; hot upgrades no longer replay legacy grants that lack a source IP
 - Rate limiting is now a token-bucket shaper: TCP streams exceeding `rateKbps` are paced instead of torn down, and both directions are limited; UDP drops over-budget packets in both directions and counts them under `traffic_limit`
@@ -29,6 +30,7 @@
 - Security: Node credentials no longer appear on any command line. `umbra-node` gains `--token-file` / `UMBRA_TOKEN_FILE`; the Windows install script writes the credential to `ProgramData\Umbra\node.token`, readable only by SYSTEM and Administrators, and passes the path instead of putting the secret in the service command line visible through `sc qc`; the Docker install script writes it to a 0600 file and mounts it read-only instead of passing it as a container argument visible through `docker inspect`; the console's local node spawn passes it through the environment rather than argv
 - Security: The console's reachability probe opens the Temporary allow service to 127.0.0.1 for 3 seconds instead of the service's full allow TTL; a knock never shortens an existing longer grant for the same address
 - Security: TCP streams admitted through Ticket access are forwarded to the node with `peer_ip` / `peer_port` set to the address the gateway actually accepted the visitor from, instead of the visitor's self-reported and spoofable values; UDP keeps the visitor-supplied values as a flow key
+- Docs: The security model section now covers the fact that the CA private key is never stored and how to rotate, the availability risk of the login backoff behind a misconfigured proxy, and that Temporary allow only rejects IPv6 sources in user space along with how to avoid that; corrects the earlier inaccurate statement that `tls-dir` contains the CA private key; node credential examples use the environment / `--token-file`
 
 ## 0.3.0 — 2026-09-11
 
