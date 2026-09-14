@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- 安全：临时放行不再把空来源 IP 退化为“任意来源”。管理口绑定 Unix socket 或反代未传来源 IP 时，敲门接口返回 400 并要求显式指定 `ip`；nftables 与用户态检查都不再接受通配放行；热升级不再回放旧版无来源 IP 的放行记录
+
+- Security: Temporary allow no longer widens an empty source IP into an any-source grant. When the console is bound to a Unix socket or a proxy passes no client IP, the knock API returns 400 and requires an explicit `ip`; neither the nftables nor the userspace check accepts a wildcard grant; hot upgrades no longer replay legacy grants that lack a source IP
+
 ## 0.3.0 — 2026-09-11
 
 在多台独立公网入口之间批量导出 / 导入节点和服务配置。

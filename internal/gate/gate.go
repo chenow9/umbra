@@ -210,7 +210,7 @@ type Server struct {
 	nodes     map[string]*nodeConn
 	ent       map[string]*entry
 	want      map[string][]Mapping
-	grant     map[string]map[string]time.Time // mappingID -> ip -> until; ip "*" = any source
+	grant     map[string]map[string]time.Time // mappingID -> ip -> until
 	tix       map[string]ticketEnt
 	visits    map[string]*visitUDP
 	ctrl      net.Listener
@@ -856,17 +856,21 @@ func (s *Server) Disconnect(nodeID string) {
 	}
 }
 
-const grantAnyIP = "*"
-
 type GrantInfo struct {
 	IP    string
 	Until time.Time
 }
 
-func (s *Server) Knock(mappingID, ip string, ttl time.Duration) time.Time {
+// Knock grants ip access to the SPA mapping for ttl. A grant is always
+// bound to one concrete source address: an empty or unparsable ip is
+// rejected (ok=false) instead of widening to every source, because the
+// caller may have derived it from a Unix-socket or proxied request that
+// carries no usable RemoteAddr.
+func (s *Server) Knock(mappingID, ip string, ttl time.Duration) (time.Time, bool) {
 	ip = policy.NormalizeIP(ip)
-	if ip == "" {
-		ip = grantAnyIP
+	if net.ParseIP(ip) == nil {
+		slog.Warn("spa knock rejected", "mapping", mappingID, "reason", "no_source_ip")
+		return time.Time{}, false
 	}
 	if ttl <= 0 {
 		ttl = policy.SPATimeout(0)
@@ -882,7 +886,7 @@ func (s *Server) Knock(mappingID, ip string, ttl time.Duration) time.Time {
 	if e != nil && e.spec.EntryPort != nil {
 		s.stealth.Knock(stealth.Port{Proto: e.spec.Proto, Port: uint16(*e.spec.EntryPort)}, ip, ttl)
 	}
-	return until
+	return until, true
 }
 
 func (s *Server) granted(id, ip string) bool {
@@ -893,11 +897,7 @@ func (s *Server) granted(id, ip string) bool {
 	if byIP == nil {
 		return false
 	}
-	now := time.Now()
-	if until, ok := byIP[ip]; ok && now.Before(until) {
-		return true
-	}
-	if until, ok := byIP[grantAnyIP]; ok && now.Before(until) {
+	if until, ok := byIP[ip]; ok && time.Now().Before(until) {
 		return true
 	}
 	return false
@@ -2108,20 +2108,14 @@ func (s *Server) Restore(snap Snapshot) {
 	for id, maps := range snap.Maps {
 		s.PutMappings(id, maps)
 	}
-	if len(snap.GrantIPs) > 0 {
-		for id, byIP := range snap.GrantIPs {
-			for ip, ms := range byIP {
-				until := time.UnixMilli(ms)
-				if until.After(time.Now()) {
-					s.Knock(id, ip, time.Until(until))
-				}
-			}
-		}
-	} else {
-		for id, ms := range snap.Grants {
+	// Only per-IP grants are restored. The legacy per-mapping Grants map
+	// carries no source address and used to be replayed as an any-source
+	// grant; a hot upgrade must not open an SPA port to the world.
+	for id, byIP := range snap.GrantIPs {
+		for ip, ms := range byIP {
 			until := time.UnixMilli(ms)
 			if until.After(time.Now()) {
-				s.Knock(id, grantAnyIP, time.Until(until))
+				s.Knock(id, ip, time.Until(until))
 			}
 		}
 	}
@@ -2227,7 +2221,11 @@ func (s *Server) ServeAPI(ln net.Listener) error {
 			ttl = policy.SPATimeout(e.spec.SpaTTLSec)
 		}
 		s.mu.Unlock()
-		until := s.Knock(id, ip, ttl)
+		until, ok := s.Knock(id, ip, ttl)
+		if !ok {
+			http.Error(w, "source ip required", 400)
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"until": until.UTC().Format(time.RFC3339), "ip": ip, "ttlSec": int(ttl.Seconds()),
 		})

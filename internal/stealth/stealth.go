@@ -29,7 +29,7 @@ type Engine struct {
 	ok      bool
 	mode    string
 	dropped map[string]Port
-	open    map[string]map[string]time.Time // portKey -> ip -> until; ip "*" = any source
+	open    map[string]map[string]time.Time // portKey -> ip -> until
 }
 
 func New(enable bool) *Engine {
@@ -89,12 +89,15 @@ func (e *Engine) SetSPA(p Port, drop bool) {
 	e.rebuild()
 }
 
+// Knock opens p for one IPv4 source. Grants are never widened to every
+// source: an empty or non-IPv4 address is ignored (IPv6 stays on the
+// userspace check because the kernel table is IPv4-only).
 func (e *Engine) Knock(p Port, ip string, ttl time.Duration) {
 	if e == nil {
 		return
 	}
-	if ip == "" {
-		ip = "*"
+	if net.ParseIP(ip).To4() == nil {
+		return
 	}
 	k := key(p)
 	e.mu.Lock()
@@ -145,14 +148,9 @@ func (e *Engine) rebuild() {
 			Chain: e.chain,
 			Exprs: establishedAccept(p),
 		})
-		anyIP := false
 		if grants := e.open[k]; grants != nil {
 			for ip, until := range grants {
 				if !now.Before(until) {
-					continue
-				}
-				if ip == "" || ip == "*" {
-					anyIP = true
 					continue
 				}
 				ip4 := net.ParseIP(ip).To4()
@@ -166,13 +164,11 @@ func (e *Engine) rebuild() {
 				})
 			}
 		}
-		if !anyIP {
-			e.conn.AddRule(&nftables.Rule{
-				Table: e.table,
-				Chain: e.chain,
-				Exprs: dropExprs(p),
-			})
-		}
+		e.conn.AddRule(&nftables.Rule{
+			Table: e.table,
+			Chain: e.chain,
+			Exprs: dropExprs(p),
+		})
 	}
 	if err := e.conn.Flush(); err != nil {
 		log.Printf("stealth: 刷新规则失败 %v", err)

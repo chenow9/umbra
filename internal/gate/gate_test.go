@@ -1188,6 +1188,42 @@ func TestSPAGrantBindsSourceIP(t *testing.T) {
 	}
 }
 
+func TestSPAKnockRejectsEmptySourceIP(t *testing.T) {
+	echo, echoPort := startEchoTCP(t)
+	defer echo.Close()
+	s, addr := startGate(t)
+	s.SetToken("tok", "nde1")
+	pub := pickPort(t)
+	port := pub
+	s.PutMappings("nde1", []wire.Mapping{{
+		ID: "map_spa_empty", Name: "t", Proto: "tcp", Mode: "spa",
+		EntryPort: &port, LocalHost: "127.0.0.1", LocalPort: echoPort,
+		Enabled: true, MaxConns: 8, SpaTTLSec: 30,
+	}})
+	go func() { _ = node.Run(addr, "tok", nil) }()
+	waitOnline(t, s, "nde1")
+	for _, bad := range []string{"", "*", "unknown", "@"} {
+		if _, ok := s.Knock("map_spa_empty", bad, time.Second); ok {
+			t.Fatalf("knock with source %q must be rejected", bad)
+		}
+	}
+	if grants := s.MappingGrants("map_spa_empty"); len(grants) != 0 {
+		t.Fatalf("no grant expected, got %v", grants)
+	}
+	dst := net.JoinHostPort("127.0.0.1", itoa(pub))
+	if echoTCP(t, dst, "no", 300*time.Millisecond) {
+		t.Fatal("rejected knock must not admit any source")
+	}
+	// A legacy snapshot without per-IP grants must not reopen the port.
+	s.Restore(Snapshot{Grants: map[string]int64{"map_spa_empty": time.Now().Add(time.Minute).UnixMilli()}})
+	if grants := s.MappingGrants("map_spa_empty"); len(grants) != 0 {
+		t.Fatalf("legacy any-source grant must be dropped, got %v", grants)
+	}
+	if echoTCP(t, dst, "no", 300*time.Millisecond) {
+		t.Fatal("legacy snapshot must not admit any source")
+	}
+}
+
 func TestSPATCPSurvivesGrantExpiry(t *testing.T) {
 	echo, echoPort := startEchoTCP(t)
 	defer echo.Close()

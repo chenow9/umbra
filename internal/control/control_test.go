@@ -1239,6 +1239,70 @@ func TestSPAKnockBindsRequestIPAndMappingTTL(t *testing.T) {
 	}
 }
 
+// A console bound to a Unix socket sees RemoteAddr == "". Knocking without an
+// explicit ip used to fall through to an any-source grant.
+func TestSPAKnockWithoutSourceIPIsRejected(t *testing.T) {
+	c, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "n1"}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("node %d %s", res.StatusCode, readBody(t, res))
+	}
+	var n struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&n); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	res = doJSON(t, srv, "POST", "/v1/mappings", map[string]any{
+		"nodeId": n.ID, "name": "ssh", "proto": "tcp", "mode": "spa",
+		"entryPort": 40223, "localHost": "127.0.0.1", "localPort": 22,
+	}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("mapping %d %s", res.StatusCode, readBody(t, res))
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+
+	for _, remote := range []string{"", "@", "unknown"} {
+		req := httptest.NewRequest("POST", "/v1/mappings/"+created.ID+"/knock", strings.NewReader("{}"))
+		req.RemoteAddr = remote
+		rec := httptest.NewRecorder()
+		c.Handler().ServeHTTP(rec, req)
+		if rec.Code != 400 {
+			t.Fatalf("RemoteAddr %q: want 400, got %d %s", remote, rec.Code, rec.Body.String())
+		}
+		if grants := c.Gate.MappingGrants(created.ID); len(grants) != 0 {
+			t.Fatalf("RemoteAddr %q: unexpected grant %v", remote, grants)
+		}
+	}
+	// Explicit wildcard-ish values are rejected too.
+	for _, bad := range []string{"*", "0.0.0.0/0", "any"} {
+		res = doJSON(t, srv, "POST", "/v1/mappings/"+created.ID+"/knock", map[string]any{"ip": bad}, nil)
+		if res.StatusCode != 400 {
+			t.Fatalf("ip %q: want 400, got %d %s", bad, res.StatusCode, readBody(t, res))
+		}
+		res.Body.Close()
+	}
+	// A real source still works.
+	req := httptest.NewRequest("POST", "/v1/mappings/"+created.ID+"/knock", strings.NewReader("{}"))
+	req.RemoteAddr = "198.51.100.7:5555"
+	rec := httptest.NewRecorder()
+	c.Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("knock from real addr: %d %s", rec.Code, rec.Body.String())
+	}
+	grants := c.Gate.MappingGrants(created.ID)
+	if len(grants) != 1 || grants[0].IP != "198.51.100.7" {
+		t.Fatalf("grant %v", grants)
+	}
+}
+
 func TestOverviewAlertsAndTickets(t *testing.T) {
 	_, srv, _ := newTestConsole(t)
 	res := doJSON(t, srv, "GET", "/v1/overview", nil, nil)

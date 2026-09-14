@@ -1272,7 +1272,13 @@ func (c *Console) postKnock(w http.ResponseWriter, r *http.Request) {
 	c.mu.Unlock()
 	ip := strings.TrimSpace(b.IP)
 	if ip == "" {
+		// Unix-socket or misconfigured-proxy requests carry no usable
+		// RemoteAddr. A grant must never silently widen to every source.
 		ip = c.requestIP(r)
+		if net.ParseIP(ip) == nil {
+			writeErr(w, 400, "无法确定来源 IP，请在请求中显式指定 ip")
+			return
+		}
 	} else {
 		ip = policy.NormalizeIP(ip)
 		if net.ParseIP(ip) == nil {
@@ -1280,7 +1286,11 @@ func (c *Console) postKnock(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	until := c.Gate.Knock(id, ip, time.Duration(ttlSec)*time.Second)
+	until, ok := c.Gate.Knock(id, ip, time.Duration(ttlSec)*time.Second)
+	if !ok {
+		writeErr(w, 400, "来源 IP 无效")
+		return
+	}
 	c.mu.Lock()
 	c.logAudit("mapping.knock", id, fmt.Sprintf("SPA grant %ds %s", ttlSec, ip))
 	c.mu.Unlock()
@@ -1343,7 +1353,7 @@ func (c *Console) probe(w http.ResponseWriter, r *http.Request, visit bool) {
 	}
 	payload := []byte("umbra-probe " + id + "\n")
 	if spec.Mode == "spa" {
-		c.Gate.Knock(id, "127.0.0.1", policy.SPATimeout(spec.SpaTTLSec))
+		_, _ = c.Gate.Knock(id, "127.0.0.1", policy.SPATimeout(spec.SpaTTLSec))
 		time.Sleep(50 * time.Millisecond)
 	}
 	var reply []byte

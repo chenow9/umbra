@@ -158,11 +158,7 @@ func (c *Console) mappingView(m *mapRec, live map[string]gateNode, stats map[str
 		if g.Until.After(latest) {
 			latest = g.Until
 			grantUntil = until
-			if g.IP != "*" {
-				grantIP = g.IP
-			} else {
-				grantIP = ""
-			}
+			grantIP = g.IP
 		}
 	}
 	if !m.Spec.Enabled {
