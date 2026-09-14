@@ -237,7 +237,7 @@ func (e *entry) udpIPLimit() int {
 	if max <= 0 {
 		max = defaultUDPIPMapMax
 	}
-	if n := policy.MaxConns(e.spec.MaxConns) * 2; n > max {
+	if n := policy.MaxConns(e.spec().MaxConns) * 2; n > max {
 		max = n
 	}
 	return max
@@ -317,7 +317,7 @@ func (e *entry) noteUDPDrop(ip, reason string) {
 	if !e.udpLogOK(reason) {
 		return
 	}
-	slog.Info("udp drop", "mapping", e.spec.ID, "ip", ip, "reason", reason)
+	slog.Info("udp drop", "mapping", e.spec().ID, "ip", ip, "reason", reason)
 }
 
 func (e *entry) noteUDPSendDrop(ip string, result udpSendResult) {

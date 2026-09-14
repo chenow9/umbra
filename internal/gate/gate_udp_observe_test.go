@@ -109,7 +109,7 @@ func TestSendNodeUDPResultCounters(t *testing.T) {
 
 func TestDeliverFromNodeFailureCounters(t *testing.T) {
 	s := New("127.0.0.1", stealth.New(false))
-	e := &entry{spec: Mapping{ID: "map", Proto: "udp", Enabled: true}, udpSess: map[string]*udpSess{}}
+	e := newEntry(Mapping{ID: "map", Proto: "udp", Enabled: true}, "", &entry{udpSess: map[string]*udpSess{}})
 	s.ent["map"] = e
 	pkt := uplane.Packet{Type: uplane.TypeData, MappingID: "map", FlowID: "flow", Payload: []byte("x")}
 	s.deliverFromNode(pkt)

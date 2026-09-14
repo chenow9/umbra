@@ -220,7 +220,7 @@ func (s *Server) onUDPData(id string, addr net.Addr, pkt uplane.Packet) {
 			s.markNodeUDPReady(ac, addr)
 		}
 		e := s.ent[pkt.MappingID]
-		ok := e != nil && e.nodeID == id && e.spec.Enabled && e.spec.Proto == "udp"
+		ok := e != nil && e.spec().nodeID == id && e.spec().Enabled && e.spec().Proto == "udp"
 		s.mu.Unlock()
 		if !ok {
 			s.udpPlane.unknownMap.Add(1)
@@ -242,7 +242,7 @@ func (s *Server) onUDPData(id string, addr net.Addr, pkt uplane.Packet) {
 	nodeID, visID, mapID := v.nodeID, v.id, v.mapID
 	proto, mode := v.proto, v.mode
 	e := s.ent[pkt.MappingID]
-	ok := pkt.MappingID == mapID && pkt.FlowID != "" && e != nil && e.nodeID == nodeID && e.spec.Enabled && e.spec.Proto == "udp" && e.spec.Mode == "visitor" && proto == "udp" && mode == "visitor"
+	ok := pkt.MappingID == mapID && pkt.FlowID != "" && e != nil && e.spec().nodeID == nodeID && e.spec().Enabled && e.spec().Proto == "udp" && e.spec().Mode == "visitor" && proto == "udp" && mode == "visitor"
 	s.mu.Unlock()
 	if !ok {
 		s.udpPlane.unknownMap.Add(1)
@@ -278,7 +278,7 @@ func (s *Server) onUDPClose(id string, pkt uplane.Packet) {
 	fromNode := false
 	visOwner := ""
 	if ac := s.nodes[id]; ac != nil {
-		fromNode = ac.online && e != nil && e.nodeID == id
+		fromNode = ac.online && e != nil && e.spec().nodeID == id
 	} else if v := s.visits[id]; v != nil {
 		fromNode = e != nil && pkt.MappingID == v.mapID
 		visOwner = v.id
@@ -366,7 +366,7 @@ func (s *Server) forwardVisitUDP(nodeID, visID string, pkt uplane.Packet) {
 		return
 	}
 	key := udpFlowIndex(pkt.FlowID)
-	idle := policy.UDPIdle(e.spec.UdpIdleTimeoutSec, e.spec.IdleTimeoutSec)
+	idle := policy.UDPIdle(e.spec().UdpIdleTimeoutSec, e.spec().IdleTimeoutSec)
 	e.mu.Lock()
 	sess := e.udpSess[key]
 	if sess == nil {
@@ -376,7 +376,7 @@ func (s *Server) forwardVisitUDP(nodeID, visID string, pkt uplane.Packet) {
 			return
 		}
 		sess = &udpSess{idle: idle, visitID: visID, flowID: pkt.FlowID, path: udpPathUPlane, admitIP: udpAdmitKey(visID)}
-		mapID, nodeID, flowID := e.spec.ID, e.nodeID, sess.flowID
+		mapID, nodeID, flowID := e.spec().ID, e.spec().nodeID, sess.flowID
 		sess.closer = func() {
 			_ = s.sendNodeUDP(nodeID, uplane.Packet{Type: uplane.TypeClose, MappingID: mapID, FlowID: flowID})
 		}

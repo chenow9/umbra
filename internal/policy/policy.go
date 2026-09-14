@@ -2,6 +2,7 @@ package policy
 
 import (
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -21,35 +22,67 @@ func NormalizeIP(addr string) string {
 	return ip.String()
 }
 
-func CidrAllowed(ip string, cidrs string) bool {
+// ACL is a pre-parsed source allow list. The zero value (or an empty
+// string) allows every source; a non-empty list with only unparsable
+// entries allows nothing. Parse once per configuration change and call
+// Allows on the hot path instead of re-parsing CIDR text per packet.
+type ACL struct {
+	nets   []netip.Prefix
+	strict bool
+}
+
+func ParseACL(cidrs string) ACL {
 	list := strings.FieldsFunc(cidrs, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' })
 	if len(list) == 0 {
-		return true
+		return ACL{}
 	}
-	parsed := net.ParseIP(NormalizeIP(ip))
-	if parsed == nil {
-		return false
-	}
-	if v4 := parsed.To4(); v4 != nil {
-		parsed = v4
-	}
+	a := ACL{strict: true, nets: make([]netip.Prefix, 0, len(list))}
 	for _, raw := range list {
 		if !strings.Contains(raw, "/") {
-			if parsed.To4() != nil {
-				raw += "/32"
-			} else {
-				raw += "/128"
+			addr, err := netip.ParseAddr(raw)
+			if err != nil {
+				continue
 			}
+			addr = addr.Unmap()
+			a.nets = append(a.nets, netip.PrefixFrom(addr, addr.BitLen()))
+			continue
 		}
-		_, netw, err := net.ParseCIDR(raw)
+		p, err := netip.ParsePrefix(raw)
 		if err != nil {
 			continue
 		}
-		if netw.Contains(parsed) {
+		if p.Addr().Is4In6() {
+			p = netip.PrefixFrom(p.Addr().Unmap(), max(0, p.Bits()-96))
+		}
+		a.nets = append(a.nets, p.Masked())
+	}
+	return a
+}
+
+// Empty reports whether the ACL admits every source.
+func (a ACL) Empty() bool { return !a.strict }
+
+func (a ACL) Allows(ip string) bool {
+	if !a.strict {
+		return true
+	}
+	addr, err := netip.ParseAddr(NormalizeIP(ip))
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	for _, p := range a.nets {
+		if p.Contains(addr) {
 			return true
 		}
 	}
 	return false
+}
+
+// CidrAllowed is the one-shot form of ParseACL(cidrs).Allows(ip) for
+// callers that evaluate a list rarely.
+func CidrAllowed(ip string, cidrs string) bool {
+	return ParseACL(cidrs).Allows(ip)
 }
 
 // Limiter is a token bucket shaping a mapping to rateKbps KiB/s. The bucket

@@ -875,7 +875,7 @@ func TestUDPPayloadSizesOverUPlane(t *testing.T) {
 func TestVisitorUDPRejectsForeignMapping(t *testing.T) {
 	s := New("127.0.0.1", stealth.New(false))
 	s.visits["vis1"] = &visitUDP{id: "vis1", mapID: "map_a", nodeID: "nde1", proto: "udp", mode: "visitor"}
-	e := &entry{spec: wire.Mapping{ID: "map_b", Proto: "udp", Mode: "visitor", Enabled: true}, nodeID: "nde1", udpSess: map[string]*udpSess{}}
+	e := newEntry(wire.Mapping{ID: "map_b", Proto: "udp", Mode: "visitor", Enabled: true}, "nde1", &entry{udpSess: map[string]*udpSess{}})
 	s.ent["map_b"] = e
 	s.onUDPData("vis1", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 9}, uplane.Packet{
 		Type: uplane.TypeData, MappingID: "map_b", FlowID: "flow-x", PeerIP: net.ParseIP("127.0.0.1"), PeerPort: 9, Payload: []byte("x"),
@@ -892,8 +892,8 @@ func TestVisitorFlowsDoNotShareSession(t *testing.T) {
 	s.nodes["nde1"].udpSeen.Store(time.Now().UnixNano())
 	s.visits["vis1"] = &visitUDP{id: "vis1", mapID: "map_v", nodeID: "nde1", proto: "udp", mode: "visitor", bound: true}
 	s.visits["vis2"] = &visitUDP{id: "vis2", mapID: "map_v", nodeID: "nde1", proto: "udp", mode: "visitor", bound: true}
-	e := &entry{spec: wire.Mapping{ID: "map_v", Proto: "udp", Mode: "visitor", Enabled: true, IdleTimeoutSec: 30}, nodeID: "nde1", udpSess: map[string]*udpSess{}}
-	e.spec.MaxConns = 8
+	e := newEntry(wire.Mapping{ID: "map_v", Proto: "udp", Mode: "visitor", Enabled: true, IdleTimeoutSec: 30}, "nde1", &entry{udpSess: map[string]*udpSess{}})
+	e.spec().MaxConns = 8
 	s.ent["map_v"] = e
 	peer := uplane.Packet{Type: uplane.TypeData, MappingID: "map_v", PeerIP: net.ParseIP("127.0.0.1"), PeerPort: 50000, Payload: []byte("a")}
 	p1, p2 := peer, peer
@@ -918,8 +918,8 @@ func TestVisitorCloseRejectsForeignFlow(t *testing.T) {
 	s.nodes["nde1"].udpSeen.Store(time.Now().UnixNano())
 	s.visits["vis1"] = &visitUDP{id: "vis1", mapID: "map_v", nodeID: "nde1", proto: "udp", mode: "visitor", bound: true}
 	s.visits["vis2"] = &visitUDP{id: "vis2", mapID: "map_v", nodeID: "nde1", proto: "udp", mode: "visitor", bound: true}
-	e := &entry{spec: wire.Mapping{ID: "map_v", Proto: "udp", Mode: "visitor", Enabled: true, IdleTimeoutSec: 30}, nodeID: "nde1", udpSess: map[string]*udpSess{}}
-	e.spec.MaxConns = 8
+	e := newEntry(wire.Mapping{ID: "map_v", Proto: "udp", Mode: "visitor", Enabled: true, IdleTimeoutSec: 30}, "nde1", &entry{udpSess: map[string]*udpSess{}})
+	e.spec().MaxConns = 8
 	s.ent["map_v"] = e
 	p1 := uplane.Packet{Type: uplane.TypeData, MappingID: "map_v", FlowID: "flow-1", PeerIP: net.ParseIP("127.0.0.1"), PeerPort: 50000, Payload: []byte("a")}
 	s.forwardVisitUDP("nde1", "vis1", p1)
@@ -1029,7 +1029,7 @@ func TestBindDoesNotMarkUPlaneReady(t *testing.T) {
 func TestNodeUDPRejectsForeignMapping(t *testing.T) {
 	s := New("127.0.0.1", stealth.New(false))
 	s.nodes["nde1"] = &nodeConn{id: "nde1", online: true, udpIn: &uplane.Opener{Key: make([]byte, 32)}}
-	e := &entry{spec: wire.Mapping{ID: "map_x", Proto: "udp", Mode: "public", Enabled: true}, nodeID: "nde2", udpSess: map[string]*udpSess{}}
+	e := newEntry(wire.Mapping{ID: "map_x", Proto: "udp", Mode: "public", Enabled: true}, "nde2", &entry{udpSess: map[string]*udpSess{}})
 	s.ent["map_x"] = e
 	s.onUDPData("nde1", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 9}, uplane.Packet{
 		Type: uplane.TypeData, MappingID: "map_x", PeerIP: net.ParseIP("10.0.0.1"), PeerPort: 1, Payload: []byte("x"),

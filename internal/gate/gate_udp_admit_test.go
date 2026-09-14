@@ -68,7 +68,7 @@ func waitUDPActive(t *testing.T, s *Server, id string, want int, d time.Duration
 
 func TestUDPAdmitPerIPDoesNotBlockOtherIP(t *testing.T) {
 	defer SetUDPAdmitForTest(1, 0)()
-	e := &entry{spec: wire.Mapping{MaxConns: 8}, udpIP: map[string]*udpIPState{}}
+	e := newEntry(wire.Mapping{MaxConns: 8}, "", &entry{udpIP: map[string]*udpIPState{}})
 	if reason := e.admitUDP("10.0.0.1"); reason != "" {
 		t.Fatalf("first flow: %s", reason)
 	}
@@ -95,7 +95,7 @@ func TestUDPAdmitPerIPDoesNotBlockOtherIP(t *testing.T) {
 
 func TestUDPAdmitMaxConnsReason(t *testing.T) {
 	defer SetUDPAdmitForTest(8, 0)()
-	e := &entry{spec: wire.Mapping{MaxConns: 1}, udpIP: map[string]*udpIPState{}}
+	e := newEntry(wire.Mapping{MaxConns: 1}, "", &entry{udpIP: map[string]*udpIPState{}})
 	if reason := e.admitUDP("10.0.0.1"); reason != "" {
 		t.Fatalf("first: %s", reason)
 	}
@@ -112,7 +112,7 @@ func TestUDPAdmitMaxConnsReason(t *testing.T) {
 
 func TestUDPAdmitMaxConnsDoesNotGrowIPMap(t *testing.T) {
 	defer SetUDPAdmitForTest(0, 0)()
-	e := &entry{spec: wire.Mapping{MaxConns: 1}, udpIP: map[string]*udpIPState{}}
+	e := newEntry(wire.Mapping{MaxConns: 1}, "", &entry{udpIP: map[string]*udpIPState{}})
 	if reason := e.admitUDP("10.0.0.1"); reason != "" {
 		t.Fatalf("hold: %s", reason)
 	}
@@ -133,7 +133,7 @@ func TestUDPAdmitMaxConnsDoesNotGrowIPMap(t *testing.T) {
 
 func TestUDPAdmitIPv6AggregatesTo64(t *testing.T) {
 	defer SetUDPAdmitForTest(1, 0)()
-	e := &entry{spec: wire.Mapping{MaxConns: 8}, udpIP: map[string]*udpIPState{}}
+	e := newEntry(wire.Mapping{MaxConns: 8}, "", &entry{udpIP: map[string]*udpIPState{}})
 	if reason := e.admitUDP("2001:db8:1::1"); reason != "" {
 		t.Fatalf("first: %s", reason)
 	}
@@ -150,7 +150,7 @@ func TestUDPAdmitIPv6AggregatesTo64(t *testing.T) {
 
 func TestUDPAdmitMapRate(t *testing.T) {
 	defer SetUDPAdmitLimitsForTest(8, 0, 1)()
-	e := &entry{spec: wire.Mapping{MaxConns: 8}, udpIP: map[string]*udpIPState{}}
+	e := newEntry(wire.Mapping{MaxConns: 8}, "", &entry{udpIP: map[string]*udpIPState{}})
 	if reason := e.admitUDP("10.0.0.1"); reason != "" {
 		t.Fatalf("first: %s", reason)
 	}
@@ -163,7 +163,7 @@ func TestUDPAdmitMapRate(t *testing.T) {
 }
 
 func TestUDPDropLogRateLimited(t *testing.T) {
-	e := &entry{spec: wire.Mapping{ID: "map_log"}}
+	e := newEntry(wire.Mapping{ID: "map_log"}, "", &entry{})
 	if !e.udpLogOK(udpDropReasonMaxConns) {
 		t.Fatal("first maxconns log")
 	}
@@ -177,7 +177,7 @@ func TestUDPDropLogRateLimited(t *testing.T) {
 
 func TestUDPReleaseRefillsTokensAfterIdle(t *testing.T) {
 	defer SetUDPAdmitForTest(8, 1)()
-	e := &entry{spec: wire.Mapping{MaxConns: 8}, udpIP: map[string]*udpIPState{}}
+	e := newEntry(wire.Mapping{MaxConns: 8}, "", &entry{udpIP: map[string]*udpIPState{}})
 	if reason := e.admitUDP("10.0.0.1"); reason != "" {
 		t.Fatalf("first: %s", reason)
 	}
@@ -195,7 +195,7 @@ func TestUDPReleaseRefillsTokensAfterIdle(t *testing.T) {
 
 func TestUDPPerIPRateSurvivesLastRelease(t *testing.T) {
 	defer SetUDPAdmitForTest(8, 1)()
-	e := &entry{spec: wire.Mapping{MaxConns: 1000}, udpIP: map[string]*udpIPState{}}
+	e := newEntry(wire.Mapping{MaxConns: 1000}, "", &entry{udpIP: map[string]*udpIPState{}})
 	ok := 0
 	for i := 0; i < 1000; i++ {
 		reason := e.admitUDP("10.0.0.1")
@@ -222,7 +222,7 @@ func TestUDPPerIPRateSurvivesLastRelease(t *testing.T) {
 
 func TestUDPAdmitRateIsolatesIP(t *testing.T) {
 	defer SetUDPAdmitForTest(8, 1)()
-	e := &entry{spec: wire.Mapping{MaxConns: 8}, udpIP: map[string]*udpIPState{}}
+	e := newEntry(wire.Mapping{MaxConns: 8}, "", &entry{udpIP: map[string]*udpIPState{}})
 	if reason := e.admitUDP("10.0.0.1"); reason != "" {
 		t.Fatalf("first: %s", reason)
 	}

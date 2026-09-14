@@ -131,8 +131,7 @@ func ParseUDPMode(s string) UDPMode {
 }
 
 type entry struct {
-	spec                Mapping
-	nodeID              string
+	cfg                 atomic.Pointer[mappingCfg] // immutable snapshot; see spec()
 	ln                  net.Listener
 	pc                  net.PacketConn
 	listenErr           string
@@ -182,6 +181,43 @@ type entry struct {
 	stopOnce            sync.Once
 	udpViaUplane        atomic.Bool
 	udpViaYamux         atomic.Bool
+}
+
+// mappingCfg is the configuration an entry serves. It is replaced as a whole
+// when the console pushes an update, so data-plane goroutines read a
+// consistent, race-free snapshot without taking Server.mu, and the ACL is
+// parsed once per update instead of per connection or packet.
+type mappingCfg struct {
+	Mapping
+	nodeID string
+	acl    policy.ACL
+}
+
+func newMappingCfg(m Mapping, nodeID string) *mappingCfg {
+	return &mappingCfg{Mapping: m, nodeID: nodeID, acl: policy.ParseACL(m.AllowCidrs)}
+}
+
+var emptyMappingCfg = &mappingCfg{}
+
+// spec returns the current configuration snapshot. The pointer must be
+// treated as read-only. An entry that was never configured yields an
+// empty snapshot rather than nil.
+func (e *entry) spec() *mappingCfg {
+	if c := e.cfg.Load(); c != nil {
+		return c
+	}
+	return emptyMappingCfg
+}
+
+func (e *entry) setSpec(m Mapping, nodeID string) { e.cfg.Store(newMappingCfg(m, nodeID)) }
+
+// newEntry initialises base (or a fresh entry when base is nil) with m.
+func newEntry(m Mapping, nodeID string, base *entry) *entry {
+	if base == nil {
+		base = &entry{}
+	}
+	base.setSpec(m, nodeID)
+	return base
 }
 
 type ticketEnt struct {
@@ -843,7 +879,8 @@ func (s *Server) mappingByID(id string) (Mapping, string, bool) {
 	defer s.mu.Unlock()
 	e := s.ent[id]
 	if e != nil {
-		return e.spec, e.nodeID, true
+		c := e.spec()
+		return c.Mapping, c.nodeID, true
 	}
 	for aid, maps := range s.want {
 		for _, m := range maps {
@@ -866,7 +903,7 @@ func (s *Server) Revoke(nodeID string) {
 	}
 	ids := []string{}
 	for id, e := range s.ent {
-		if e.nodeID == nodeID {
+		if e.spec().nodeID == nodeID {
 			ids = append(ids, id)
 		}
 	}
@@ -926,8 +963,8 @@ func (s *Server) Knock(mappingID, ip string, ttl time.Duration) (time.Time, bool
 	s.grant[mappingID][ip] = until
 	e := s.ent[mappingID]
 	s.mu.Unlock()
-	if e != nil && e.spec.EntryPort != nil {
-		s.stealth.Knock(stealth.Port{Proto: e.spec.Proto, Port: uint16(*e.spec.EntryPort)}, ip, ttl)
+	if e != nil && e.spec().EntryPort != nil {
+		s.stealth.Knock(stealth.Port{Proto: e.spec().Proto, Port: uint16(*e.spec().EntryPort)}, ip, ttl)
 	}
 	return until, true
 }
@@ -992,7 +1029,7 @@ func (s *Server) PutMappings(nodeID string, maps []Mapping) {
 	s.mu.Lock()
 	have := []string{}
 	for id, e := range s.ent {
-		if e.nodeID == nodeID {
+		if e.spec().nodeID == nodeID {
 			have = append(have, id)
 		}
 	}
@@ -1045,7 +1082,7 @@ func (s *Server) recordAck(id string, gen int64, ok bool) {
 	delete(s.ackErr, id)
 	want := int64(0)
 	if e := s.ent[id]; e != nil {
-		want = e.spec.Generation
+		want = e.spec().Generation
 	} else {
 		for _, maps := range s.want {
 			for _, m := range maps {
@@ -1079,9 +1116,8 @@ func (s *Server) ensureEntry(nodeID string, m Mapping) {
 	s.mu.Lock()
 	cur := s.ent[m.ID]
 	listening := cur != nil && cur.listenErr == "" && (cur.ln != nil || cur.pc != nil || !listen)
-	if cur != nil && sameListen(cur.spec, m) && listening {
-		cur.spec = m
-		cur.nodeID = nodeID
+	if cur != nil && sameListen(cur.spec().Mapping, m) && listening {
+		cur.setSpec(m, nodeID)
 		s.mu.Unlock()
 		return
 	}
@@ -1107,7 +1143,7 @@ func (s *Server) ensureEntry(nodeID string, m Mapping) {
 	}
 	s.mu.Unlock()
 	s.stopEntry(m.ID)
-	e := &entry{spec: m, nodeID: nodeID, udpSess: map[string]*udpSess{}, udpIP: map[string]*udpIPState{}, stopCh: make(chan struct{})}
+	e := newEntry(m, nodeID, &entry{udpSess: map[string]*udpSess{}, udpIP: map[string]*udpIPState{}, stopCh: make(chan struct{})})
 	e.in.Store(in)
 	e.out.Store(out)
 	e.pin.Store(pin)
@@ -1172,9 +1208,9 @@ func (s *Server) ensureEntry(nodeID string, m Mapping) {
 }
 
 func (s *Server) bindListen(e *entry) (net.Listener, net.PacketConn, error) {
-	port := *e.spec.EntryPort
+	port := *e.spec().EntryPort
 	addr := net.JoinHostPort(s.bind, fmt.Sprintf("%d", port))
-	if e.spec.Proto == "udp" {
+	if e.spec().Proto == "udp" {
 		pc, err := doListenPacket("udp4", addr)
 		if err == nil {
 			if err = netutil.SetUDPReadBuffer(pc); err != nil {
@@ -1189,7 +1225,7 @@ func (s *Server) bindListen(e *entry) (net.Listener, net.PacketConn, error) {
 }
 
 func (s *Server) stoppedLocked(e *entry) bool {
-	if s.draining.Load() || s.ent[e.spec.ID] != e || !e.spec.Enabled {
+	if s.draining.Load() || s.ent[e.spec().ID] != e || !e.spec().Enabled {
 		return true
 	}
 	select {
@@ -1209,11 +1245,11 @@ func (s *Server) installListener(e *entry, ln net.Listener, pc net.PacketConn) b
 	e.ln = ln
 	e.pc = pc
 	e.listenErr = ""
-	spa := e.spec.Mode == "spa" && e.spec.EntryPort != nil
-	proto := e.spec.Proto
+	spa := e.spec().Mode == "spa" && e.spec().EntryPort != nil
+	proto := e.spec().Proto
 	var port uint16
 	if spa {
-		port = uint16(*e.spec.EntryPort)
+		port = uint16(*e.spec().EntryPort)
 	}
 	s.mu.Unlock()
 	if spa {
@@ -1225,7 +1261,7 @@ func (s *Server) installListener(e *entry, ln net.Listener, pc net.PacketConn) b
 func (s *Server) startServe(e *entry) {
 	s.mu.Lock()
 	ln, pc := e.ln, e.pc
-	udp := e.spec.Proto == "udp"
+	udp := e.spec().Proto == "udp"
 	s.mu.Unlock()
 	if udp {
 		go s.serveUDP(e, pc)
@@ -1251,7 +1287,7 @@ func (s *Server) retryListen(e *entry) {
 		ln, pc, err := s.bindListen(e)
 		if err != nil {
 			s.mu.Lock()
-			if s.ent[e.spec.ID] == e {
+			if s.ent[e.spec().ID] == e {
 				e.listenErr = err.Error()
 			}
 			s.mu.Unlock()
@@ -1302,8 +1338,8 @@ func (s *Server) stopEntry(id string) {
 	if e == nil {
 		return
 	}
-	if e.spec.Mode == "spa" && e.spec.EntryPort != nil {
-		s.stealth.SetSPA(stealth.Port{Proto: e.spec.Proto, Port: uint16(*e.spec.EntryPort)}, false)
+	if e.spec().Mode == "spa" && e.spec().EntryPort != nil {
+		s.stealth.SetSPA(stealth.Port{Proto: e.spec().Proto, Port: uint16(*e.spec().EntryPort)}, false)
 	}
 	if ln != nil {
 		_ = ln.Close()
@@ -1346,24 +1382,25 @@ func (s *Server) serveTCP(e *entry, ln net.Listener) {
 			}
 			return
 		}
-		go s.handleTCP(e, c, e.spec.Mode)
+		go s.handleTCP(e, c, e.spec().Mode)
 	}
 }
 
 func (s *Server) handleTCP(e *entry, c net.Conn, via string) {
+	spec := e.spec()
 	ip := policy.NormalizeIP(c.RemoteAddr().String())
-	if e.spec.Mode == "spa" && !s.granted(e.spec.ID, ip) {
+	if spec.Mode == "spa" && !s.granted(spec.ID, ip) {
 		e.noteTCPDrop("spa")
 		_ = c.Close()
 		return
 	}
-	if !policy.CidrAllowed(ip, e.spec.AllowCidrs) {
+	if !spec.acl.Allows(ip) {
 		e.noteTCPDrop("acl")
 		if e.tcpLogOK() {
-			slog.Info("acl drop", "mapping", e.spec.ID, "ip", ip)
+			slog.Info("acl drop", "mapping", spec.ID, "ip", ip)
 		}
 		if detail, ok := e.aclAuditDetail(ip); ok {
-			s.noteAudit("acl.drop", e.spec.ID, detail)
+			s.noteAudit("acl.drop", spec.ID, detail)
 		}
 		_ = c.Close()
 		return
@@ -1371,7 +1408,7 @@ func (s *Server) handleTCP(e *entry, c net.Conn, via string) {
 	if !e.reserve() {
 		e.noteTCPDrop("maxconns")
 		if e.tcpLogOK() {
-			slog.Info("maxconns drop", "mapping", e.spec.ID, "ip", ip)
+			slog.Info("maxconns drop", "mapping", spec.ID, "ip", ip)
 		}
 		_ = c.Close()
 		return
@@ -1384,7 +1421,7 @@ func (s *Server) handleTCP(e *entry, c net.Conn, via string) {
 	}
 	defer s.releaseSplice()
 	s.mu.Lock()
-	ac := s.nodes[e.nodeID]
+	ac := s.nodes[spec.nodeID]
 	var sess *yamux.Session
 	if ac != nil && ac.online {
 		sess = ac.sess
@@ -1398,20 +1435,20 @@ func (s *Server) handleTCP(e *entry, c net.Conn, via string) {
 	st, err := sess.OpenStream()
 	if err != nil {
 		e.noteTCPDrop("tunnel")
-		slog.Info("yamux open fail", "mapping", e.spec.ID, "err", err)
+		slog.Info("yamux open fail", "mapping", spec.ID, "err", err)
 		_ = c.Close()
 		return
 	}
 	if err := wire.WriteOpen(st, wire.StreamOpen{
-		MappingID: e.spec.ID, Proto: "tcp", PeerIP: ip, PeerPort: portOf(c.RemoteAddr()), Via: via,
+		MappingID: spec.ID, Proto: "tcp", PeerIP: ip, PeerPort: portOf(c.RemoteAddr()), Via: via,
 	}); err != nil {
 		e.noteTCPDrop("tunnel")
-		slog.Info("stream open write fail", "mapping", e.spec.ID, "err", err)
+		slog.Info("stream open write fail", "mapping", spec.ID, "err", err)
 		_ = st.Close()
 		_ = c.Close()
 		return
 	}
-	idle := time.Duration(e.spec.IdleTimeoutSec) * time.Second
+	idle := time.Duration(spec.IdleTimeoutSec) * time.Second
 	if idle < 0 {
 		idle = 0
 	}
@@ -1484,7 +1521,7 @@ func (e *entry) noteTCPDrop(reason string) {
 }
 
 func (e *entry) reserve() bool {
-	max := int32(policy.MaxConns(e.spec.MaxConns))
+	max := int32(policy.MaxConns(e.spec().MaxConns))
 	for {
 		cur := e.active.Load()
 		if cur >= max {
@@ -1523,23 +1560,23 @@ func (s *Server) releaseSplice() { s.splices.Add(-1) }
 // take is the non-blocking check used for datagrams: a packet that does not
 // fit the current budget is dropped.
 func (e *entry) take(n int) bool {
-	if e.spec.RateKbps <= 0 {
+	if e.spec().RateKbps <= 0 {
 		return true
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.limiter.Take(e.spec.RateKbps, n)
+	return e.limiter.Take(e.spec().RateKbps, n)
 }
 
 // pace is the shaping hook for streams: it debits n bytes and tells the
 // writer how long to pause so the connection is throttled, not torn down.
 func (e *entry) pace(n int) time.Duration {
-	if e.spec.RateKbps <= 0 {
+	if e.spec().RateKbps <= 0 {
 		return 0
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.limiter.Reserve(e.spec.RateKbps, n)
+	return e.limiter.Reserve(e.spec().RateKbps, n)
 }
 
 type idleConn struct {
@@ -1587,7 +1624,7 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 		e.udpIngressPackets.Add(1)
 		e.udpIngressBytes.Add(int64(n))
 		ip := policy.NormalizeIP(raddr.String())
-		if !policy.CidrAllowed(ip, e.spec.AllowCidrs) {
+		if !e.spec().acl.Allows(ip) {
 			e.noteUDPDrop(ip, "acl")
 			continue
 		}
@@ -1598,13 +1635,13 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 		peerKey := raddr.String()
 		peerIP := net.ParseIP(ip)
 		peerPort := portOf(raddr)
-		ready := s.nodeUDPReady(e.nodeID)
+		ready := s.nodeUDPReady(e.spec().nodeID)
 		e.mu.Lock()
 		sess := e.udpSess[udpPeerIndex(peerKey)]
-		idle := policy.UDPIdle(e.spec.UdpIdleTimeoutSec, e.spec.IdleTimeoutSec)
+		idle := policy.UDPIdle(e.spec().UdpIdleTimeoutSec, e.spec().IdleTimeoutSec)
 		if sess == nil {
 			e.mu.Unlock()
-			if e.spec.Mode == "spa" && !s.granted(e.spec.ID, ip) {
+			if e.spec().Mode == "spa" && !s.granted(e.spec().ID, ip) {
 				e.noteUDPDrop(ip, "spa")
 				continue
 			}
@@ -1618,7 +1655,7 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 				continue
 			}
 			sess = &udpSess{pc: pc, raddr: raddr, idle: idle, flowID: uplane.NewFlowID(), peerKey: peerKey, admitIP: udpAdmitKey(ip)}
-			mapID, nodeID, flowID := e.spec.ID, e.nodeID, sess.flowID
+			mapID, nodeID, flowID := e.spec().ID, e.spec().nodeID, sess.flowID
 			sess.closer = func() {
 				_ = s.sendNodeUDP(nodeID, uplane.Packet{Type: uplane.TypeClose, MappingID: mapID, FlowID: flowID})
 			}
@@ -1654,12 +1691,12 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 		e.mu.Unlock()
 
 		pkt := uplane.Packet{
-			Type: uplane.TypeData, MappingID: e.spec.ID, FlowID: flowID,
+			Type: uplane.TypeData, MappingID: e.spec().ID, FlowID: flowID,
 			PeerIP: peerIP, PeerPort: peerPort, Payload: append([]byte(nil), buf[:n]...),
 		}
 		switch path {
 		case udpPathUPlane:
-			if result := s.sendNodeUDP(e.nodeID, pkt); result == udpSendOK {
+			if result := s.sendNodeUDP(e.spec().nodeID, pkt); result == udpSendOK {
 				e.in.Add(int64(n))
 				e.pin.Add(1)
 			} else {
@@ -1698,7 +1735,7 @@ func (s *Server) openUDPFallback(e *entry, sess *udpSess, key, ip string, peerPo
 		return true
 	}
 	s.mu.Lock()
-	ac := s.nodes[e.nodeID]
+	ac := s.nodes[e.spec().nodeID]
 	var ysess *yamux.Session
 	if ac != nil && ac.online {
 		ysess = ac.sess
@@ -1712,7 +1749,7 @@ func (s *Server) openUDPFallback(e *entry, sess *udpSess, key, ip string, peerPo
 		return false
 	}
 	if err := wire.WriteOpen(st, wire.StreamOpen{
-		MappingID: e.spec.ID, Proto: "udp", PeerIP: ip, PeerPort: peerPort, Via: e.spec.Mode,
+		MappingID: e.spec().ID, Proto: "udp", PeerIP: ip, PeerPort: peerPort, Via: e.spec().Mode,
 	}); err != nil {
 		_ = st.Close()
 		return false
@@ -1788,7 +1825,7 @@ func (s *Server) openToNode(nodeID string, o wire.StreamOpen) (net.Conn, *entry,
 }
 
 func (s *Server) spliceToNode(e *entry, peer net.Conn, o wire.StreamOpen) {
-	st, e2, err := s.openToNode(e.nodeID, o)
+	st, e2, err := s.openToNode(e.spec().nodeID, o)
 	if err != nil {
 		_ = peer.Close()
 		return
@@ -1948,7 +1985,7 @@ func (s *Server) Status() Status {
 	for _, e := range s.ent {
 		a := int(e.active.Load())
 		st.Active += a
-		if e.spec.Proto == "udp" {
+		if e.spec().Proto == "udp" {
 			st.UDPActive += a
 			st.UDPDropMaxConns += e.udpDropMaxConns.Load()
 			st.UDPDropPerIP += e.udpDropPerIP.Load()
@@ -2051,7 +2088,7 @@ func (s *Server) MappingStats() map[string]MapStat {
 	defer s.mu.Unlock()
 	out := map[string]MapStat{}
 	for id, e := range s.ent {
-		listen := e.spec.Mode == "visitor" || e.ln != nil || e.pc != nil
+		listen := e.spec().Mode == "visitor" || e.ln != nil || e.pc != nil
 		via := "none"
 		yu, up := e.udpViaYamux.Load(), e.udpViaUplane.Load()
 		switch {
@@ -2064,7 +2101,7 @@ func (s *Server) MappingStats() map[string]MapStat {
 		}
 		active := int(e.active.Load())
 		udpActive := 0
-		if e.spec.Proto == "udp" {
+		if e.spec().Proto == "udp" {
 			udpActive = active
 		}
 		last, _ := e.lastDrop.Load().(string)
@@ -2104,10 +2141,10 @@ func (s *Server) MappingStats() map[string]MapStat {
 			TCPDropSplice:       e.tcpDropSplice.Load(),
 			LastDrop:            last,
 			LastDropAt:          lastAt,
-			NodeID:              e.nodeID,
+			NodeID:              e.spec().nodeID,
 			Error:               e.listenErr, Listening: listen && e.listenErr == "",
-			UDPVia: via, Generation: e.spec.Generation,
-			Acked: ackedOK(s.acked[id], e.spec.Generation, s.ackErr[id]),
+			UDPVia: via, Generation: e.spec().Generation,
+			Acked: ackedOK(s.acked[id], e.spec().Generation, s.ackErr[id]),
 		}
 	}
 	return out
