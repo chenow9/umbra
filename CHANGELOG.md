@@ -10,6 +10,7 @@
 - 隧道每流接收窗口从 256 KiB 提升到 2 MiB：单条 TCP 连接在 100 ms 往返下的吞吐上限从约 20 Mbit/s 提升到约 160 Mbit/s，公网入口、节点与访问端需同时升级才能生效
 - UDP 数据面收发路径减少复制与分配：AEAD 密钥调度按方向缓存而不是逐包重建，封包在池化缓冲中原地加密、解包原地解密，入口与独立 UDP 通道的读缓冲不再逐包复制；封包 + 解包基准从约 2.2 µs / 13 次分配降到约 1.0 µs / 6 次分配
 - 控制台后台采样不再阻塞数据面：审计回调改为带缓冲的异步投递（满时丢弃并计数），入口连接 / 报文处理不再等待控制台加锁写审计；流量样本的 JSON 序列化移出全局锁，`traffic` 文件与 `control.json` 一起每分钟落盘一次而不是每 10 秒 fsync 一次，正常退出仍会完整刷盘
+- 安全：登录全局退避只对近期失败过的 IP 生效。攻击者用少数 IP 持续喂错口令，不再能让管理员从未失败过的 IP 也收到 429；分布式猜测仍受每 IP 8 次 / 15 分钟和 2 路并行口令哈希的约束
 
 - Security: Temporary allow no longer widens an empty source IP into an any-source grant. When the console is bound to a Unix socket or a proxy passes no client IP, the knock API returns 400 and requires an explicit `ip`; neither the nftables nor the userspace check accepts a wildcard grant; hot upgrades no longer replay legacy grants that lack a source IP
 - Rate limiting is now a token-bucket shaper: TCP streams exceeding `rateKbps` are paced instead of torn down, and both directions are limited; UDP drops over-budget packets in both directions and counts them under `traffic_limit`
@@ -19,6 +20,7 @@
 - Tunnel per-stream receive window raised from 256 KiB to 2 MiB: a single TCP connection at 100 ms RTT goes from roughly 20 Mbit/s to roughly 160 Mbit/s; gateway, nodes and visitor clients must all be upgraded to benefit
 - Fewer copies and allocations on the UDP data plane: the AEAD key schedule is cached per direction instead of rebuilt per packet, datagrams are sealed in place in a pooled buffer and opened in place, and neither the entry socket nor the independent UDP channel copies its read buffer per packet; the seal + open benchmark drops from about 2.2 µs / 13 allocations to about 1.0 µs / 6 allocations
 - Console background sampling no longer stalls the data plane: audit callbacks are delivered asynchronously through a bounded queue (dropped and counted when full), so connection and packet handlers never wait on the console lock to write audit records; traffic sample JSON encoding runs outside the global lock, and the `traffic` file is persisted together with `control.json` once a minute instead of fsyncing every 10 seconds, with a full flush still performed on clean shutdown
+- Security: The global login backoff now only applies to addresses with a recent failure. An attacker feeding wrong passwords from a few addresses can no longer make the administrator receive 429 from an address that has never failed; distributed guessing remains bounded by the 8 attempts / 15 minutes per-address budget and the two-way password hash concurrency limit
 
 ## 0.3.0 — 2026-09-11
 

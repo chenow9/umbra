@@ -533,9 +533,15 @@ func TestLoginRateLimitCountsFailuresOnly(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "试得太勤") {
 		t.Fatalf("want global backoff after 6 failures, got %v", err)
 	}
+	// A clean address is not held hostage by failures elsewhere, but once
+	// it fails itself it joins the global backoff.
 	err = c.login("wrongpass", "9.9.9.9")
+	if err == nil || !strings.Contains(err.Error(), "认证凭证不正确") {
+		t.Fatalf("clean IP must be admitted during global backoff, got %v", err)
+	}
+	err = c.login("abcdefgh", "9.9.9.9")
 	if err == nil || !strings.Contains(err.Error(), "试得太勤") {
-		t.Fatalf("global backoff must apply across IPs, got %v", err)
+		t.Fatalf("IP with a recent failure must honour global backoff, got %v", err)
 	}
 }
 

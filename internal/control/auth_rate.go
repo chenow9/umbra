@@ -86,16 +86,26 @@ func globalBackoff(failCount int) time.Duration {
 
 // allow atomically reserves an attempt. Concurrent callers cannot all
 // slip through before fail() runs.
+//
+// The global backoff (notBefore) is driven by the total failure count
+// and is meant to slow a password-guessing campaign that rotates
+// source addresses. It is only enforced against addresses that already
+// have an attempt on record inside the window: an address that has not
+// failed recently is admitted even while the global backoff is armed,
+// so an attacker feeding wrong passwords from a few addresses cannot
+// lock the administrator out from a clean one. Distributed guessing
+// remains bounded by the per-address budget and the password hash
+// concurrency limit.
 func (a *authRate) allow(ip string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	now := nowFn()
-	if now.Before(a.notBefore) {
-		return &rateLimitError{retryAfter: a.notBefore.Sub(now)}
-	}
 	h := a.byIP[ip]
 	if now.Sub(h.t) > ipFailWindow {
 		h = hit{}
+	}
+	if h.n > 0 && now.Before(a.notBefore) {
+		return &rateLimitError{retryAfter: a.notBefore.Sub(now)}
 	}
 	if h.n >= ipFailMax {
 		left := ipFailWindow - now.Sub(h.t)
