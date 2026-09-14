@@ -66,6 +66,7 @@ type Console struct {
 	httpWG         sync.WaitGroup
 	httpActive     atomic.Int32
 	httpStall      atomic.Value
+	csp            cspCache
 	revoked        map[string]struct{}
 	nodes          map[string]*nodeRec
 	maps           map[string]*mapRec

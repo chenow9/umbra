@@ -84,8 +84,7 @@ func (c *Console) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/knock/{id}", c.need(c.postKnockRaw))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "no-referrer")
+		c.setSecurityHeaders(w, r)
 		c.httpWG.Add(1)
 		if c.draining.Load() {
 			c.httpWG.Done()
@@ -151,10 +150,10 @@ func (c *Console) serveUI(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	serveUIFile(w, r, sub, p)
+	serveUIFile(w, r, sub, p, &c.csp)
 }
 
-func serveUIFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, p string) {
+func serveUIFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, p string, csp *cspCache) {
 	name := strings.TrimPrefix(p, "/")
 	if name == "" || name == "." {
 		name = "index.html"
@@ -169,6 +168,9 @@ func serveUIFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, p string) {
 		return
 	case err != nil:
 		name = "index.html"
+	}
+	if strings.HasSuffix(name, ".html") {
+		w.Header().Set("Content-Security-Policy", csp.get(fsys, name))
 	}
 	http.ServeFileFS(w, r, fsys, name)
 }

@@ -763,7 +763,7 @@ sudo systemctl start umbrad
 - 非回环管理口继续强制 TLS；
 - 反向代理只有在来源 IP 命中 `UMBRA_HTTP_TRUST_PROXY` 时才信任转发头；
 - 认证失败统一返回通用消息；
-- 全部控制台 HTTP 响应增加 `X-Content-Type-Options: nosniff` 和 `Referrer-Policy: no-referrer`。
+- 全部控制台 HTTP 响应增加 `X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`X-Frame-Options: DENY` 和 `Content-Security-Policy`。API 响应用 `default-src 'none'`；HTML 文档的策略按所服务文件计算内联脚本的 SHA-256 哈希写入 `script-src`，不放行 `'unsafe-inline'` 脚本。请求经 TLS（直连或可信反代报告 https）到达时额外返回 `Strict-Transport-Security`，纯 HTTP 回环不返回。
 - 登录必须使用 `requestIP`，不得使用未经验证的 `RemoteAddr` 绕过可信反代解析。
 
 ## 18. 前端流程
