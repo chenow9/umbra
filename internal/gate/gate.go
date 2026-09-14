@@ -1623,8 +1623,9 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 		}
 		e.udpIngressPackets.Add(1)
 		e.udpIngressBytes.Add(int64(n))
+		spec := e.spec()
 		ip := policy.NormalizeIP(raddr.String())
-		if !e.spec().acl.Allows(ip) {
+		if !spec.acl.Allows(ip) {
 			e.noteUDPDrop(ip, "acl")
 			continue
 		}
@@ -1635,13 +1636,13 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 		peerKey := raddr.String()
 		peerIP := net.ParseIP(ip)
 		peerPort := portOf(raddr)
-		ready := s.nodeUDPReady(e.spec().nodeID)
+		ready := s.nodeUDPReady(spec.nodeID)
 		e.mu.Lock()
 		sess := e.udpSess[udpPeerIndex(peerKey)]
-		idle := policy.UDPIdle(e.spec().UdpIdleTimeoutSec, e.spec().IdleTimeoutSec)
+		idle := policy.UDPIdle(spec.UdpIdleTimeoutSec, spec.IdleTimeoutSec)
 		if sess == nil {
 			e.mu.Unlock()
-			if e.spec().Mode == "spa" && !s.granted(e.spec().ID, ip) {
+			if spec.Mode == "spa" && !s.granted(spec.ID, ip) {
 				e.noteUDPDrop(ip, "spa")
 				continue
 			}
@@ -1655,7 +1656,7 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 				continue
 			}
 			sess = &udpSess{pc: pc, raddr: raddr, idle: idle, flowID: uplane.NewFlowID(), peerKey: peerKey, admitIP: udpAdmitKey(ip)}
-			mapID, nodeID, flowID := e.spec().ID, e.spec().nodeID, sess.flowID
+			mapID, nodeID, flowID := spec.ID, spec.nodeID, sess.flowID
 			sess.closer = func() {
 				_ = s.sendNodeUDP(nodeID, uplane.Packet{Type: uplane.TypeClose, MappingID: mapID, FlowID: flowID})
 			}
@@ -1690,13 +1691,15 @@ func (s *Server) serveUDP(e *entry, pc net.PacketConn) {
 		sess.touchLocked(e, udpFlowIndex(flowID))
 		e.mu.Unlock()
 
+		// The payload aliases the read buffer: sendNodeUDP seals it into a
+		// pooled datagram synchronously, so no per-packet copy is needed.
 		pkt := uplane.Packet{
-			Type: uplane.TypeData, MappingID: e.spec().ID, FlowID: flowID,
-			PeerIP: peerIP, PeerPort: peerPort, Payload: append([]byte(nil), buf[:n]...),
+			Type: uplane.TypeData, MappingID: spec.ID, FlowID: flowID,
+			PeerIP: peerIP, PeerPort: peerPort, Payload: buf[:n],
 		}
 		switch path {
 		case udpPathUPlane:
-			if result := s.sendNodeUDP(e.spec().nodeID, pkt); result == udpSendOK {
+			if result := s.sendNodeUDP(spec.nodeID, pkt); result == udpSendOK {
 				e.in.Add(int64(n))
 				e.pin.Add(1)
 			} else {

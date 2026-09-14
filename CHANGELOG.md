@@ -8,6 +8,7 @@
 - 安全：审计记录区分 `owner` 与 `gateway` 两类来源；环满时优先淘汰网关自动产生的事件，未认证流量（ACL 拒绝、节点抖动）无法把管理员操作挤出审计历史。ACL 拒绝每个服务每分钟最多写一条审计并折叠计数，TCP 拒绝日志每服务每秒最多一条
 - 修复服务配置热更新与数据面读取之间的数据竞争：入口现在以不可变快照方式持有配置，连接 / 报文处理不再加全局锁读取；`allowCidrs` 在配置变更时解析一次，不再逐连接、逐报文重复解析 CIDR 文本
 - 隧道每流接收窗口从 256 KiB 提升到 2 MiB：单条 TCP 连接在 100 ms 往返下的吞吐上限从约 20 Mbit/s 提升到约 160 Mbit/s，公网入口、节点与访问端需同时升级才能生效
+- UDP 数据面收发路径减少复制与分配：AEAD 密钥调度按方向缓存而不是逐包重建，封包在池化缓冲中原地加密、解包原地解密，入口与独立 UDP 通道的读缓冲不再逐包复制；封包 + 解包基准从约 2.2 µs / 13 次分配降到约 1.0 µs / 6 次分配
 
 - Security: Temporary allow no longer widens an empty source IP into an any-source grant. When the console is bound to a Unix socket or a proxy passes no client IP, the knock API returns 400 and requires an explicit `ip`; neither the nftables nor the userspace check accepts a wildcard grant; hot upgrades no longer replay legacy grants that lack a source IP
 - Rate limiting is now a token-bucket shaper: TCP streams exceeding `rateKbps` are paced instead of torn down, and both directions are limited; UDP drops over-budget packets in both directions and counts them under `traffic_limit`
@@ -15,6 +16,7 @@
 - Security: Audit records now distinguish `owner` from `gateway` actors; when the ring is full, gateway-generated events are evicted first so unauthenticated traffic (ACL drops, node flapping) cannot push administrator actions out of the history. ACL drops produce at most one audit record per service per minute with a folded count, and TCP drop log lines are limited to one per service per second
 - Fix a data race between hot service updates and the data plane: entries now hold their configuration as an immutable snapshot that connection and packet handlers read without the global lock; `allowCidrs` is parsed once per update instead of re-parsing CIDR text for every connection and packet
 - Tunnel per-stream receive window raised from 256 KiB to 2 MiB: a single TCP connection at 100 ms RTT goes from roughly 20 Mbit/s to roughly 160 Mbit/s; gateway, nodes and visitor clients must all be upgraded to benefit
+- Fewer copies and allocations on the UDP data plane: the AEAD key schedule is cached per direction instead of rebuilt per packet, datagrams are sealed in place in a pooled buffer and opened in place, and neither the entry socket nor the independent UDP channel copies its read buffer per packet; the seal + open benchmark drops from about 2.2 µs / 13 allocations to about 1.0 µs / 6 allocations
 
 ## 0.3.0 — 2026-09-11
 

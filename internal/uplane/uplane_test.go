@@ -30,6 +30,71 @@ func TestNewFlowIDIs128Bit(t *testing.T) {
 	}
 }
 
+// Writer seals into a pooled buffer and Decode opens in place; the Packet a
+// receiver gets back must not alias either buffer.
+func TestWriterOpenerDoNotAliasBuffers(t *testing.T) {
+	c2s, _ := testKeys()
+	w := &Writer{Key: c2s}
+	o := &Opener{Key: c2s}
+	payload := bytes.Repeat([]byte{0xAB}, 1500)
+	var raw []byte
+	_, err := w.Write("nde1", Packet{Type: TypeData, MappingID: "map", FlowID: "f1", PeerIP: net.IPv4(10, 0, 0, 1), PeerPort: 5, Payload: payload}, func(b []byte) (int, error) {
+		raw = append([]byte(nil), b...)
+		// Scribble over the pooled buffer after "sending".
+		for i := range b {
+			b[i] = 0
+		}
+		return len(b), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Payload passed in must be untouched (it may alias a read buffer).
+	if !bytes.Equal(payload, bytes.Repeat([]byte{0xAB}, 1500)) {
+		t.Fatal("writer mutated caller payload")
+	}
+	ref, err := Encode(c2s, "nde1", Packet{Type: TypeData, Seq: 1, MappingID: "map", FlowID: "f1", PeerIP: net.IPv4(10, 0, 0, 1), PeerPort: 5, Payload: payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, ref) {
+		t.Fatal("Writer output differs from one-shot Encode")
+	}
+	id, p, err := o.Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range raw {
+		raw[i] = 0xFF
+	}
+	if id != "nde1" || p.MappingID != "map" || p.FlowID != "f1" || p.PeerPort != 5 ||
+		!p.PeerIP.Equal(net.IPv4(10, 0, 0, 1)) || !bytes.Equal(p.Payload, payload) {
+		t.Fatalf("decoded packet aliases the input buffer: %+v", p)
+	}
+}
+
+func BenchmarkWriterOpenerRoundtrip(b *testing.B) {
+	c2s, _ := testKeys()
+	w := &Writer{Key: c2s}
+	o := &Opener{Key: c2s}
+	payload := make([]byte, SafePayload)
+	buf := make([]byte, 0, MaxUDPDatagram)
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var raw []byte
+		if _, err := w.Write("nde1", Packet{Type: TypeData, MappingID: "map_udp_bench", FlowID: "0123456789abcdef0123456789abcdef", PeerIP: net.IPv4(203, 0, 113, 7), PeerPort: 4444, Payload: payload}, func(bb []byte) (int, error) {
+			raw = append(buf[:0], bb...)
+			return len(bb), nil
+		}); err != nil {
+			b.Fatal(err)
+		}
+		if _, _, err := o.Decode(raw); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestPacketRoundtripAndIndependence(t *testing.T) {
 	c2s, _ := testKeys()
 	a := Packet{Type: TypeData, Seq: 1, MappingID: "map_udp", PeerIP: net.IPv4(127, 0, 0, 1), PeerPort: 9, Payload: []byte("one")}

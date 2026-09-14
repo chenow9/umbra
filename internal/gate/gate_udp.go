@@ -115,7 +115,9 @@ func (s *Server) serveUPlane(pc net.PacketConn) {
 		}
 		s.udpPlane.rxPackets.Add(1)
 		s.udpPlane.rxBytes.Add(int64(n))
-		s.handleUPlane(addr, append([]byte(nil), buf[:n]...))
+		// Decode copies what it keeps out of the buffer and every handler
+		// runs synchronously, so the read buffer is reused without a copy.
+		s.handleUPlane(addr, buf[:n])
 	}
 }
 

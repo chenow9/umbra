@@ -120,7 +120,21 @@ func PeekID(raw []byte) (string, error) {
 	return string(raw[hdrMin : hdrMin+n]), nil
 }
 
+// Encode seals p for id with key into a freshly allocated datagram. Hot
+// paths should go through Writer, which caches the cipher and reuses a
+// pooled buffer; Encode keeps the one-shot form for tests and tooling.
 func Encode(key []byte, id string, p Packet) ([]byte, error) {
+	gcm, err := aead(key)
+	if err != nil {
+		return nil, err
+	}
+	return appendEncode(nil, gcm, id, p)
+}
+
+// appendEncode appends the sealed datagram for p to dst. The header, nonce
+// and inner record are laid out once in dst and sealed in place, so the
+// payload is copied exactly once.
+func appendEncode(dst []byte, gcm cipher.AEAD, id string, p Packet) ([]byte, error) {
 	if len(id) == 0 || len(id) > maxID {
 		return nil, fmt.Errorf("bad id")
 	}
@@ -136,33 +150,44 @@ func Encode(key []byte, id string, p Packet) ([]byte, error) {
 	if p.Seq == 0 {
 		return nil, fmt.Errorf("bad seq")
 	}
-	inner := marshalInner(p)
-	gcm, err := aead(key)
-	if err != nil {
-		return nil, err
+	start := len(dst)
+	need := hdrMin + len(id) + nonceSize + innerLen(p) + gcm.Overhead()
+	if cap(dst)-start < need {
+		grown := make([]byte, start, start+need)
+		copy(grown, dst)
+		dst = grown
 	}
-	var nonce [nonceSize]byte
-	binary.BigEndian.PutUint64(nonce[4:], p.Seq)
-	idb := []byte(id)
-	out := make([]byte, 0, hdrMin+len(idb)+nonceSize+len(inner)+gcm.Overhead())
-	out = append(out, Magic...)
-	out = append(out, Version, byte(len(idb)))
-	out = append(out, idb...)
-	out = append(out, nonce[:]...)
-	aad := out[:hdrMin+len(idb)]
-	sealed := gcm.Seal(out, nonce[:], inner, aad)
-	if len(sealed) > MaxUDPDatagram {
+	out := append(dst, Magic...)
+	out = append(out, Version, byte(len(id)))
+	out = append(out, id...)
+	nonceOff := len(out)
+	out = append(out, make([]byte, nonceSize)...)
+	binary.BigEndian.PutUint64(out[nonceOff+4:nonceOff+nonceSize], p.Seq)
+	aadEnd := nonceOff
+	plainOff := len(out)
+	out = appendInner(out, p)
+	// Seal in place: dst is out[:plainOff] whose spare capacity begins
+	// exactly at the plaintext, the pattern cipher.AEAD documents as safe.
+	sealed := gcm.Seal(out[:plainOff], out[nonceOff:nonceOff+nonceSize], out[plainOff:], out[start:aadEnd])
+	if len(sealed)-start > MaxUDPDatagram {
 		return nil, fmt.Errorf("datagram too large")
 	}
 	return sealed, nil
 }
 
+// Decode authenticates raw with key and returns an independent Packet.
+// raw is used as scratch for the plaintext and must be considered
+// clobbered afterwards.
 func Decode(key, raw []byte) (string, Packet, error) {
-	id, err := PeekID(raw)
+	gcm, err := aead(key)
 	if err != nil {
 		return "", Packet{}, err
 	}
-	gcm, err := aead(key)
+	return decodeWith(gcm, raw)
+}
+
+func decodeWith(gcm cipher.AEAD, raw []byte) (string, Packet, error) {
+	id, err := PeekID(raw)
 	if err != nil {
 		return "", Packet{}, err
 	}
@@ -170,7 +195,9 @@ func Decode(key, raw []byte) (string, Packet, error) {
 	off := hdrMin + idLen
 	nonce := raw[off : off+nonceSize]
 	ct := raw[off+nonceSize:]
-	plain, err := gcm.Open(nil, nonce, ct, raw[:off])
+	// Open in place: the plaintext lands where the ciphertext was, and
+	// unmarshalInner copies the fields it keeps out of it.
+	plain, err := gcm.Open(ct[:0], nonce, ct, raw[:off])
 	if err != nil {
 		return "", Packet{}, err
 	}
@@ -189,25 +216,30 @@ func aead(key []byte) (cipher.AEAD, error) {
 	return cipher.NewGCM(block)
 }
 
-func marshalInner(p Packet) []byte {
-	ip := p.PeerIP
+func wireIP(ip net.IP) net.IP {
 	if ip == nil {
-		ip = net.IPv4zero
+		return net.IPv4zero.To4()
 	}
 	if v4 := ip.To4(); v4 != nil {
-		ip = v4
+		return v4
 	}
-	mapb := []byte(p.MappingID)
-	flow := []byte(p.FlowID)
-	out := make([]byte, 0, 1+8+1+len(mapb)+1+len(flow)+1+len(ip)+2+len(p.Payload))
+	return ip
+}
+
+func innerLen(p Packet) int {
+	return 1 + 8 + 1 + len(p.MappingID) + 1 + len(p.FlowID) + 1 + len(wireIP(p.PeerIP)) + 2 + len(p.Payload)
+}
+
+func appendInner(out []byte, p Packet) []byte {
+	ip := wireIP(p.PeerIP)
 	out = append(out, p.Type)
 	var seq [8]byte
 	binary.BigEndian.PutUint64(seq[:], p.Seq)
 	out = append(out, seq[:]...)
-	out = append(out, byte(len(mapb)))
-	out = append(out, mapb...)
-	out = append(out, byte(len(flow)))
-	out = append(out, flow...)
+	out = append(out, byte(len(p.MappingID)))
+	out = append(out, p.MappingID...)
+	out = append(out, byte(len(p.FlowID)))
+	out = append(out, p.FlowID...)
 	out = append(out, byte(len(ip)))
 	out = append(out, ip...)
 	var port [2]byte
@@ -311,17 +343,28 @@ type Writer struct {
 	Key []byte
 	mu  sync.Mutex
 	seq uint64
+	gcm cipher.AEAD // built from Key on first use
 }
 
 // Write encodes p and calls send while holding the directional writer lock.
 // A failed socket write consumes its sequence number, which is safe because
-// the receiver's replay window permits gaps.
+// the receiver's replay window permits gaps. The datagram is assembled in a
+// pooled buffer that is only valid for the duration of send.
 func (w *Writer) Write(id string, p Packet, send func([]byte) (int, error)) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.gcm == nil {
+		gcm, err := aead(w.Key)
+		if err != nil {
+			return 0, fmt.Errorf("%w: %v", ErrWriterEncode, err)
+		}
+		w.gcm = gcm
+	}
 	w.seq++
 	p.Seq = w.seq
-	raw, err := Encode(w.Key, id, p)
+	buf := GetBuf()
+	defer PutBuf(buf)
+	raw, err := appendEncode(buf[:0], w.gcm, id, p)
 	if err != nil {
 		return 0, fmt.Errorf("%w: %v", ErrWriterEncode, err)
 	}
@@ -336,10 +379,24 @@ type Opener struct {
 	Key []byte
 	mu  sync.Mutex
 	Win Window
+	gcm cipher.AEAD // built from Key on first use
 }
 
+// Decode authenticates raw, enforces the replay window and returns a Packet
+// that does not alias raw. raw is used as scratch and is clobbered.
 func (o *Opener) Decode(raw []byte) (string, Packet, error) {
-	id, p, err := Decode(o.Key, raw)
+	o.mu.Lock()
+	gcm := o.gcm
+	if gcm == nil {
+		var err error
+		if gcm, err = aead(o.Key); err != nil {
+			o.mu.Unlock()
+			return "", Packet{}, err
+		}
+		o.gcm = gcm
+	}
+	o.mu.Unlock()
+	id, p, err := decodeWith(gcm, raw)
 	if err != nil {
 		return "", Packet{}, err
 	}
