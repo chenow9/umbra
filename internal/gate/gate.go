@@ -759,18 +759,41 @@ func (s *Server) ExpireTokenHash(h string) {
 	}
 }
 
+// SetTicket installs or updates a visitor ticket. Sessions already admitted
+// with this ticket pick up the new expiry, and are closed if the ticket now
+// points at a different mapping.
 func (s *Server) SetTicket(hash, mappingID string, until time.Time) {
 	s.mu.Lock()
 	s.tix[hash] = ticketEnt{MappingID: mappingID, Until: until}
+	var kick []*yamux.Session
+	for _, v := range s.visits {
+		if v.ticket != hash {
+			continue
+		}
+		if v.mapID != mappingID && v.mux != nil {
+			kick = append(kick, v.mux)
+			continue
+		}
+		v.armExpiry(until)
+	}
 	s.mu.Unlock()
+	for _, m := range kick {
+		_ = m.Close()
+	}
 }
 
+// DeleteTicket revokes a ticket and disconnects every visitor session that
+// was admitted with it. Revocation is fail-closed: if the caller later fails
+// to persist the change it may re-add the ticket and clients reconnect.
 func (s *Server) DeleteTicket(hash string) {
 	s.mu.Lock()
 	delete(s.tix, hash)
 	s.mu.Unlock()
+	s.kickVisits(func(v *visitUDP) bool { return v.ticket == hash })
 }
 
+// DeleteTicketsFor revokes all tickets of a mapping and disconnects its
+// visitor sessions.
 func (s *Server) DeleteTicketsFor(mappingID string) {
 	s.mu.Lock()
 	for h, t := range s.tix {
@@ -779,6 +802,25 @@ func (s *Server) DeleteTicketsFor(mappingID string) {
 		}
 	}
 	s.mu.Unlock()
+	s.kickVisits(func(v *visitUDP) bool { return v.mapID == mappingID })
+}
+
+// kickVisits closes the mux of every registered visitor session matched by
+// fn. Closing the yamux session tears down all of its streams, so any TCP
+// splice or UDP bridge riding on it ends and runVisitor unregisters it.
+func (s *Server) kickVisits(fn func(*visitUDP) bool) int {
+	s.mu.Lock()
+	var kick []*yamux.Session
+	for _, v := range s.visits {
+		if v.mux != nil && fn(v) {
+			kick = append(kick, v.mux)
+		}
+	}
+	s.mu.Unlock()
+	for _, m := range kick {
+		_ = m.Close()
+	}
+	return len(kick)
 }
 
 func (s *Server) lookupTicket(hash string) (ticketEnt, bool) {
@@ -966,6 +1008,20 @@ func (s *Server) PutMappings(nodeID string, maps []Mapping) {
 	for _, m := range want {
 		s.ensureEntry(nodeID, m)
 	}
+	// Visitors admitted to a mapping that has since left visitor mode (or
+	// changed protocol) lose their session; a stopped mapping is handled
+	// by stopEntry.
+	s.kickVisits(func(v *visitUDP) bool {
+		if v.nodeID != nodeID {
+			return false
+		}
+		for _, m := range maps {
+			if m.ID == v.mapID {
+				return m.Mode != "visitor" || m.Proto != v.proto
+			}
+		}
+		return false
+	})
 	s.mu.Lock()
 	ac := s.nodes[nodeID]
 	s.mu.Unlock()
@@ -1254,6 +1310,9 @@ func (s *Server) stopEntry(id string) {
 	if pc != nil {
 		_ = pc.Close()
 	}
+	// A disabled or deleted mapping must not keep serving already-admitted
+	// visitors.
+	s.kickVisits(func(v *visitUDP) bool { return v.mapID == id })
 }
 
 func (e *entry) stop() {

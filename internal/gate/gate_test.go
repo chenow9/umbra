@@ -392,6 +392,130 @@ func TestVisitorTCP(t *testing.T) {
 	}
 }
 
+// startVisitor runs a visitor client against ticket and returns its local
+// listen address plus an open, echo-verified TCP connection through it.
+func startVisitor(t *testing.T, addr, ticket string) (string, net.Conn) {
+	t.Helper()
+	ready := make(chan string, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() {
+		_ = visit.Run(ctx, visit.Config{
+			Server: addr, Ticket: ticket, Local: "127.0.0.1:0",
+			OnListen: func(_, a string) { ready <- a },
+		})
+	}()
+	var local string
+	select {
+	case local = <-ready:
+	case <-time.After(3 * time.Second):
+		t.Fatal("visit did not listen")
+	}
+	c, err := net.DialTimeout("tcp", local, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	msg := []byte("hello")
+	if _, err := c.Write(msg); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, len(msg))
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := io.ReadFull(c, buf); err != nil {
+		t.Fatal(err)
+	}
+	return local, c
+}
+
+// expectClosed asserts that c reaches EOF (or an error) within wait.
+func expectClosed(t *testing.T, c net.Conn, wait time.Duration, what string) {
+	t.Helper()
+	_ = c.SetReadDeadline(time.Now().Add(wait))
+	buf := make([]byte, 1)
+	if _, err := c.Read(buf); err == nil {
+		t.Fatalf("%s: connection still alive", what)
+	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		t.Fatalf("%s: connection not closed within %v", what, wait)
+	}
+}
+
+func TestVisitorRevokeDisconnectsLiveSession(t *testing.T) {
+	echo, echoPort := startEchoTCP(t)
+	defer echo.Close()
+	s, addr := startGate(t)
+	s.SetToken("tok", "nde1")
+	s.PutMappings("nde1", []wire.Mapping{{
+		ID: "map_rv", Name: "v", Proto: "tcp", Mode: "visitor",
+		LocalHost: "127.0.0.1", LocalPort: echoPort,
+		Enabled: true, MaxConns: 8, IdleTimeoutSec: 30,
+	}})
+	ticket := "umbra_vis_revoke"
+	s.SetTicket(TicketHash(ticket), "map_rv", time.Now().Add(time.Hour))
+	go func() { _ = node.Run(addr, "tok", nil) }()
+	waitOnline(t, s, "nde1")
+	local, c := startVisitor(t, addr, ticket)
+
+	s.DeleteTicket(TicketHash(ticket))
+	expectClosed(t, c, 3*time.Second, "revoked ticket")
+	// The client may try to reconnect; the gateway must refuse it.
+	if echoTCP(t, local, "again", 700*time.Millisecond) {
+		t.Fatal("revoked ticket must not be re-admitted")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		n := len(s.visits)
+		s.mu.Unlock()
+		if n == 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("visitor session still registered after revoke")
+}
+
+func TestVisitorTicketExpiryDisconnects(t *testing.T) {
+	echo, echoPort := startEchoTCP(t)
+	defer echo.Close()
+	s, addr := startGate(t)
+	s.SetToken("tok", "nde1")
+	s.PutMappings("nde1", []wire.Mapping{{
+		ID: "map_exp", Name: "v", Proto: "tcp", Mode: "visitor",
+		LocalHost: "127.0.0.1", LocalPort: echoPort,
+		Enabled: true, MaxConns: 8, IdleTimeoutSec: 30,
+	}})
+	ticket := "umbra_vis_expire"
+	s.SetTicket(TicketHash(ticket), "map_exp", time.Now().Add(time.Hour))
+	go func() { _ = node.Run(addr, "tok", nil) }()
+	waitOnline(t, s, "nde1")
+	_, c := startVisitor(t, addr, ticket)
+	// Shorten the expiry of a ticket that already has a live session.
+	s.SetTicket(TicketHash(ticket), "map_exp", time.Now().Add(300*time.Millisecond))
+	expectClosed(t, c, 3*time.Second, "expired ticket")
+}
+
+func TestVisitorDisabledMappingDisconnects(t *testing.T) {
+	echo, echoPort := startEchoTCP(t)
+	defer echo.Close()
+	s, addr := startGate(t)
+	s.SetToken("tok", "nde1")
+	m := wire.Mapping{
+		ID: "map_dis", Name: "v", Proto: "tcp", Mode: "visitor",
+		LocalHost: "127.0.0.1", LocalPort: echoPort,
+		Enabled: true, MaxConns: 8, IdleTimeoutSec: 30,
+	}
+	s.PutMappings("nde1", []wire.Mapping{m})
+	ticket := "umbra_vis_disable"
+	s.SetTicket(TicketHash(ticket), "map_dis", time.Now().Add(time.Hour))
+	go func() { _ = node.Run(addr, "tok", nil) }()
+	waitOnline(t, s, "nde1")
+	_, c := startVisitor(t, addr, ticket)
+	m.Enabled = false
+	s.PutMappings("nde1", []wire.Mapping{m})
+	expectClosed(t, c, 3*time.Second, "disabled mapping")
+}
+
 func TestRevokeRejectsOldToken(t *testing.T) {
 	s, addr := startGate(t)
 	s.SetToken("tok", "nde1")

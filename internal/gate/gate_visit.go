@@ -20,7 +20,8 @@ func (s *Server) runVisitor(raw net.Conn, sess *yamux.Session, wc *wire.Conn, fi
 		_ = wc.SendJSON("Dropped", map[string]string{"reason": "bad_ticket"})
 		return
 	}
-	t, ok := s.lookupTicket(TicketHash(b.Ticket))
+	ticketHash := TicketHash(b.Ticket)
+	t, ok := s.lookupTicket(ticketHash)
 	if !ok {
 		_ = wc.SendJSON("Dropped", map[string]string{"reason": "bad_ticket"})
 		return
@@ -46,15 +47,27 @@ func (s *Server) runVisitor(raw net.Conn, sess *yamux.Session, wc *wire.Conn, fi
 	visID := "vis_" + hexCookie(newUDPCookie())[:16]
 	keys := s.issueUDP(raw)
 	s.mu.Lock()
-	vu := &visitUDP{id: visID, mapID: m.ID, nodeID: nodeID, proto: m.Proto, mode: m.Mode, mux: sess}
+	vu := &visitUDP{id: visID, mapID: m.ID, nodeID: nodeID, proto: m.Proto, mode: m.Mode, mux: sess, ticket: ticketHash}
 	if keys != nil {
 		vu.cookie, vu.in, vu.out = keys.cookie, keys.in, keys.out
+	}
+	// Re-check under the lock: the ticket may have been revoked between
+	// lookupTicket and registration, in which case the kick already ran.
+	if cur, still := s.tix[ticketHash]; !still || cur.MappingID != m.ID {
+		s.mu.Unlock()
+		_ = wc.SendJSON("Dropped", map[string]string{"reason": "bad_ticket"})
+		return
+	} else {
+		vu.armExpiry(cur.Until)
 	}
 	s.visits[visID] = vu
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
 		delete(s.visits, visID)
+		if vu.expire != nil {
+			vu.expire.Stop()
+		}
 		s.mu.Unlock()
 		s.dropVisitUDP(visID)
 	}()

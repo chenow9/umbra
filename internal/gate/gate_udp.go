@@ -69,6 +69,22 @@ type visitUDP struct {
 	proto  string
 	mode   string
 	mux    *yamux.Session
+	ticket string      // hash of the ticket that admitted this session
+	expire *time.Timer // closes mux when the ticket expires; guarded by Server.mu
+}
+
+// armExpiry (re)schedules closing the visitor session at until. Called with
+// Server.mu held.
+func (v *visitUDP) armExpiry(until time.Time) {
+	if v.expire != nil {
+		v.expire.Stop()
+		v.expire = nil
+	}
+	if v.mux == nil || until.IsZero() {
+		return
+	}
+	mux := v.mux
+	v.expire = time.AfterFunc(time.Until(until), func() { _ = mux.Close() })
 }
 
 type udpCred struct {
