@@ -261,7 +261,11 @@ type Server struct {
 	draining  atomic.Bool
 	acked     map[string]int64
 	ackErr    map[string]bool
-	obs       Observer
+
+	obsMu      sync.Mutex
+	obs        Observer
+	obsQ       chan obsEvent
+	obsDropped atomic.Int64
 }
 
 type Observer interface {
@@ -291,24 +295,79 @@ func New(bind string, st *stealth.Engine) *Server {
 	}
 }
 
-func (s *Server) SetObserver(o Observer) { s.obs = o }
+// obsEvent is one queued observer callback.
+type obsEvent struct {
+	frame bool
+	a, b  string
+	c, d  string
+}
 
-func (s *Server) noteAudit(action, target, detail string) {
-	if s.obs != nil {
-		s.obs.Audit(action, target, detail)
+// obsQueue bounds how many observer events may be pending. The console
+// takes its own lock (and may be mid-fsync) inside the callback, so
+// data-plane goroutines must never call it directly.
+const obsQueue = 4096
+
+// SetObserver installs o and starts the single goroutine that delivers
+// events to it in order. Pass nil to stop delivering (pending events are
+// still drained).
+func (s *Server) SetObserver(o Observer) {
+	s.obsMu.Lock()
+	defer s.obsMu.Unlock()
+	s.obs = o
+	if o != nil && s.obsQ == nil {
+		s.obsQ = make(chan obsEvent, obsQueue)
+		go s.obsLoop(s.obsQ)
 	}
 }
 
-func (s *Server) noteFrame(nodeID, dir, typ string, body []byte) {
-	if s.obs == nil {
+func (s *Server) obsLoop(q <-chan obsEvent) {
+	for ev := range q {
+		s.obsMu.Lock()
+		o := s.obs
+		s.obsMu.Unlock()
+		if o == nil {
+			continue
+		}
+		if ev.frame {
+			o.Frame(ev.a, ev.b, ev.c, ev.d)
+		} else {
+			o.Audit(ev.a, ev.b, ev.c)
+		}
+	}
+}
+
+// enqueueObs hands ev to the observer goroutine without blocking. When the
+// queue is full the event is dropped and counted; audit and frame views are
+// diagnostic, the authoritative counters live on the entries.
+func (s *Server) enqueueObs(ev obsEvent) {
+	s.obsMu.Lock()
+	q := s.obsQ
+	s.obsMu.Unlock()
+	if q == nil {
 		return
 	}
+	select {
+	case q <- ev:
+	default:
+		s.obsDropped.Add(1)
+	}
+}
+
+// ObserverDropped reports how many observer events were discarded because
+// the delivery queue was full.
+func (s *Server) ObserverDropped() int64 { return s.obsDropped.Load() }
+
+func (s *Server) noteAudit(action, target, detail string) {
+	s.enqueueObs(obsEvent{a: action, b: target, c: detail})
+}
+
+func (s *Server) noteFrame(nodeID, dir, typ string, body []byte) {
 	const max = 240
 	b := string(body)
 	if len(b) > max {
 		b = b[:max] + "…"
 	}
-	s.obs.Frame(nodeID, dir, typ, b)
+	s.enqueueObs(obsEvent{frame: true, a: nodeID, b: dir, c: typ, d: b})
 }
 
 func (s *Server) SetUDPMode(m UDPMode) {

@@ -310,8 +310,17 @@ func (c *Console) recordSampleLocked(now time.Time) {
 	c.samples = compactSamples(append(c.samples, sampleRec{Ts: now, In: in, Out: out, By: by}), now)
 }
 
+// Sampling cadence. Samples are taken every sampleEvery; the traffic file
+// and control.json are persisted every persistEveryTicks samples. The
+// in-memory series is authoritative for the UI, so the file only needs to
+// bound loss on an unclean shutdown (FlushTraffic covers a clean one).
+const (
+	sampleEvery       = 10 * time.Second
+	persistEveryTicks = 6
+)
+
 func (c *Console) sampleLoop() {
-	t := time.NewTicker(10 * time.Second)
+	t := time.NewTicker(sampleEvery)
 	defer t.Stop()
 	n := 0
 	for {
@@ -328,18 +337,29 @@ func (c *Console) sampleLoop() {
 		c.absorbAllLocked(st)
 		c.recordSampleLocked(now)
 		n++
-		trafficRaw, trafficErr := encodeTrafficFile(c.samples, now)
-		saveCtrl := n%6 == 0
+		persist := n%persistEveryTicks == 0
+		// Sample records are immutable once appended and compactSamples
+		// always returns a fresh slice, so the header can be encoded
+		// outside the lock.
+		var samples []sampleRec
+		if persist {
+			samples = c.samples
+			// control.json carries the absorbed byte counters; its write
+			// protocol (tomb then main) must not interleave with a
+			// handler's save, so it stays under the lock.
+			_ = c.save()
+		}
 		c.mu.Unlock()
-		if trafficErr != nil {
-			log.Printf("traffic encode: %v", trafficErr)
+		if !persist {
+			continue
+		}
+		trafficRaw, err := encodeTrafficFile(samples, now)
+		if err != nil {
+			log.Printf("traffic encode: %v", err)
 		} else if p := c.trafficPath(); p != "" {
 			if err := writeAtomic(p, trafficRaw, 0o600); err != nil {
 				log.Printf("traffic: %v", err)
 			}
-		}
-		if saveCtrl {
-			_ = c.save()
 		}
 	}
 }

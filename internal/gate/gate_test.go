@@ -1371,8 +1371,17 @@ func TestACLDropAuditIsThrottled(t *testing.T) {
 	if got := s.MappingStats()["map_acl"].TCPDropACL; got != tries {
 		t.Fatalf("acl counter %d, want %d", got, tries)
 	}
+	// Observer delivery is asynchronous; give the queue a moment to drain.
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && sink.count("acl.drop map_acl") == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
 	if n := sink.count("acl.drop map_acl"); n != 1 {
 		t.Fatalf("acl.drop audit records %d, want 1: %v", n, sink.recs)
+	}
+	if s.ObserverDropped() != 0 {
+		t.Fatalf("observer queue dropped %d events", s.ObserverDropped())
 	}
 }
 
