@@ -155,6 +155,9 @@ func (s *Server) bridgeUDP(e *entry, nodeID string, peer net.Conn, o wire.Stream
 				_ = peer.Close()
 				return
 			}
+			if !e.take(len(p)) {
+				continue
+			}
 			if err := wire.WriteDatagram(peer, p); err != nil {
 				return
 			}

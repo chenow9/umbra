@@ -139,7 +139,7 @@ type entry struct {
 	pc                  net.PacketConn
 	listenErr           string
 	mu                  sync.Mutex
-	window              policy.Window
+	limiter             policy.Limiter
 	udpSess             map[string]*udpSess
 	udpIP               map[string]*udpIPState
 	active              atomic.Int32
@@ -1349,8 +1349,9 @@ func (s *Server) handleTCP(e *entry, c net.Conn, via string) {
 	if idle < 0 {
 		idle = 0
 	}
-	pub := &idleConn{Conn: c, idle: idle}
-	dst := xfer.WithLimit(st, e.take)
+	var pub io.ReadWriteCloser = &idleConn{Conn: c, idle: idle}
+	dst := xfer.WithLimit(st, e.pace)
+	pub = xfer.WithLimit(pub, e.pace)
 	xfer.CopyBidirectional(dst, pub, &e.in, &e.out)
 }
 
@@ -1414,13 +1415,26 @@ func (s *Server) reserveSplice() bool {
 
 func (s *Server) releaseSplice() { s.splices.Add(-1) }
 
+// take is the non-blocking check used for datagrams: a packet that does not
+// fit the current budget is dropped.
 func (e *entry) take(n int) bool {
 	if e.spec.RateKbps <= 0 {
 		return true
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.window.Take(e.spec.RateKbps, n)
+	return e.limiter.Take(e.spec.RateKbps, n)
+}
+
+// pace is the shaping hook for streams: it debits n bytes and tells the
+// writer how long to pause so the connection is throttled, not torn down.
+func (e *entry) pace(n int) time.Duration {
+	if e.spec.RateKbps <= 0 {
+		return 0
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.limiter.Reserve(e.spec.RateKbps, n)
 }
 
 type idleConn struct {
@@ -1624,6 +1638,10 @@ func (s *Server) readUDPStream(e *entry, sess *udpSess, key string) {
 		}
 		e.udpFromNodePackets.Add(1)
 		e.udpFromNodeBytes.Add(int64(len(p)))
+		if !e.take(len(p)) {
+			e.noteUDPDrop("", "traffic_limit")
+			continue
+		}
 		if _, err := sess.pc.WriteTo(p, sess.raddr); err != nil {
 			e.noteUDPDrop("", "client_write")
 			continue
@@ -1680,8 +1698,9 @@ func (s *Server) spliceToNode(e *entry, peer net.Conn, o wire.StreamOpen) {
 		return
 	}
 	defer s.releaseSplice()
-	dst := xfer.WithLimit(st, e.take)
-	xfer.CopyBidirectional(dst, peer, &e.in, &e.out)
+	dst := xfer.WithLimit(st, e.pace)
+	src := xfer.WithLimit(peer, e.pace)
+	xfer.CopyBidirectional(dst, src, &e.in, &e.out)
 }
 
 func (s *Server) Probe(mappingID string, payload []byte, timeout time.Duration) ([]byte, error) {

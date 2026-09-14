@@ -52,25 +52,67 @@ func CidrAllowed(ip string, cidrs string) bool {
 	return false
 }
 
-type Window struct {
-	Start time.Time
-	Bytes int
+// Limiter is a token bucket shaping a mapping to rateKbps KiB/s. The bucket
+// holds one second of traffic so short bursts pass without delay; sustained
+// traffic is smoothed instead of being cut off at a fixed window boundary.
+type Limiter struct {
+	tokens float64
+	last   time.Time
+	nowFn  func() time.Time
 }
 
-func (w *Window) Take(rateKbps int, n int) bool {
+func (l *Limiter) now() time.Time {
+	if l.nowFn != nil {
+		return l.nowFn()
+	}
+	return time.Now()
+}
+
+func (l *Limiter) refill(rate float64) {
+	now := l.now()
+	if l.last.IsZero() {
+		l.tokens = rate
+		l.last = now
+		return
+	}
+	if dt := now.Sub(l.last).Seconds(); dt > 0 {
+		l.tokens += dt * rate
+		if l.tokens > rate {
+			l.tokens = rate
+		}
+	}
+	l.last = now
+}
+
+// Take reports whether n bytes fit right now and debits them if so. Callers
+// that cannot wait (UDP datagrams) drop the packet when Take returns false.
+func (l *Limiter) Take(rateKbps int, n int) bool {
 	if rateKbps <= 0 {
 		return true
 	}
-	now := time.Now()
-	if now.Sub(w.Start) > time.Second {
-		w.Start = now
-		w.Bytes = 0
-	}
-	if w.Bytes+n > rateKbps*1024 {
+	rate := float64(rateKbps) * 1024
+	l.refill(rate)
+	if l.tokens < float64(n) {
 		return false
 	}
-	w.Bytes += n
+	l.tokens -= float64(n)
 	return true
+}
+
+// Reserve debits n bytes unconditionally and returns how long the caller
+// must wait before sending them so the long-run rate stays at rateKbps.
+// Stream callers (TCP) sleep for the returned duration instead of failing.
+func (l *Limiter) Reserve(rateKbps int, n int) time.Duration {
+	if rateKbps <= 0 || n <= 0 {
+		return 0
+	}
+	rate := float64(rateKbps) * 1024
+	l.refill(rate)
+	l.tokens -= float64(n)
+	if l.tokens >= 0 {
+		return 0
+	}
+	return time.Duration(-l.tokens / rate * float64(time.Second))
 }
 
 func IntOr(v, d int) int {

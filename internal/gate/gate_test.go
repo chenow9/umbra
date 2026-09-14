@@ -1188,6 +1188,54 @@ func TestSPAGrantBindsSourceIP(t *testing.T) {
 	}
 }
 
+// RateKbps must shape a stream, not kill it. Push several seconds' worth of
+// budget through an echo in one burst and make sure every byte comes back.
+func TestRateLimitThrottlesTCPWithoutClosing(t *testing.T) {
+	echo, echoPort := startEchoTCP(t)
+	defer echo.Close()
+	s, addr := startGate(t)
+	s.SetToken("tok", "nde1")
+	pub := pickPort(t)
+	port := pub
+	const rateKbps = 64 // 64 KiB/s budget, 1 s bucket
+	s.PutMappings("nde1", []wire.Mapping{{
+		ID: "map_rate", Name: "t", Proto: "tcp", Mode: "public",
+		EntryPort: &port, LocalHost: "127.0.0.1", LocalPort: echoPort,
+		Enabled: true, MaxConns: 8, RateKbps: rateKbps, IdleTimeoutSec: 30,
+	}})
+	go func() { _ = node.Run(addr, "tok", nil) }()
+	waitOnline(t, s, "nde1")
+	c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", itoa(pub)), 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	// ~1.5 s of upstream budget; the echo reply consumes the same again.
+	payload := make([]byte, 96*1024)
+	for i := range payload {
+		payload[i] = byte(i * 7)
+	}
+	_ = c.SetDeadline(time.Now().Add(15 * time.Second))
+	start := time.Now()
+	go func() { _, _ = c.Write(payload) }()
+	got := make([]byte, len(payload))
+	if _, err := io.ReadFull(c, got); err != nil {
+		t.Fatalf("rate-limited stream was cut: %v", err)
+	}
+	if string(got) != string(payload) {
+		t.Fatal("payload corrupted")
+	}
+	// Two directions share one bucket: 192 KiB minus the 64 KiB burst
+	// allowance needs at least ~2 s at 64 KiB/s.
+	if el := time.Since(start); el < 1500*time.Millisecond {
+		t.Fatalf("rate limit not applied, finished in %v", el)
+	}
+	st := s.MappingStats()["map_rate"]
+	if st.In != int64(len(payload)) || st.Out != int64(len(payload)) {
+		t.Fatalf("counters in=%d out=%d", st.In, st.Out)
+	}
+}
+
 func TestSPAKnockRejectsEmptySourceIP(t *testing.T) {
 	echo, echoPort := startEchoTCP(t)
 	defer echo.Close()

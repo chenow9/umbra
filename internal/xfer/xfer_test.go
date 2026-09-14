@@ -262,3 +262,50 @@ func TestCopyBidirectionalHangAfterFIN(t *testing.T) {
 		t.Fatal("backend hang after FIN must be bounded by ClosingTimeout")
 	}
 }
+
+// A rate limit must pace writes, never fail them: the old implementation
+// returned an error that CopyBidirectional treated as a hard close.
+func TestWithLimitThrottlesWithoutClosing(t *testing.T) {
+	a, b := net.Pipe()
+	defer a.Close()
+	defer b.Close()
+	var reserved atomic.Int64
+	var waits atomic.Int32
+	limited := WithLimit(b, func(n int) time.Duration {
+		reserved.Add(int64(n))
+		if waits.Add(1) == 2 {
+			return 30 * time.Millisecond
+		}
+		return 0
+	})
+	payload := make([]byte, 3*limitChunk+7)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	got := make([]byte, len(payload))
+	readErr := make(chan error, 1)
+	go func() {
+		_, err := io.ReadFull(a, got)
+		readErr <- err
+	}()
+	start := time.Now()
+	n, err := limited.Write(payload)
+	if err != nil || n != len(payload) {
+		t.Fatalf("write n=%d err=%v", n, err)
+	}
+	if err := <-readErr; err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Fatal("payload corrupted by chunking")
+	}
+	if reserved.Load() != int64(len(payload)) {
+		t.Fatalf("reserved %d bytes, want %d", reserved.Load(), len(payload))
+	}
+	if waits.Load() != 4 {
+		t.Fatalf("expected 4 chunks, got %d", waits.Load())
+	}
+	if time.Since(start) < 30*time.Millisecond {
+		t.Fatal("write did not honour the reserve wait")
+	}
+}

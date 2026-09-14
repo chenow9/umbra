@@ -99,23 +99,46 @@ func closeWrite(c io.ReadWriteCloser) error {
 	return c.Close()
 }
 
+// limitChunk bounds how many bytes one reservation covers so a slow mapping
+// releases data in small, evenly paced pieces instead of one long stall.
+const limitChunk = 16 << 10
+
 type rwLimit struct {
 	io.ReadWriteCloser
-	take func(int) bool
+	reserve func(int) time.Duration
 }
 
-func WithLimit(rw io.ReadWriteCloser, take func(int) bool) io.ReadWriteCloser {
-	if take == nil {
+// WithLimit shapes writes to rw. reserve debits n bytes and returns how
+// long to wait before sending them; Write sleeps for that long rather than
+// failing, so a rate limit throttles the stream instead of tearing it down.
+func WithLimit(rw io.ReadWriteCloser, reserve func(int) time.Duration) io.ReadWriteCloser {
+	if reserve == nil {
 		return rw
 	}
-	return rwLimit{ReadWriteCloser: rw, take: take}
+	return rwLimit{ReadWriteCloser: rw, reserve: reserve}
 }
 
 func (r rwLimit) Write(p []byte) (int, error) {
-	if r.take != nil && !r.take(len(p)) {
-		return 0, fmt.Errorf("rate limit")
+	written := 0
+	for len(p) > 0 {
+		chunk := p
+		if len(chunk) > limitChunk {
+			chunk = p[:limitChunk]
+		}
+		if wait := r.reserve(len(chunk)); wait > 0 {
+			time.Sleep(wait)
+		}
+		n, err := r.ReadWriteCloser.Write(chunk)
+		written += n
+		if err != nil {
+			return written, err
+		}
+		if n != len(chunk) {
+			return written, fmt.Errorf("short write")
+		}
+		p = p[n:]
 	}
-	return r.ReadWriteCloser.Write(p)
+	return written, nil
 }
 
 func (r rwLimit) CloseWrite() error {

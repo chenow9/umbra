@@ -308,6 +308,10 @@ func (s *Server) deliverFromNode(pkt uplane.Packet) {
 	pc, raddr := sess.pc, sess.raddr
 	sess.touchLocked(e, key)
 	e.mu.Unlock()
+	if !e.take(len(pkt.Payload)) {
+		e.noteUDPDrop("", "traffic_limit")
+		return
+	}
 	if visID != "" {
 		if result := s.sendVisitUDP(visID, pkt); result == udpSendOK {
 			e.out.Add(int64(len(pkt.Payload)))
