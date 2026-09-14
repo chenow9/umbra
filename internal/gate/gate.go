@@ -11,10 +11,8 @@ import (
 	"log"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -2296,84 +2294,4 @@ func (s *Server) WaitIdle(d time.Duration) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-}
-
-func (s *Server) ServeAPI(ln net.Listener) error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(200)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	})
-	mux.HandleFunc("PUT /v1/tokens/{token}", func(w http.ResponseWriter, r *http.Request) {
-		var b struct {
-			NodeID string `json:"node_id"`
-		}
-		if err := decodeJSONBody(r, &b); err != nil {
-			http.Error(w, err.Error(), 400)
-			return
-		}
-		s.SetToken(r.PathValue("token"), b.NodeID)
-		w.WriteHeader(204)
-	})
-	mux.HandleFunc("PUT /v1/nodes/{id}/mappings", func(w http.ResponseWriter, r *http.Request) {
-		var maps []Mapping
-		if err := decodeJSONBody(r, &maps); err != nil {
-			http.Error(w, err.Error(), 400)
-			return
-		}
-		s.PutMappings(r.PathValue("id"), maps)
-		w.WriteHeader(204)
-	})
-	mux.HandleFunc("POST /v1/nodes/{id}/revoke", func(w http.ResponseWriter, r *http.Request) {
-		s.Revoke(r.PathValue("id"))
-		w.WriteHeader(204)
-	})
-	mux.HandleFunc("POST /v1/nodes/{id}/disconnect", func(w http.ResponseWriter, r *http.Request) {
-		s.Disconnect(r.PathValue("id"))
-		w.WriteHeader(204)
-	})
-	mux.HandleFunc("POST /v1/knock/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		ip := policy.NormalizeIP(r.RemoteAddr)
-		var b struct {
-			IP string `json:"ip"`
-		}
-		if err := decodeJSONBody(r, &b); err == nil && strings.TrimSpace(b.IP) != "" {
-			ip = policy.NormalizeIP(b.IP)
-		}
-		ttl := policy.SPATimeout(0)
-		s.mu.Lock()
-		if e := s.ent[id]; e != nil {
-			ttl = policy.SPATimeout(e.spec.SpaTTLSec)
-		}
-		s.mu.Unlock()
-		until, ok := s.Knock(id, ip, ttl)
-		if !ok {
-			http.Error(w, "source ip required", 400)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"until": until.UTC().Format(time.RFC3339), "ip": ip, "ttlSec": int(ttl.Seconds()),
-		})
-	})
-	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(s.Status())
-	})
-	return http.Serve(ln, mux)
-}
-
-func decodeJSONBody(r *http.Request, v any) error {
-	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(nil, r.Body, 256<<10)
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(v); err != nil {
-		return err
-	}
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return fmt.Errorf("trailing json")
-		}
-		return err
-	}
-	return nil
 }
