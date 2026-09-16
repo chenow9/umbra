@@ -151,6 +151,7 @@ func TestEnrollScriptsWithoutCA(t *testing.T) {
 
 func TestEnrollBinaryScriptsUseNativeSystemServices(t *testing.T) {
 	c, _, dir := newTestConsole(t)
+	c.HideNodeToken = true
 	c.Listen = "114.55.129.94:4400"
 	caPath := filepath.Join(dir, "ca.crt")
 	if err := os.WriteFile(caPath, []byte(testCAPEM+"\n"), 0o644); err != nil {
@@ -205,6 +206,7 @@ func assertTokenNotOnCommandLine(t *testing.T, cmd string) {
 
 func TestEnrollScriptsKeepCredentialOffCommandLine(t *testing.T) {
 	c, _, dir := newTestConsole(t)
+	c.HideNodeToken = true
 	c.Listen = "114.55.129.94:4400"
 	caPath := filepath.Join(dir, "ca.crt")
 	if err := os.WriteFile(caPath, []byte(testCAPEM+"\n"), 0o644); err != nil {
@@ -230,6 +232,47 @@ func TestEnrollScriptsKeepCredentialOffCommandLine(t *testing.T) {
 			if !strings.Contains(dk, want) {
 				t.Fatalf("docker script (ca=%v) missing %q:\n%s", withCA, want, dk)
 			}
+		}
+	}
+}
+
+func TestEnrollTokenVisibility(t *testing.T) {
+	c, _, _ := newTestConsole(t)
+	for _, hide := range []bool{false, true} {
+		c.HideNodeToken = hide
+		for _, platform := range []string{"linux", "darwin", "windows", "docker"} {
+			cmd := c.enrollBinScript("umbra_boot_test", platform, "amd64")
+			if platform == "docker" {
+				cmd = c.enrollDockerScript("umbra_boot_test")
+			}
+			if hide {
+				assertTokenNotOnCommandLine(t, cmd)
+			} else if !strings.Contains(cmd, "--token ") {
+				t.Fatalf("%s: default script must pass token in argv", platform)
+			}
+		}
+		if c.enrollFields("umbra_boot_test", "linux", "amd64")["hideNodeToken"] != hide {
+			t.Fatal("missing enrollment policy")
+		}
+	}
+}
+
+func TestLocalNodeTokenVisibility(t *testing.T) {
+	c := &Console{NodeBin: "/usr/local/bin/umbra-node", Listen: "gate:4400", CAFile: "/etc/umbra/ca.crt"}
+	for _, hide := range []bool{false, true} {
+		c.HideNodeToken = hide
+		cmd := c.nodeCommand("umbra_boot_local")
+		args := strings.Join(cmd.Args, " ")
+		if hide {
+			assertTokenNotOnCommandLine(t, args)
+			if strings.Contains(args, "umbra_boot_local") {
+				t.Fatal("credential leaked to argv")
+			}
+			if !strings.Contains(strings.Join(cmd.Env, "\n"), "UMBRA_TOKEN=umbra_boot_local") {
+				t.Fatal("missing environment credential")
+			}
+		} else if !strings.Contains(args, "--token umbra_boot_local") {
+			t.Fatal("missing argv credential")
 		}
 	}
 }

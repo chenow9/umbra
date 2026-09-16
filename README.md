@@ -304,7 +304,7 @@ UMBRA_TOKEN=umbra_boot_… ./umbra-node \
   --tls-ca /etc/umbra/ca.crt
 ```
 
-凭证通过环境变量 `UMBRA_TOKEN` 或 `--token-file <路径>` 传入；`--token` 仍可用，但会出现在进程参数里，本机其他用户可通过 `ps` 读到。控制台生成的安装命令都不会把凭证放进服务或容器的命令行。
+控制台生成的节点安装命令默认使用 `--token`，凭证会出现在节点进程参数中。要隐藏凭证，在入口 `umbrad` 上设置 `--hide-node-token` 或环境变量 `UMBRA_HIDE_NODE_TOKEN=true`（默认 `false`，命令行参数优先）。开启后，Windows / Docker 通过受保护的文件和 `--token-file` 传递凭证，Linux / macOS 及控制台本地启动通过环境变量传递。修改配置并重启入口后，对新生成的安装命令和后续本地启动生效；已有节点需要重新执行安装命令。手动启动仍可使用 `--token`、`--token-file <路径>` 或 `UMBRA_TOKEN`。
 
 节点凭证默认 90 天，也可设为永不过期；过期前轮换，或随时吊销。轮换后旧凭证大约 90 秒内仍可用。
 

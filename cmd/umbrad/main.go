@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +44,14 @@ func main() {
 	stateFile := flag.String("state", "", "热升级恢复的状态文件")
 	pprofAddr := flag.String("pprof", envOr("UMBRA_PPROF", "off"), "pprof 监听，默认关闭；只允许回环或 Unix")
 	reset2FA := flag.Bool("reset-2fa", false, "离线重置控制台 2FA（须先停止守护进程）")
+	hideNodeToken := flag.Bool("hide-node-token", false, "隐藏节点进程命令行中的凭证（使用文件或环境变量）")
+	if value := os.Getenv("UMBRA_HIDE_NODE_TOKEN"); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			log.Fatalf("UMBRA_HIDE_NODE_TOKEN: %v", err)
+		}
+		*hideNodeToken = parsed
+	}
 	flag.Parse()
 	obs.Init()
 
@@ -156,6 +165,7 @@ func main() {
 	}
 	con.AttachLock(lock)
 	con.Listen = nodeAddr
+	con.HideNodeToken = *hideNodeToken
 	con.CAFile = bundle.CAFile
 	con.NodeBin = envOr("UMBRA_NODE_BIN", "/usr/local/bin/umbra-node")
 	con.UIDir = *ui

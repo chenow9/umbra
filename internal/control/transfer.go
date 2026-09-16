@@ -177,19 +177,20 @@ type importPreview struct {
 }
 
 type importNodeResult struct {
-	OriginID    string `json:"originId"`
-	LocalID     string `json:"localId"`
-	Action      string `json:"action"`
-	Name        string `json:"name"`
-	Token       string `json:"token,omitempty"`
-	OS          string `json:"os,omitempty"`
-	Arch        string `json:"arch,omitempty"`
-	InstallCmd  string `json:"installCmd,omitempty"`
-	DockerCmd   string `json:"dockerCmd,omitempty"`
-	Listen      string `json:"listen,omitempty"`
-	CAPem       string `json:"caPem,omitempty"`
-	ExpiresAt   string `json:"expiresAt,omitempty"`
-	NeverExpire bool   `json:"neverExpire,omitempty"`
+	OriginID      string `json:"originId"`
+	LocalID       string `json:"localId"`
+	Action        string `json:"action"`
+	Name          string `json:"name"`
+	Token         string `json:"token,omitempty"`
+	OS            string `json:"os,omitempty"`
+	Arch          string `json:"arch,omitempty"`
+	InstallCmd    string `json:"installCmd,omitempty"`
+	DockerCmd     string `json:"dockerCmd,omitempty"`
+	Listen        string `json:"listen,omitempty"`
+	HideNodeToken bool   `json:"hideNodeToken"`
+	CAPem         string `json:"caPem,omitempty"`
+	ExpiresAt     string `json:"expiresAt,omitempty"`
+	NeverExpire   bool   `json:"neverExpire,omitempty"`
 }
 
 type importServiceResult struct {
@@ -1282,6 +1283,7 @@ func (c *Console) enrichImportResultLocked(result *importResult, live map[string
 			continue
 		}
 		fields := c.enrollFields(n.Token, n.OS, n.Arch)
+		result.Nodes[i].HideNodeToken = c.HideNodeToken
 		if v, ok := fields["installCmd"].(string); ok {
 			result.Nodes[i].InstallCmd = v
 		}

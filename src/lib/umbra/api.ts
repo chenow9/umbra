@@ -251,6 +251,7 @@ export function createNode({
     listen?: string;
     caURL?: string;
     caPem?: string;
+    hideNodeToken?: boolean;
   }>("/v1/nodes", {
     method: "POST",
     body: JSON.stringify(data),
@@ -271,6 +272,7 @@ export function rotateNodeToken({ data }: { data: { id: string; neverExpire?: bo
     dockerCmd?: string;
     listen?: string;
     caPem?: string;
+    hideNodeToken?: boolean;
   }>(`/v1/nodes/${encodeURIComponent(data.id)}/rotate`, {
     method: "POST",
     body:

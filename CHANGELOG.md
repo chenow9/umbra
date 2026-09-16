@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- 节点凭证隐藏改为可选：入口新增 `--hide-node-token` / `UMBRA_HIDE_NODE_TOKEN`，默认关闭。开启后保留文件或环境变量传递方式；默认安装命令与本地启动使用 `--token`。修改后需重新安装已有节点才能应用。
+- Node credential hiding is now opt-in via `umbrad --hide-node-token` / `UMBRA_HIDE_NODE_TOKEN` (default: false). Enabled installations use files or environment variables; default installation commands and local launches use `--token`. Reinstall existing nodes to apply the change.
+
 ## 0.3.1 — 2026-09-14
 
 安全加固与数据面性能优化：堵住临时放行、凭证访问与登录限流上的若干口子，降低控制台与 UDP 路径的锁竞争与分配开销。

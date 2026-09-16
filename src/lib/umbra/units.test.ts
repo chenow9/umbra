@@ -46,8 +46,8 @@ describe("nodeEnrollDockerCmd", () => {
 
   it("mounts the credential as a file instead of passing it on the command line", () => {
     for (const cmd of [
-      nodeEnrollDockerCmd("umbra_boot_abc", "gate.example.com:4400", pem),
-      nodeEnrollDockerCmd("umbra_boot_abc", "gate.example.com:4400"),
+      nodeEnrollDockerCmd("umbra_boot_abc", "gate.example.com:4400", pem, true),
+      nodeEnrollDockerCmd("umbra_boot_abc", "gate.example.com:4400", undefined, true),
     ]) {
       assert.match(cmd, /umask 077/);
       assert.match(cmd, /printf '%s' 'umbra_boot_abc' >"\$HOME\/\.umbra\/node\.token"/);
@@ -125,7 +125,7 @@ describe("nodeEnrollWindowsCmd", () => {
   });
 
   it("stores the credential in an ACL-protected file rather than the service command line", () => {
-    const cmd = nodeEnrollWindowsCmd("umbra_boot_abc", "114.55.129.94:4400", "amd64", pem);
+    const cmd = nodeEnrollWindowsCmd("umbra_boot_abc", "114.55.129.94:4400", "amd64", pem, true);
     assert.match(cmd, /\$tokenFile = Join-Path \$data 'node\.token'/);
     assert.match(cmd, /Set-Content -LiteralPath \$tokenFile -Value 'umbra_boot_abc' -NoNewline/);
     assert.match(cmd, /SetAccessRuleProtection\(\$true, \$false\)/);
@@ -146,4 +146,25 @@ it("portable visitor commands preserve credentials and use a local CA on each OS
   const mac = portableVisitorCommand(command, "darwin", "arm64");
   assert.ok(mac.startsWith("chmod +x ./umbra-visit_darwin_arm64\n./umbra-visit_darwin_arm64 "));
   assert.ok(mac.includes("--server gate.example.com:4400"));
+});
+
+it("honors token visibility on all enrollment platforms", () => {
+  for (const hide of [false, true]) {
+    for (const ca of [undefined, pem]) {
+      const scripts = [
+        ...(["linux", "darwin", "windows"] as const).map((platform) =>
+          nodeEnrollServiceCmd(platform, "amd64", "umbra_boot_test", "gate:4400", ca, hide),
+        ),
+        nodeEnrollDockerCmd("umbra_boot_test", "gate:4400", ca, hide),
+      ];
+      for (const script of scripts) {
+        if (hide) assert.doesNotMatch(script, /--token /);
+        else assert.match(script, /--token /);
+      }
+      if (!hide) {
+        assert.doesNotMatch(scripts[2], /tokenFile/);
+        assert.doesNotMatch(scripts[3], /node\.token/);
+      }
+    }
+  }
 });

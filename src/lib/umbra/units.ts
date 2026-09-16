@@ -251,6 +251,7 @@ export function nodeEnrollLinuxCmd(
   server: string | undefined,
   arch: Arch,
   caPem?: string,
+  hideNodeToken = false,
 ) {
   const srv = shSingleQuote(enrollServer(server));
   const tok = shSingleQuote(token);
@@ -271,7 +272,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/umbra/node.env
-ExecStart=/usr/local/bin/umbra-node --server \${UMBRA_SERVER} --tls-ca /etc/umbra/ca.crt
+ExecStart=/usr/local/bin/umbra-node --server \${UMBRA_SERVER} --tls-ca /etc/umbra/ca.crt${hideNodeToken ? "" : " --token ${UMBRA_TOKEN}"}
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true
@@ -291,6 +292,7 @@ export function nodeEnrollDarwinCmd(
   server: string | undefined,
   arch: Arch,
   caPem?: string,
+  hideNodeToken = false,
 ) {
   const srv = shSingleQuote(enrollServer(server));
   const tok = shSingleQuote(token);
@@ -312,7 +314,7 @@ UMBRA_TOKEN="$(cat /usr/local/etc/umbra/node.token)"
 export UMBRA_TOKEN
 exec /usr/local/bin/umbra-node \
   --server "$(cat /usr/local/etc/umbra/server)" \
-  --tls-ca /usr/local/etc/umbra/ca.crt
+  --tls-ca /usr/local/etc/umbra/ca.crt${hideNodeToken ? "" : ' --token "$UMBRA_TOKEN"'}
 UMBRA_RUNNER
 sudo chmod 755 /usr/local/libexec/umbra-node-run
 sudo tee /Library/LaunchDaemons/io.umbra.node.plist >/dev/null <<'UMBRA_PLIST'
@@ -351,39 +353,51 @@ export function nodeEnrollServiceCmd(
   token: string,
   server?: string,
   caPem?: string,
+  hideNodeToken = false,
 ) {
   if (platform === "windows") {
-    return nodeEnrollWindowsCmd(token, server, arch, caPem);
+    return nodeEnrollWindowsCmd(token, server, arch, caPem, hideNodeToken);
   }
   if (platform === "darwin") {
-    return nodeEnrollDarwinCmd(token, server, arch, caPem);
+    return nodeEnrollDarwinCmd(token, server, arch, caPem, hideNodeToken);
   }
-  return nodeEnrollLinuxCmd(token, server, arch, caPem);
+  return nodeEnrollLinuxCmd(token, server, arch, caPem, hideNodeToken);
 }
 
 // Legacy server-side callers without platform metadata receive the Linux
 // systemd command. New callers should use nodeEnrollServiceCmd.
-export function nodeEnrollBinCmd(token: string, server?: string, caPem?: string) {
-  return nodeEnrollLinuxCmd(token, server, "amd64", caPem);
+export function nodeEnrollBinCmd(
+  token: string,
+  server?: string,
+  caPem?: string,
+  hideNodeToken = false,
+) {
+  return nodeEnrollLinuxCmd(token, server, "amd64", caPem, hideNodeToken);
 }
 
-export function nodeEnrollDockerCmd(token: string, server?: string, caPem?: string) {
+export function nodeEnrollDockerCmd(
+  token: string,
+  server?: string,
+  caPem?: string,
+  hideNodeToken = false,
+) {
   const srv = shSingleQuote(enrollServer(server));
   const tok = shSingleQuote(token);
   const pem = caPem?.trim();
   const head = `# --network host 让映射目标 127.0.0.1 指向这台机器。`;
-  // The credential is written to a 0600 file and bind-mounted rather than
+  // When hidden, the credential is written to a 0600 file and bind-mounted rather than
   // passed as a container argument or environment variable, both of which
   // are visible through docker inspect and the host's ps.
-  const writeToken = `if [ -d "$HOME/.umbra/node.token" ]; then rm -rf "$HOME/.umbra/node.token"; fi
-printf '%s' ${tok} >"$HOME/.umbra/node.token"`;
+  const writeToken = hideNodeToken
+    ? `if [ -d "$HOME/.umbra/node.token" ]; then rm -rf "$HOME/.umbra/node.token"; fi
+printf '%s' ${tok} >"$HOME/.umbra/node.token"`
+    : "";
   const run = `${writeToken}
 docker rm -f umbra-node >/dev/null 2>&1 || true
 docker run -d --name umbra-node --network host --restart unless-stopped \\
   -v "$HOME/.umbra/ca.crt":/etc/umbra/ca.crt:ro \\
-  -v "$HOME/.umbra/node.token":/etc/umbra/node.token:ro \\
-  ${DOCKERHUB_NODE}:latest \\
-  --server ${srv} --tls-ca /etc/umbra/ca.crt --token-file /etc/umbra/node.token
+${hideNodeToken ? '  -v "$HOME/.umbra/node.token":/etc/umbra/node.token:ro \\\n' : ""}  ${DOCKERHUB_NODE}:latest \\
+  --server ${srv} --tls-ca /etc/umbra/ca.crt ${hideNodeToken ? "--token-file /etc/umbra/node.token" : `--token ${tok}`}
 `;
   if (!pem) {
     return `${head}
@@ -394,9 +408,8 @@ ${writeToken}
 docker rm -f umbra-node >/dev/null 2>&1 || true
 docker run -d --name umbra-node --network host --restart unless-stopped \\
   -v "$PWD/ca.crt":/etc/umbra/ca.crt:ro \\
-  -v "$HOME/.umbra/node.token":/etc/umbra/node.token:ro \\
-  ${DOCKERHUB_NODE}:latest \\
-  --server ${srv} --tls-ca /etc/umbra/ca.crt --token-file /etc/umbra/node.token
+${hideNodeToken ? '  -v "$HOME/.umbra/node.token":/etc/umbra/node.token:ro \\\n' : ""}  ${DOCKERHUB_NODE}:latest \\
+  --server ${srv} --tls-ca /etc/umbra/ca.crt ${hideNodeToken ? "--token-file /etc/umbra/node.token" : `--token ${tok}`}
 `;
   }
   return withCAHeredoc(
@@ -416,6 +429,7 @@ export function nodeEnrollWindowsCmd(
   server: string | undefined,
   arch: Arch,
   caPem?: string,
+  hideNodeToken = false,
 ) {
   const srv = psSingleQuote(enrollServer(server));
   const tok = psSingleQuote(token);
@@ -456,7 +470,9 @@ if ($service) {
   }
 }
 Copy-Item -Force ${bin} $exe
-$tokenFile = Join-Path $data 'node.token'
+${
+  hideNodeToken
+    ? `$tokenFile = Join-Path $data 'node.token'
 Set-Content -LiteralPath $tokenFile -Value ${tok} -NoNewline -Encoding ascii
 $acl = Get-Acl -LiteralPath $tokenFile
 $acl.SetAccessRuleProtection($true, $false)
@@ -465,7 +481,9 @@ foreach ($id in 'NT AUTHORITY\\SYSTEM', 'BUILTIN\\Administrators') {
   $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($id, 'FullControl', 'Allow')))
 }
 Set-Acl -LiteralPath $tokenFile -AclObject $acl
-$arguments = '--server ' + ${srv} + ' --tls-ca "' + $ca + '" --token-file "' + $tokenFile + '"'
+$arguments = '--server ' + ${srv} + ' --tls-ca "' + $ca + '" --token-file "' + $tokenFile + '"'`
+    : `$arguments = '--server ' + ${srv} + ' --tls-ca "' + $ca + '" --token ' + ${tok}`
+}
 $binPath = '"' + $exe + '" ' + $arguments
 Unblock-File -LiteralPath $exe -ErrorAction SilentlyContinue
 New-Service -Name 'UmbraNode' -BinaryPathName $binPath -DisplayName 'Umbra Node' -Description 'Umbra Node' -StartupType Automatic | Out-Null

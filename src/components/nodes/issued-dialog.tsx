@@ -30,6 +30,7 @@ export type Issued = {
   dockerCmd?: string;
   listen?: string;
   caPem?: string;
+  hideNodeToken?: boolean;
   note?: string;
   expiresAt?: string;
   neverExpire?: boolean;
@@ -83,7 +84,7 @@ function IssuedBody({ issued, onClose }: { issued: Issued; onClose: () => void }
   const dockerCmd =
     issued.dockerCmd && (issued.dockerCmd.includes("BEGIN CERTIFICATE") || !pem)
       ? issued.dockerCmd
-      : nodeEnrollDockerCmd(issued.token, server, pem || undefined);
+      : nodeEnrollDockerCmd(issued.token, server, pem || undefined, issued.hideNodeToken);
   const servicePlatform = issued.os === "docker" ? "linux" : issued.os;
   const binCmd = nodeEnrollServiceCmd(
     servicePlatform,
@@ -91,6 +92,7 @@ function IssuedBody({ issued, onClose }: { issued: Issued; onClose: () => void }
     issued.token,
     server,
     pem || undefined,
+    issued.hideNodeToken,
   );
   const cmd = (kind === "docker" ? dockerCmd : binCmd).trim();
   const hasCA = cmd.includes("BEGIN CERTIFICATE");

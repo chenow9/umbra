@@ -126,6 +126,7 @@ export type ImportNodeResult = {
   dockerCmd?: string;
   listen?: string;
   caPem?: string;
+  hideNodeToken?: boolean;
   expiresAt?: string;
   neverExpire?: boolean;
 };

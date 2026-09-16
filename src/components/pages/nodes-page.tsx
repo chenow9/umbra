@@ -123,6 +123,7 @@ export function NodesPage() {
         dockerCmd: r.dockerCmd,
         listen: r.listen,
         caPem: r.caPem,
+        hideNodeToken: r.hideNodeToken,
         note: t("nodes.rotatedNote", { sec: r.graceSec }),
         expiresAt: r.expiresAt,
         neverExpire: r.neverExpire,
@@ -523,6 +524,7 @@ function CreateNodeForm({ onIssued }: { onIssued: (v: Issued) => void }) {
         dockerCmd: res.dockerCmd,
         listen: res.listen,
         caPem: res.caPem,
+        hideNodeToken: res.hideNodeToken,
         expiresAt: res.expiresAt,
         neverExpire: res.neverExpire,
       });

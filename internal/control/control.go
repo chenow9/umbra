@@ -35,6 +35,7 @@ var sessionAbsoluteTTL = 24 * time.Hour
 var nowFn = time.Now
 
 type Console struct {
+	HideNodeToken    bool
 	Gate             *gate.Server
 	Listen           string
 	CAFile           string
@@ -1195,18 +1196,28 @@ func (c *Console) spawnNode(token string) {
 	if _, err := os.Stat(c.NodeBin); err != nil {
 		return
 	}
-	args := []string{"--server", c.Listen}
-	if c.CAFile != "" {
-		args = append(args, "--tls-ca", c.CAFile)
-	}
-	cmd := exec.Command(c.NodeBin, args...)
-	// The credential goes through the environment, not argv, so it is
-	// not visible to other local users via ps / procfs cmdline.
-	cmd.Env = append(os.Environ(), "UMBRA_TOKEN="+token)
+	cmd := c.nodeCommand(token)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	_ = cmd.Start()
 	if cmd.Process != nil {
 		go func() { _, _ = cmd.Process.Wait() }()
 	}
+}
+
+// nodeCommand builds the local node launch with the configured credential policy.
+func (c *Console) nodeCommand(token string) *exec.Cmd {
+	args := []string{"--server", c.Listen}
+	if c.CAFile != "" {
+		args = append(args, "--tls-ca", c.CAFile)
+	}
+	if !c.HideNodeToken {
+		args = append(args, "--token", token)
+	}
+	cmd := exec.Command(c.NodeBin, args...)
+	// When hidden, pass the credential through the environment instead of argv.
+	if c.HideNodeToken {
+		cmd.Env = append(os.Environ(), "UMBRA_TOKEN="+token)
+	}
+	return cmd
 }
