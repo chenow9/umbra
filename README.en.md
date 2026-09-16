@@ -1,7 +1,7 @@
 <h1 align="center">Umbra</h1>
 
 <p align="center">
-  <img src="public/og.jpg" alt="Umbra" width="900">
+  <img src="docs/images/readme-hero.en.png" alt="Umbra: a self-hosted gateway for private TCP and UDP services and its connection architecture" width="900">
 </p>
 
 <p align="center"><strong>A self-hosted gateway for private TCP and UDP services</strong></p>

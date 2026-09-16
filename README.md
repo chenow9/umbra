@@ -1,7 +1,7 @@
 <h1 align="center">Umbra</h1>
 
 <p align="center">
-  <img src="public/og.jpg" alt="Umbra" width="900">
+  <img src="docs/images/readme-hero.zh-CN.png" alt="Umbra：自托管的 TCP / UDP 内网服务访问网关及连接架构" width="900">
 </p>
 
 <p align="center"><strong>自托管的 TCP / UDP 内网服务访问网关</strong></p>
