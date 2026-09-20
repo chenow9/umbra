@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  needsPublicConfirm,
   serviceCanConnect,
   serviceState,
   serviceSummary,
@@ -87,6 +88,14 @@ test("real target and public entry ports must be explicit and valid", () => {
   assert.ok(validateService({ ...input, mode: "public" }));
   assert.equal(validateService({ ...input, mode: "public", entryPort: 22022 }), null);
   assert.ok(validateService({ ...input, maxConns: NaN }));
+});
+
+test("public access needs a second confirm when leaving a closed mode", () => {
+  assert.equal(needsPublicConfirm("visitor", "public"), true);
+  assert.equal(needsPublicConfirm("spa", "public"), true);
+  assert.equal(needsPublicConfirm(undefined, "public"), true);
+  assert.equal(needsPublicConfirm("public", "public"), false);
+  assert.equal(needsPublicConfirm("visitor", "spa"), false);
 });
 
 test("hostnames and CIDRs are validated like ports", () => {

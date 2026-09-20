@@ -15,6 +15,7 @@ import { Route as DeployRouteImport } from './routes/deploy'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MappingsRouteImport } from './routes/mappings'
 import { Route as NodesRouteImport } from './routes/nodes'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TrafficRouteImport } from './routes/traffic'
 import { Route as NodesNodeIdRouteImport } from './routes/nodes_.$nodeId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -49,6 +50,11 @@ const NodesRoute = NodesRouteImport.update({
   path: '/nodes',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TrafficRoute = TrafficRouteImport.update({
   id: '/traffic',
   path: '/traffic',
@@ -72,6 +78,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/mappings': typeof MappingsRoute
   '/nodes': typeof NodesRoute
+  '/settings': typeof SettingsRoute
   '/traffic': typeof TrafficRoute
   '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -83,6 +90,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/mappings': typeof MappingsRoute
   '/nodes': typeof NodesRoute
+  '/settings': typeof SettingsRoute
   '/traffic': typeof TrafficRoute
   '/nodes/$nodeId': typeof NodesNodeIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -95,6 +103,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/mappings': typeof MappingsRoute
   '/nodes': typeof NodesRoute
+  '/settings': typeof SettingsRoute
   '/traffic': typeof TrafficRoute
   '/nodes_/$nodeId': typeof NodesNodeIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -108,6 +117,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/mappings'
     | '/nodes'
+    | '/settings'
     | '/traffic'
     | '/nodes/$nodeId'
     | '/api/auth/$'
@@ -119,6 +129,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/mappings'
     | '/nodes'
+    | '/settings'
     | '/traffic'
     | '/nodes/$nodeId'
     | '/api/auth/$'
@@ -130,6 +141,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/mappings'
     | '/nodes'
+    | '/settings'
     | '/traffic'
     | '/nodes_/$nodeId'
     | '/api/auth/$'
@@ -142,6 +154,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   MappingsRoute: typeof MappingsRoute
   NodesRoute: typeof NodesRoute
+  SettingsRoute: typeof SettingsRoute
   TrafficRoute: typeof TrafficRoute
   NodesNodeIdRoute: typeof NodesNodeIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -191,6 +204,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NodesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/traffic': {
       id: '/traffic'
       path: '/traffic'
@@ -222,6 +242,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   MappingsRoute: MappingsRoute,
   NodesRoute: NodesRoute,
+  SettingsRoute: SettingsRoute,
   TrafficRoute: TrafficRoute,
   NodesNodeIdRoute: NodesNodeIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,

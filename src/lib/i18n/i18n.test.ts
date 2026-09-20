@@ -21,11 +21,13 @@ test("auto preference follows the browser, explicit preference wins", () => {
 test("t interpolates and falls back, including simple plurals", () => {
   setActiveLocale("zh");
   assert.equal(t("nav.nodes"), "节点");
+  assert.equal(t("nav.settings"), "设置");
   assert.equal(t("nodes.services", { count: 1 }), "1 项服务");
   assert.equal(t("action.node.create"), "登记节点");
   assert.equal(t("action.auth.2fa.enrolled"), "绑定双因素");
   setActiveLocale("en");
   assert.equal(t("nav.nodes"), "Nodes");
+  assert.equal(t("nav.settings"), "Settings");
   assert.equal(t("nodes.services", { count: 1 }), "1 service");
   assert.equal(t("nodes.services", { count: 2 }), "2 services");
   assert.equal(t("action.node.create"), "Enroll node");

@@ -16,7 +16,7 @@ const nav = [
   { to: "/nodes", labelKey: "nav.nodes", icon: Radio, paths: ["/", "/nodes"] },
   { to: "/mappings", labelKey: "nav.services", icon: Layers, paths: ["/mappings"] },
   { to: "/traffic", labelKey: "nav.observe", icon: Activity, paths: ["/traffic", "/audit"] },
-  { to: "/deploy", labelKey: "nav.system", icon: Settings2, paths: ["/deploy"] },
+  { to: "/settings", labelKey: "nav.settings", icon: Settings2, paths: ["/settings", "/deploy"] },
 ] as const;
 
 export function AppShell({

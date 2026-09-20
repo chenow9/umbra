@@ -1,4 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { SystemPage } from "@/components/pages/system-page";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/deploy")({ component: SystemPage });
+export const Route = createFileRoute("/deploy")({
+  beforeLoad: () => {
+    throw redirect({ to: "/settings" });
+  },
+});

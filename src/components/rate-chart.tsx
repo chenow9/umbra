@@ -128,8 +128,9 @@ export function RateChart({
   const elRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
 
-  const waitingRate = kind === "rate" && inn.length === 0;
-  const showChart = !waitingRate && data.length > 0;
+  const hasSignal = inn.some(([, value]) => value > 0) || out.some(([, value]) => value > 0);
+  const waitingRate = kind === "rate" && data.length > 0 && inn.length === 0;
+  const showChart = hasSignal && !waitingRate;
 
   const option = useMemo<ECOption>(() => {
     const span = trafficRangeMs(range);
@@ -242,8 +243,12 @@ export function RateChart({
   return (
     <div aria-busy={loading || updating}>
       <div className="mb-2 flex h-5 items-center justify-end gap-3">
-        <Swatch color="var(--live)" label={t("chart.in")} />
-        <Swatch color="var(--amber)" label={t("chart.out")} />
+        {showChart && !loading && !error ? (
+          <>
+            <Swatch color="var(--live)" label={t("chart.in")} />
+            <Swatch color="var(--amber)" label={t("chart.out")} />
+          </>
+        ) : null}
       </div>
       <div className="relative h-52 w-full">
         <div
@@ -260,11 +265,9 @@ export function RateChart({
                 ? t("traffic.trafficFail")
                 : loading
                   ? t("chart.loading")
-                  : waitingRate && data.length > 0
+                  : waitingRate && hasSignal
                     ? t("chart.waitSample")
-                    : kind === "rate"
-                      ? t("chart.emptyRate")
-                      : t("chart.emptyBytes")}
+                    : t("chart.empty")}
             </span>
             {!loading && !error ? emptyAction : null}
           </div>

@@ -3,7 +3,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { Activity, ArrowRight, Layers, Radio } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
 import { ObservabilityNav } from "@/components/observability-nav";
 import { AppShell } from "@/components/app-shell";
 import { ObservationScope } from "@/components/observation-scope";
@@ -104,7 +105,11 @@ export function TrafficPage() {
         : undefined);
 
   return (
-    <AppShell title={t("traffic.title")} description={t("traffic.description")} showTelemetry={false}>
+    <AppShell
+      title={t("traffic.title")}
+      description={t("traffic.description")}
+      showTelemetry={false}
+    >
       <ObservabilityNav
         active="traffic"
         trafficSearch={search}
@@ -143,7 +148,10 @@ export function TrafficPage() {
       />
       <div className="flex flex-col gap-5">
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-          <nav aria-label={t("traffic.scope")} className="flex min-w-0 flex-wrap items-center gap-2">
+          <nav
+            aria-label={t("traffic.scope")}
+            className="flex min-w-0 flex-wrap items-center gap-2"
+          >
             <Link to="/traffic" search={{ range, chart }}>
               {t("traffic.allNodes")}
             </Link>
@@ -158,7 +166,9 @@ export function TrafficPage() {
             {mappingId ? (
               <>
                 <span className="text-stone">/</span>
-                <span className="break-all">{scope.service?.name ?? t("traffic.selectedService")}</span>
+                <span className="break-all">
+                  {scope.service?.name ?? t("traffic.selectedService")}
+                </span>
               </>
             ) : null}
           </nav>
@@ -233,7 +243,10 @@ export function TrafficPage() {
             hint={t("traffic.histHint")}
           />
         </section>
-        <section className="min-w-0 rounded-xl bg-card p-4 shadow-border" aria-label={t("traffic.trend")}>
+        <section
+          className="min-w-0 rounded-xl bg-card p-4 shadow-border"
+          aria-label={t("traffic.trend")}
+        >
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div role="group" aria-label={t("traffic.chartType")} className="flex gap-1">
               <Button
@@ -335,9 +348,29 @@ export function TrafficPage() {
                 ))}
               </ul>
             ) : (
-              <p className="rounded-xl border border-dashed border-line p-6 text-sm text-stone">
-                {q ? t("traffic.noMatch") : nodeId ? t("traffic.noServices") : t("traffic.noNodes")}
-              </p>
+              <EmptyState
+                icon={q ? Activity : nodeId ? Layers : Radio}
+                title={
+                  q ? t("traffic.noMatch") : nodeId ? t("traffic.noServices") : t("traffic.noNodes")
+                }
+                action={
+                  q ? (
+                    <Button variant="outline" onClick={() => setQ("")}>
+                      {t("traffic.clear")}
+                    </Button>
+                  ) : nodeId ? (
+                    <Button asChild>
+                      <Link to="/nodes/$nodeId" params={{ nodeId }} search={{ create: true }}>
+                        {t("services.add")}
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button asChild>
+                      <Link to="/nodes">{t("nodes.enroll")}</Link>
+                    </Button>
+                  )
+                }
+              />
             )}
             {rows.length > PAGE_SIZE ? (
               <Pager

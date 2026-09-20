@@ -21,7 +21,8 @@ try {
     ["/mappings", "全部服务"],
     ["/traffic", "观测"],
     ["/audit", "观测"],
-    ["/deploy", "系统"],
+    ["/settings", "设置"],
+    ["/deploy", "设置"],
   ]) {
     await page.goto(base + path, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: title, exact: true, level: 1 }).waitFor();

@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import {
   SheetHeader,
   SheetTitle,
@@ -28,6 +29,7 @@ import {
 import type { Mapping, MappingMode, Proto } from "@/lib/umbra/types";
 import {
   accessOptions,
+  needsPublicConfirm,
   serviceErrors,
   validateService,
   type ServiceField,
@@ -117,6 +119,9 @@ export function ServiceEditor({
   const [step, setStep] = useState(0);
   const [attempted, setAttempted] = useState(false);
   const [touched, setTouched] = useState<Partial<Record<ServiceField, boolean>>>({});
+  const [publicOpen, setPublicOpen] = useState(false);
+  const [publicAccepted, setPublicAccepted] = useState(mapping?.mode === "public");
+  const publicSaveRef = useRef(false);
   const stepHeading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (!editing) stepHeading.current?.focus();
@@ -175,10 +180,8 @@ export function ServiceEditor({
   const stepTitles = [t("editor.where"), t("editor.who"), t("editor.confirm")];
 
   const save = useMutation({
-    mutationFn: () =>
-      editing
-        ? updateMapping({ data: { id: mapping.id, ...payload } })
-        : createMapping({ data: payload }),
+    mutationFn: (data: typeof payload) =>
+      editing ? updateMapping({ data: { id: mapping.id, ...data } }) : createMapping({ data }),
     onSuccess: (m) => {
       toast.success(editing ? t("editor.saved") : t("editor.added"));
       onDone(m);
@@ -215,12 +218,17 @@ export function ServiceEditor({
           e.preventDefault();
           setAttempted(true);
           if (stepValidation || save.isPending) return;
+          if (needsPublicConfirm(mapping?.mode, mode) && !publicAccepted) {
+            publicSaveRef.current = !editing && step < 2 ? false : true;
+            setPublicOpen(true);
+            return;
+          }
           if (!editing && step < 2) {
             setAttempted(false);
             setStep(step + 1);
             return;
           }
-          save.mutate();
+          save.mutate(payload);
         }}
       >
         <SheetBody className="space-y-6" key={step}>
@@ -309,7 +317,15 @@ export function ServiceEditor({
                       name="service-access"
                       className="mt-1 accent-[var(--pine)]"
                       checked={mode === option.mode}
-                      onChange={() => setMode(option.mode)}
+                      onChange={() => {
+                        if (needsPublicConfirm(mode, option.mode) && !publicAccepted) {
+                          publicSaveRef.current = false;
+                          setPublicOpen(true);
+                          return;
+                        }
+                        if (option.mode !== "public") setPublicAccepted(false);
+                        setMode(option.mode);
+                      }}
                     />
                     <span>
                       <span className="block text-sm font-medium">{option.label}</span>
@@ -454,6 +470,42 @@ export function ServiceEditor({
           </div>
         </SheetFooter>
       </form>
+      <ConfirmDialog
+        open={publicOpen}
+        title={t("editor.publicConfirmTitle")}
+        description={
+          validPortNumber(entryPort)
+            ? t("editor.publicConfirmPort", { port: entryPort })
+            : t("editor.publicConfirm")
+        }
+        confirmLabel={t("editor.publicConfirmSave")}
+        danger
+        onOpenChange={(open) => {
+          if (!open) {
+            publicSaveRef.current = false;
+            setPublicOpen(false);
+          }
+        }}
+        onConfirm={() => {
+          const next = {
+            ...payload,
+            mode: "public" as const,
+            entryPort: Number(entryPort),
+          };
+          setMode("public");
+          setPublicAccepted(true);
+          setPublicOpen(false);
+          if (!publicSaveRef.current) return;
+          publicSaveRef.current = false;
+          if (validateService(next) || save.isPending) return;
+          save.mutate(next);
+        }}
+      />
     </>
   );
+}
+
+function validPortNumber(value: string) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1 && n <= 65535;
 }

@@ -44,7 +44,7 @@ export function QuickLauncher() {
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
   }, [open]);
-  const go = (to: "/mappings" | "/nodes" | "/traffic" | "/deploy", search = {}) => {
+  const go = (to: "/mappings" | "/nodes" | "/traffic" | "/settings", search = {}) => {
     close();
     void navigate({ to, search });
   };
@@ -71,7 +71,7 @@ export function QuickLauncher() {
       value: t("quick.systemKeys"),
       label: t("quick.system"),
       icon: Settings2,
-      to: "/deploy" as const,
+      to: "/settings" as const,
     },
   ];
   const hits = quickLaunchHits(query, mappings.data ?? [], nodes.data ?? []);

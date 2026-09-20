@@ -3,7 +3,8 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearch, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowRight, Search } from "lucide-react";
+import { ArrowRight, Radio, Search } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { StatusDot } from "@/components/status-dot";
@@ -187,9 +188,22 @@ export function NodesPage() {
           />
 
           {pageData.total === 0 ? (
-            <p className="rounded-xl bg-card px-4 py-8 text-center text-sm text-stone shadow-border">
-              {t("nodes.emptyMatch")}
-            </p>
+            <EmptyState
+              icon={Radio}
+              title={t("nodes.emptyMatch")}
+              action={
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setQ("");
+                    setStatus("all");
+                  }}
+                >
+                  {t("nodes.clear")}
+                </Button>
+              }
+            />
           ) : (
             <>
               <div className="node-directory" role="list" aria-label={t("nodes.list")}>
@@ -369,22 +383,20 @@ function NodeFleetBar({
 function EmptyNodes({ onCreate, onImport }: { onCreate: () => void; onImport: () => void }) {
   const { t } = useI18n();
   return (
-    <div className="mx-auto flex max-w-md flex-col items-start gap-5 py-8">
-      <div>
-        <h2 className="font-serif text-3xl italic tracking-tight text-ink">
-          {t("nodes.emptyTitle")}
-        </h2>
-        <p className="mt-2 text-sm leading-relaxed text-ink-soft">{t("nodes.emptyBody")}</p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" onClick={onCreate}>
-          {t("nodes.enroll")}
-        </Button>
-        <Button type="button" variant="outline" onClick={onImport}>
-          {t("transfer.import")}
-        </Button>
-      </div>
-    </div>
+    <EmptyState
+      icon={Radio}
+      title={t("nodes.emptyReason")}
+      action={
+        <>
+          <Button type="button" onClick={onCreate}>
+            {t("nodes.enroll")}
+          </Button>
+          <Button type="button" variant="outline" onClick={onImport}>
+            {t("transfer.import")}
+          </Button>
+        </>
+      }
+    />
   );
 }
 
