@@ -166,28 +166,39 @@ var auditActionLabels = map[string]string{
 	"node.create":      "登记节点",
 	"node.update":      "修改节点",
 	"node.delete":      "删除节点",
-	"node.enroll":      "节点登记",
+	"node.enroll":      "登记节点",
 	"node.offline":     "节点离线",
 	"node.rotate":      "轮换凭证",
-	"node.hello":       "Hello 全量下发",
-	"mapping.ack":      "映射确认",
-	"mapping.ack_fail": "映射确认失败",
-	"acl.drop":         "ACL 丢弃",
-	"mapping.push":     "MappingSync",
-	"mapping.probe":    "探测开流",
-	"mapping.knock":    "敲门",
-	"mapping.visit":    "探访",
-	"visitor.issue":    "签发",
-	"visitor.revoke":   "作废票据",
+	"node.hello":       "同步节点配置",
+	"mapping.ack":      "节点已确认配置",
+	"mapping.ack_fail": "节点未能确认配置",
+	"acl.drop":         "来源不允许",
+	"mapping.push":     "下发服务配置",
+	"mapping.probe":    "探测服务",
+	"mapping.knock":    "临时放行",
+	"mapping.visit":    "凭证访问",
+	"visitor.issue":    "签发访问凭证",
+	"visitor.revoke":   "撤销访问凭证",
 	"node.disconnect":  "节点离线",
 	"node.revoke":      "吊销凭证",
-	"mapping.create":   "新建映射",
-	"mapping.update":   "修改映射",
-	"mapping.policy":   "更新策略",
-	"mapping.delete":   "删除映射",
-	"mapping.enable":   "启用映射",
-	"mapping.disable":  "停用映射",
+	"mapping.create":   "新建服务",
+	"mapping.update":   "修改服务",
+	"mapping.policy":   "更新服务策略",
+	"mapping.delete":   "删除服务",
+	"mapping.enable":   "启用服务",
+	"mapping.disable":  "停用服务",
 	"demo.run":         "连通性探测",
+}
+
+func auditActionGroup(action string) string {
+	switch action {
+	case "node.enroll":
+		return "node.create"
+	case "node.disconnect":
+		return "node.offline"
+	default:
+		return action
+	}
 }
 
 func filterAuditViews(views []map[string]any, q, action string) []map[string]any {
@@ -199,7 +210,7 @@ func filterAuditViews(views []map[string]any, q, action string) []map[string]any
 	out := make([]map[string]any, 0, len(views))
 	for _, v := range views {
 		act := asString(v["action"])
-		if action != "" && act != action {
+		if action != "" && auditActionGroup(act) != auditActionGroup(action) {
 			continue
 		}
 		if q != "" {

@@ -13,7 +13,13 @@ import { Pager } from "@/components/ui/pager";
 import { useI18n } from "@/lib/i18n";
 import { queryAudit } from "@/lib/umbra/api";
 import { formatClock, formatRelative } from "@/lib/umbra/format";
-import { actionLabel } from "@/lib/umbra/labels";
+import {
+  actionLabel,
+  auditActionOptions,
+  auditActorLabel,
+  auditTargetHint,
+  auditTargetLabel,
+} from "@/lib/umbra/labels";
 import { emptyPage, PAGE_SIZE } from "@/lib/umbra/page";
 import type { AuditItem } from "@/lib/umbra/types";
 
@@ -43,10 +49,7 @@ export function AuditPage() {
     setAction("all");
   };
   const labels = actionLabel();
-  const actionOptions = [
-    { value: "all", label: t("audit.all") },
-    ...Object.entries(labels).map(([value, label]) => ({ value, label })),
-  ];
+  const actionOptions = [{ value: "all", label: t("audit.all") }, ...auditActionOptions()];
 
   useEffect(() => {
     setPage(1);
@@ -107,14 +110,14 @@ export function AuditPage() {
                         {formatRelative(item.ts)}
                       </span>
                     </div>
-                    <p className="mt-1 text-sm text-ink-soft">
-                      {item.targetName || item.target || "—"}
+                    <p className="mt-1 text-sm text-ink-soft" title={auditTargetHint(item)}>
+                      {auditTargetLabel(item)}
                     </p>
                     {item.detail ? (
                       <p className="mt-1 font-mono text-xs text-stone">{item.detail}</p>
                     ) : null}
                     <p className="mt-1 font-mono text-xs text-stone">
-                      {formatClock(item.ts)} · {item.actor || "owner"}
+                      {formatClock(item.ts)} · {auditActorLabel(item.actor)}
                     </p>
                   </article>
                 ))}
@@ -145,14 +148,17 @@ export function AuditPage() {
                         <td className="px-4 py-3 align-top font-medium">
                           {labels[item.action] ?? item.action}
                         </td>
-                        <td className="px-4 py-3 align-top text-ink-soft">
-                          {item.targetName || item.target || "—"}
+                        <td
+                          className="px-4 py-3 align-top text-ink-soft"
+                          title={auditTargetHint(item)}
+                        >
+                          {auditTargetLabel(item)}
                         </td>
                         <td className="px-4 py-3 align-top font-mono text-xs text-stone">
                           {item.detail || "—"}
                         </td>
                         <td className="px-4 py-3 align-top text-xs text-stone">
-                          {item.actor || "owner"}
+                          {auditActorLabel(item.actor)}
                         </td>
                       </tr>
                     ))}

@@ -24,6 +24,9 @@ test("t interpolates and falls back, including simple plurals", () => {
   assert.equal(t("nav.settings"), "设置");
   assert.equal(t("nodes.services", { count: 1 }), "1 项服务");
   assert.equal(t("action.node.create"), "登记节点");
+  assert.equal(t("action.node.enroll"), "登记节点");
+  assert.equal(t("action.node.hello"), "同步节点配置");
+  assert.equal(t("action.acl.drop"), "来源不允许");
   assert.equal(t("action.auth.2fa.enrolled"), "绑定双因素");
   setActiveLocale("en");
   assert.equal(t("nav.nodes"), "Nodes");
@@ -31,6 +34,8 @@ test("t interpolates and falls back, including simple plurals", () => {
   assert.equal(t("nodes.services", { count: 1 }), "1 service");
   assert.equal(t("nodes.services", { count: 2 }), "2 services");
   assert.equal(t("action.node.create"), "Enroll node");
+  assert.equal(t("action.node.enroll"), "Enroll node");
+  assert.equal(t("action.node.hello"), "Sync node configuration");
   assert.equal(t("missing.key"), "missing.key");
   setActiveLocale("zh");
 });

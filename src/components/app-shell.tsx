@@ -13,7 +13,7 @@ import { useLiveStatus } from "@/lib/umbra/live";
 import { useI18n } from "@/lib/i18n";
 
 const nav = [
-  { to: "/nodes", labelKey: "nav.nodes", icon: Radio, paths: ["/", "/nodes"] },
+  { to: "/nodes", labelKey: "nav.nodes", icon: Radio, paths: ["/nodes"] },
   { to: "/mappings", labelKey: "nav.services", icon: Layers, paths: ["/mappings"] },
   { to: "/traffic", labelKey: "nav.observe", icon: Activity, paths: ["/traffic", "/audit"] },
   { to: "/settings", labelKey: "nav.settings", icon: Settings2, paths: ["/settings", "/deploy"] },
@@ -84,7 +84,7 @@ export function AppShell({
 
 function Brand() {
   return (
-    <Link to="/nodes" className="network-brand" aria-label="umbra">
+    <Link to="/" className="network-brand" aria-label="umbra">
       <img
         src="/favicon.svg?v=umbra-eclipse-1"
         className="eclipse-mark"

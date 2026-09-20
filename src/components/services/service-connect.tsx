@@ -20,7 +20,14 @@ import {
   listTickets,
   revokeTicket,
 } from "@/lib/umbra/api";
-import { accessOptions, serviceState, serviceCanConnect, targetAddress } from "@/lib/umbra/service";
+import { Hint } from "@/components/ui/tooltip";
+import {
+  accessOptions,
+  serviceState,
+  serviceCanConnect,
+  serviceGateReason,
+  targetAddress,
+} from "@/lib/umbra/service";
 import {
   ARCHS,
   PLATFORMS,
@@ -132,6 +139,7 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
     onError: (e: Error) => toast.error(e.message),
   });
   const ready = serviceCanConnect(m);
+  const gate = ready ? undefined : serviceGateReason(m);
   const access = accessOptions().find((option) => option.mode === m.mode)!;
   const grants = (m.grants ?? []).filter((grant) => Date.parse(grant.until) > Date.now());
   const ticketName = revokeTarget?.label || t("connect.unnamed");
@@ -152,11 +160,15 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
         </Link>
       </SheetHeader>
       <Tabs.Root value={task} onValueChange={setTask} className="flex min-h-0 flex-1 flex-col">
-        <Tabs.List className="connection-task-tabs" aria-label={t("connect.tabs")}>
-          <Tabs.Trigger value="connect">{t("connect.connect")}</Tabs.Trigger>
-          <Tabs.Trigger value="diagnose">{t("connect.diagnose")}</Tabs.Trigger>
+        <Tabs.List className="sub-nav" aria-label={t("connect.tabs")}>
+          <Tabs.Trigger className="sub-nav-item" value="connect">
+            {t("connect.connect")}
+          </Tabs.Trigger>
+          <Tabs.Trigger className="sub-nav-item" value="diagnose">
+            {t("connect.diagnose")}
+          </Tabs.Trigger>
           {m.mode === "visitor" ? (
-            <Tabs.Trigger value="credentials">
+            <Tabs.Trigger className="sub-nav-item" value="credentials">
               {tickets.data?.length
                 ? t("connect.ticketsN", { n: tickets.data.length })
                 : t("connect.tickets")}
@@ -211,9 +223,14 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
                   value={label}
                   onChange={(e) => setLabel(e.target.value)}
                 />
-                <Button onClick={() => issue.mutate()} disabled={!ready || busy || Boolean(issued)}>
-                  {issue.isPending ? t("connect.issuing") : t("connect.issue")}
-                </Button>
+                <Hint text={!ready ? gate : issued ? t("connect.alreadyIssued") : undefined}>
+                  <Button
+                    onClick={() => issue.mutate()}
+                    disabled={!ready || busy || Boolean(issued)}
+                  >
+                    {issue.isPending ? t("connect.issuing") : t("connect.issue")}
+                  </Button>
+                </Hint>
                 {issued ? (
                   <div className="space-y-3 rounded-lg border border-pine/30 bg-paper-2 p-3">
                     <p className="text-sm font-medium">{t("connect.saveCmd")}</p>
@@ -264,9 +281,11 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
                 )}
                 {m.mode === "spa" ? (
                   <>
-                    <Button onClick={() => knock.mutate()} disabled={!ready || busy}>
-                      {knock.isPending ? t("connect.knocking") : t("connect.knock")}
-                    </Button>
+                    <Hint text={!ready ? gate : undefined}>
+                      <Button onClick={() => knock.mutate()} disabled={!ready || busy}>
+                        {knock.isPending ? t("connect.knocking") : t("connect.knock")}
+                      </Button>
+                    </Hint>
                     {knock.data ? (
                       <p role="status" className="text-sm text-live">
                         {t("connect.knocked", {
@@ -336,9 +355,11 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
               </dd>
             </dl>
             <p className="text-xs leading-relaxed text-stone">{t("connect.probeHint")}</p>
-            <Button variant="outline" disabled={!ready || busy} onClick={() => probe.mutate()}>
-              {probe.isPending ? t("connect.probing") : t("connect.probe")}
-            </Button>
+            <Hint text={!ready ? gate : undefined}>
+              <Button variant="outline" disabled={!ready || busy} onClick={() => probe.mutate()}>
+                {probe.isPending ? t("connect.probing") : t("connect.probe")}
+              </Button>
+            </Hint>
             {probe.error ? (
               <div role="alert" className="rounded-lg bg-paper-2 p-3 text-sm">
                 <p className="font-medium text-rose">{t("connect.unverified")}</p>
@@ -423,7 +444,9 @@ export function ServiceConnect({ mapping: m, onEdit }: { mapping: Mapping; onEdi
                         <p className="text-xs text-stone">
                           {ticket.expired
                             ? t("connect.expired")
-                            : t("connect.expiresAt", { when: formatRelative(ticket.expiresAt) })}{" "}
+                            : t("connect.expiresAt", {
+                                when: formatRelative(ticket.expiresAt),
+                              })}{" "}
                           · {ticket.id.slice(-8)}
                         </p>
                       </div>

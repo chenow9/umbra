@@ -60,13 +60,24 @@ export function dropReasonLabel(): Record<string, string> {
   };
 }
 
+const AUDIT_CANONICAL: Record<string, string> = {
+  "node.enroll": "node.create",
+  "node.disconnect": "node.offline",
+};
+
+export function canonicalAuditAction(action: string) {
+  return AUDIT_CANONICAL[action] ?? action;
+}
+
 export function actionLabel(): Record<string, string> {
+  const create = t("action.node.create");
+  const offline = t("action.node.offline");
   return {
-    "node.create": t("action.node.create"),
+    "node.create": create,
     "node.update": t("action.node.update"),
     "node.delete": t("action.node.delete"),
-    "node.enroll": t("action.node.enroll"),
-    "node.offline": t("action.node.offline"),
+    "node.enroll": create,
+    "node.offline": offline,
     "node.rotate": t("action.node.rotate"),
     "node.hello": t("action.node.hello"),
     "mapping.ack": t("action.mapping.ack"),
@@ -78,7 +89,7 @@ export function actionLabel(): Record<string, string> {
     "mapping.visit": t("action.mapping.visit"),
     "visitor.issue": t("action.visitor.issue"),
     "visitor.revoke": t("action.visitor.revoke"),
-    "node.disconnect": t("action.node.disconnect"),
+    "node.disconnect": offline,
     "node.revoke": t("action.node.revoke"),
     "mapping.create": t("action.mapping.create"),
     "mapping.update": t("action.mapping.update"),
@@ -94,6 +105,39 @@ export function actionLabel(): Record<string, string> {
     "auth.2fa.recovery_regenerated": t("action.auth.2fa.recovery_regenerated"),
     "auth.2fa.local_reset": t("action.auth.2fa.local_reset"),
   };
+}
+
+export function auditActionOptions(): { value: string; label: string }[] {
+  const labels = actionLabel();
+  const seen = new Set<string>();
+  const out: { value: string; label: string }[] = [];
+  for (const [value, label] of Object.entries(labels)) {
+    const canonical = canonicalAuditAction(value);
+    if (seen.has(canonical)) continue;
+    seen.add(canonical);
+    out.push({ value: canonical, label });
+  }
+  return out;
+}
+
+export function auditActorLabel(actor: string) {
+  if (!actor || actor === "owner") return t("audit.admin");
+  if (actor === "gateway") return t("audit.gateway");
+  return actor;
+}
+
+export function auditTargetLabel(item: { target: string; targetName?: string }) {
+  const name = item.targetName?.trim();
+  if (name) return name;
+  if (/^(nde|map|tkt)_/i.test(item.target)) return t("audit.unknownTarget");
+  return item.target || "—";
+}
+
+export function auditTargetHint(item: { target: string; targetName?: string }) {
+  const name = item.targetName?.trim();
+  if (name && item.target && name !== item.target) return item.target;
+  if (/^(nde|map|tkt)_/i.test(item.target)) return item.target;
+  return undefined;
 }
 
 export function policyBits(

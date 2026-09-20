@@ -57,19 +57,19 @@ export function QuickLauncher() {
     },
     {
       value: t("quick.nodeKeys"),
-      label: t("quick.nodes"),
+      label: t("nav.nodes"),
       icon: Radio,
       to: "/nodes" as const,
     },
     {
       value: t("quick.trafficKeys"),
-      label: t("quick.traffic"),
+      label: t("nav.observe"),
       icon: Activity,
       to: "/traffic" as const,
     },
     {
       value: t("quick.systemKeys"),
-      label: t("quick.system"),
+      label: t("nav.settings"),
       icon: Settings2,
       to: "/settings" as const,
     },
@@ -153,7 +153,7 @@ export function QuickLauncher() {
                     </p>
                   ) : null}
                   {hits.mappings.length > 0 || hits.mappingMore > 0 ? (
-                    <Command.Group heading={t("quick.services")}>
+                    <Command.Group heading={t("nav.services")}>
                       {hits.mappings.map((m) => (
                         <Command.Item
                           key={m.id}
@@ -195,7 +195,7 @@ export function QuickLauncher() {
                     </p>
                   ) : null}
                   {hits.nodes.length > 0 || hits.nodeMore > 0 ? (
-                    <Command.Group heading={t("quick.nodeGroup")}>
+                    <Command.Group heading={t("nav.nodes")}>
                       {hits.nodes.map((node) => (
                         <Command.Item
                           key={node.id}

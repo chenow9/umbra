@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   defaultGroupOpen,
+  filterAudit,
   filterMappings,
   filterNodeOptions,
   groupMappings,
@@ -62,11 +63,49 @@ function mapping(partial: Partial<Mapping> & Pick<Mapping, "id" | "nodeId" | "no
 
 describe("groupMappings", () => {
   const rows = [
-    mapping({ id: "b", nodeId: "n2", nodeName: "load-204", nodeStatus: "offline", name: "ssh", entryPort: 22022 }),
-    mapping({ id: "a", nodeId: "n1", nodeName: "load-111", nodeStatus: "online", name: "web", entryPort: 18080 }),
-    mapping({ id: "c", nodeId: "n1", nodeName: "load-111", nodeStatus: "online", name: "dns", entryPort: 53, proto: "udp" }),
-    mapping({ id: "e", nodeId: "n1", nodeName: "load-111", nodeStatus: "online", name: "private", entryPort: 1, mode: "spa" }),
-    mapping({ id: "d", nodeId: "n1", nodeName: "load-111", nodeStatus: "online", name: "visit", entryPort: null, mode: "visitor" }),
+    mapping({
+      id: "b",
+      nodeId: "n2",
+      nodeName: "load-204",
+      nodeStatus: "offline",
+      name: "ssh",
+      entryPort: 22022,
+    }),
+    mapping({
+      id: "a",
+      nodeId: "n1",
+      nodeName: "load-111",
+      nodeStatus: "online",
+      name: "web",
+      entryPort: 18080,
+    }),
+    mapping({
+      id: "c",
+      nodeId: "n1",
+      nodeName: "load-111",
+      nodeStatus: "online",
+      name: "dns",
+      entryPort: 53,
+      proto: "udp",
+    }),
+    mapping({
+      id: "e",
+      nodeId: "n1",
+      nodeName: "load-111",
+      nodeStatus: "online",
+      name: "private",
+      entryPort: 1,
+      mode: "spa",
+    }),
+    mapping({
+      id: "d",
+      nodeId: "n1",
+      nodeName: "load-111",
+      nodeStatus: "online",
+      name: "visit",
+      entryPort: null,
+      mode: "visitor",
+    }),
   ];
 
   it("filters then groups online nodes first and sorts modes before ports", () => {
@@ -140,9 +179,30 @@ describe("nodeFacets", () => {
 describe("mappingFacets", () => {
   it("counts nodes, protos and modes from the current rows", () => {
     const rows = [
-      mapping({ id: "a", nodeId: "n1", nodeName: "load-111", nodeStatus: "online", proto: "tcp", mode: "spa" }),
-      mapping({ id: "b", nodeId: "n1", nodeName: "load-111", nodeStatus: "online", proto: "udp", mode: "public" }),
-      mapping({ id: "c", nodeId: "n2", nodeName: "load-204", nodeStatus: "offline", proto: "tcp", mode: "spa" }),
+      mapping({
+        id: "a",
+        nodeId: "n1",
+        nodeName: "load-111",
+        nodeStatus: "online",
+        proto: "tcp",
+        mode: "spa",
+      }),
+      mapping({
+        id: "b",
+        nodeId: "n1",
+        nodeName: "load-111",
+        nodeStatus: "online",
+        proto: "udp",
+        mode: "public",
+      }),
+      mapping({
+        id: "c",
+        nodeId: "n2",
+        nodeName: "load-204",
+        nodeStatus: "offline",
+        proto: "tcp",
+        mode: "spa",
+      }),
     ];
     const facets = mappingFacets(rows);
     assert.deepEqual(
@@ -252,5 +312,23 @@ describe("defaultGroupOpen", () => {
     );
     assert.equal(open.a, false);
     assert.equal(open.b, true);
+  });
+});
+
+describe("filterAudit", () => {
+  it("treats enroll as the same action as create", () => {
+    const rows = [
+      {
+        id: 1,
+        ts: "2026-09-20T00:00:00Z",
+        actor: "owner",
+        action: "node.enroll",
+        target: "nde_1",
+        targetName: "home-nas",
+        detail: "",
+      },
+    ];
+    assert.equal(filterAudit(rows, { action: "node.create", page: 1, size: 10 }).length, 1);
+    assert.equal(filterAudit(rows, { action: "node.update", page: 1, size: 10 }).length, 0);
   });
 });
