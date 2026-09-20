@@ -39,6 +39,7 @@ import {
 } from "@/lib/umbra/api";
 import { emptyPage, nodeFacets, PAGE_SIZE, type NodeFacets } from "@/lib/umbra/page";
 import { serviceSummary } from "@/lib/umbra/service";
+import { validNodeName } from "@/lib/umbra/validate";
 import { cn } from "@/lib/utils";
 import { Pager } from "@/components/ui/pager";
 import { formatBytes, formatBps, formatRelative } from "@/lib/umbra/format";
@@ -86,11 +87,7 @@ export function NodesPage() {
   const pageData = nodes.data ?? emptyPage<Node>(page);
   const list = pageData.items;
   const empty =
-    !nodes.isPending &&
-    !nodes.isError &&
-    pageData.total === 0 &&
-    !q &&
-    status === "all";
+    !nodes.isPending && !nodes.isError && pageData.total === 0 && !q && status === "all";
   useEffect(() => {
     setPage(1);
   }, [q, status]);
@@ -243,6 +240,7 @@ export function NodesPage() {
               onIssued={(v) => {
                 setEditor(null);
                 setIssued(v);
+                void qc.invalidateQueries({ queryKey: ["umbra"] });
               }}
             />
           ) : null}
@@ -373,7 +371,9 @@ function EmptyNodes({ onCreate, onImport }: { onCreate: () => void; onImport: ()
   return (
     <div className="mx-auto flex max-w-md flex-col items-start gap-5 py-8">
       <div>
-        <h2 className="font-serif text-3xl italic tracking-tight text-ink">{t("nodes.emptyTitle")}</h2>
+        <h2 className="font-serif text-3xl italic tracking-tight text-ink">
+          {t("nodes.emptyTitle")}
+        </h2>
         <p className="mt-2 text-sm leading-relaxed text-ink-soft">{t("nodes.emptyBody")}</p>
       </div>
       <div className="flex flex-wrap gap-2">
@@ -511,8 +511,16 @@ function CreateNodeForm({ onIssued }: { onIssued: (v: Issued) => void }) {
   const [os, setOs] = useState<Platform>("linux");
   const [arch, setArch] = useState<Arch>("amd64");
   const [neverExpire, setNeverExpire] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [attempted, setAttempted] = useState(false);
+  const nameError = !name.trim()
+    ? t("nodes.needName")
+    : validNodeName(name)
+      ? null
+      : t("validate.nodeName");
+  const showNameError = attempted || Boolean(name.trim()) ? nameError : null;
   const create = useMutation({
-    mutationFn: () => createNode({ data: { name, comment, os, arch, neverExpire } }),
+    mutationFn: () => createNode({ data: { name: name.trim(), comment, os, arch, neverExpire } }),
     onSuccess: (res) => {
       toast.success(t("nodes.issuedToast"), { id: "create-node" });
       onIssued({
@@ -520,6 +528,7 @@ function CreateNodeForm({ onIssued }: { onIssued: (v: Issued) => void }) {
         token: res.token,
         os,
         arch,
+        name: name.trim(),
         installCmd: res.installCmd,
         dockerCmd: res.dockerCmd,
         listen: res.listen,
@@ -535,16 +544,19 @@ function CreateNodeForm({ onIssued }: { onIssued: (v: Issued) => void }) {
   return (
     <>
       <SheetHeader>
-        <SheetTitle>{t("nodes.enroll")}</SheetTitle>
-        <SheetDescription>{t("nodes.enrollHint")}</SheetDescription>
+        <SheetTitle>{confirming ? t("nodes.confirmTitle") : t("nodes.enroll")}</SheetTitle>
+        <SheetDescription>
+          {confirming ? t("nodes.confirmHint") : t("nodes.enrollHint")}
+        </SheetDescription>
       </SheetHeader>
       <form
         className="flex min-h-0 flex-1 flex-col"
         onSubmit={(e) => {
           e.preventDefault();
-          if (create.isPending) return;
-          if (!name.trim()) {
-            toast.error(t("nodes.needName"));
+          setAttempted(true);
+          if (create.isPending || nameError) return;
+          if (!confirming) {
+            setConfirming(true);
             return;
           }
           toast.loading(t("nodes.registering"), { id: "create-node" });
@@ -552,48 +564,64 @@ function CreateNodeForm({ onIssued }: { onIssued: (v: Issued) => void }) {
         }}
       >
         <SheetBody className="flex flex-col gap-3">
-          <TextField
-            label={t("nodes.name")}
-            required
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="home-nas"
-          />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <SelectField
-              label={t("nodes.os")}
-              value={os}
-              onValueChange={(v) => setOs(v as Platform)}
-              options={PLATFORMS.map((p) => ({ value: p.id, label: p.label }))}
-            />
-            <SelectField
-              label={t("nodes.arch")}
-              value={arch}
-              onValueChange={(v) => setArch(v as Arch)}
-              options={ARCHS.map((p) => ({ value: p.id, label: p.label }))}
-            />
-          </div>
-          <TextAreaField
-            label={t("nodes.comment")}
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            placeholder={t("common.optional")}
-          />
-          <CheckField
-            label={t("nodes.neverExpire")}
-            hint={t("nodes.neverExpireHint")}
-            checked={neverExpire}
-            onChange={setNeverExpire}
-          />
+          {confirming ? (
+            <section className="rounded-lg bg-paper-2 p-5 text-sm leading-relaxed">
+              <h3 className="text-xl font-semibold">{name.trim()}</h3>
+              <p className="mt-2 text-xs text-stone">{platformLabel(os, arch)}</p>
+              <p className="mt-1 text-ink-soft">
+                {neverExpire ? t("nodes.neverExpires") : t("nodes.confirmTtl")}
+              </p>
+            </section>
+          ) : (
+            <>
+              <TextField
+                label={t("nodes.name")}
+                required
+                autoFocus
+                value={name}
+                error={showNameError ?? undefined}
+                onBlur={() => setAttempted(true)}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="home-nas"
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <SelectField
+                  label={t("nodes.os")}
+                  value={os}
+                  onValueChange={(v) => setOs(v as Platform)}
+                  options={PLATFORMS.map((p) => ({ value: p.id, label: p.label }))}
+                />
+                <SelectField
+                  label={t("nodes.arch")}
+                  value={arch}
+                  onValueChange={(v) => setArch(v as Arch)}
+                  options={ARCHS.map((p) => ({ value: p.id, label: p.label }))}
+                />
+              </div>
+              <TextAreaField
+                label={t("nodes.comment")}
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder={t("common.optional")}
+              />
+              <CheckField
+                label={t("nodes.neverExpire")}
+                hint={t("nodes.neverExpireHint")}
+                checked={neverExpire}
+                onChange={setNeverExpire}
+              />
+            </>
+          )}
         </SheetBody>
         <SheetFooter className="flex items-center justify-between gap-3">
           <p className="text-xs text-stone" aria-live="polite">
-            {name.trim()
-              ? neverExpire
-                ? t("nodes.hintNamedNever")
-                : t("nodes.hintNamedTtl")
-              : t("nodes.hintEmpty")}
+            {confirming
+              ? t("nodes.confirmHint")
+              : name.trim()
+                ? neverExpire
+                  ? t("nodes.hintNamedNever")
+                  : t("nodes.hintNamedTtl")
+                : t("nodes.hintEmpty")}
           </p>
           <div className="flex shrink-0 gap-2">
             <SheetClose asChild>
@@ -601,8 +629,17 @@ function CreateNodeForm({ onIssued }: { onIssued: (v: Issued) => void }) {
                 {t("common.cancel")}
               </Button>
             </SheetClose>
-            <Button type="submit" disabled={!name.trim() || create.isPending}>
-              {create.isPending ? t("nodes.issuing") : t("nodes.issue")}
+            {confirming ? (
+              <Button type="button" variant="outline" onClick={() => setConfirming(false)}>
+                {t("nodes.back")}
+              </Button>
+            ) : null}
+            <Button type="submit" disabled={Boolean(nameError) || create.isPending}>
+              {create.isPending
+                ? t("nodes.issuing")
+                : confirming
+                  ? t("nodes.issue")
+                  : t("nodes.next")}
             </Button>
           </div>
         </SheetFooter>
@@ -637,7 +674,7 @@ function EditNodeForm({ node, onDone }: { node: Node; onDone: () => void }) {
         className="flex min-h-0 flex-1 flex-col"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!name.trim() || save.isPending) return;
+          if (!name.trim() || !validNodeName(name) || save.isPending) return;
           save.mutate();
         }}
       >
@@ -680,6 +717,13 @@ function EditNodeForm({ node, onDone }: { node: Node; onDone: () => void }) {
             required
             autoFocus
             value={name}
+            error={
+              !name.trim()
+                ? t("nodes.needName")
+                : validNodeName(name)
+                  ? undefined
+                  : t("validate.nodeName")
+            }
             onChange={(e) => setName(e.target.value)}
           />
           <div className="grid gap-3 sm:grid-cols-2">
@@ -716,7 +760,7 @@ function EditNodeForm({ node, onDone }: { node: Node; onDone: () => void }) {
               {t("common.cancel")}
             </Button>
           </SheetClose>
-          <Button type="submit" disabled={!name.trim() || save.isPending}>
+          <Button type="submit" disabled={!name.trim() || !validNodeName(name) || save.isPending}>
             {save.isPending ? t("common.saving") : t("common.save")}
           </Button>
         </SheetFooter>
@@ -724,5 +768,3 @@ function EditNodeForm({ node, onDone }: { node: Node; onDone: () => void }) {
     </>
   );
 }
-
-

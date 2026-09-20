@@ -1,5 +1,6 @@
 import { t } from "../i18n/index.ts";
 import type { Mapping, MappingMode, Proto } from "./types.ts";
+import { validCidrs, validHost } from "./validate.ts";
 
 export function accessOptions(): { mode: MappingMode; label: string; description: string }[] {
   return [
@@ -37,13 +38,24 @@ export type ServiceInput = {
   allowCidrs: string;
 };
 
-export function validateService(input: ServiceInput): string | null {
-  if (!input.name.trim()) return t("validate.name");
-  if (!input.nodeId) return t("validate.node");
-  if (!input.localHost.trim()) return t("validate.host");
-  if (!validPort(input.localPort)) return t("validate.localPort");
-  if (input.mode !== "visitor" && !validPort(input.entryPort)) return t("validate.entryPort");
-  if (input.mode === "visitor" && input.entryPort !== null) return t("validate.visitorPort");
+export type ServiceField =
+  "name" | "nodeId" | "localHost" | "localPort" | "entryPort" | "allowCidrs" | "advanced";
+
+export type ServiceErrors = Partial<Record<ServiceField, string>>;
+
+export function serviceErrors(input: ServiceInput): ServiceErrors {
+  const errors: ServiceErrors = {};
+  if (!input.name.trim()) errors.name = t("validate.name");
+  if (!input.nodeId) errors.nodeId = t("validate.node");
+  const host = input.localHost.trim();
+  if (!host) errors.localHost = t("validate.host");
+  else if (!validHost(host)) errors.localHost = t("validate.hostFormat");
+  if (!validPort(input.localPort)) errors.localPort = t("validate.localPort");
+  if (input.mode !== "visitor" && !validPort(input.entryPort))
+    errors.entryPort = t("validate.entryPort");
+  if (input.mode === "visitor" && input.entryPort !== null)
+    errors.entryPort = t("validate.visitorPort");
+  if (!validCidrs(input.allowCidrs)) errors.allowCidrs = t("validate.cidr");
   if (
     ![
       input.maxConns,
@@ -53,8 +65,22 @@ export function validateService(input: ServiceInput): string | null {
       input.rateKbps,
     ].every((n) => Number.isSafeInteger(n) && n >= 0)
   )
-    return t("validate.advanced");
-  return null;
+    errors.advanced = t("validate.advanced");
+  return errors;
+}
+
+export function validateService(input: ServiceInput): string | null {
+  const errors = serviceErrors(input);
+  return (
+    errors.name ??
+    errors.nodeId ??
+    errors.localHost ??
+    errors.localPort ??
+    errors.entryPort ??
+    errors.allowCidrs ??
+    errors.advanced ??
+    null
+  );
 }
 
 function validPort(value: number | null) {
@@ -82,12 +108,16 @@ export function serviceState(m: Mapping): ServiceState {
   if (m.nodeStatus !== "online" || m.pushState === "pending_offline")
     return {
       kind: "attention",
-      label: t(m.nodeStatus === "revoked" ? "serviceState.revoked.label" : "serviceState.offline.label"),
+      label: t(
+        m.nodeStatus === "revoked" ? "serviceState.revoked.label" : "serviceState.offline.label",
+      ),
       detail: t(
         m.nodeStatus === "revoked" ? "serviceState.revoked.detail" : "serviceState.offline.detail",
         { node: m.nodeName },
       ),
-      next: t(m.nodeStatus === "revoked" ? "serviceState.revoked.next" : "serviceState.offline.next"),
+      next: t(
+        m.nodeStatus === "revoked" ? "serviceState.revoked.next" : "serviceState.offline.next",
+      ),
       tone: "error",
     };
   if (m.listenError || m.listenState === "error" || m.pushState === "error")

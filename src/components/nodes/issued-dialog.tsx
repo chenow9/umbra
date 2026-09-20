@@ -45,7 +45,7 @@ export function IssuedDialog({ issued, onClose }: { issued: Issued | null; onClo
         <DialogHeader>
           <DialogTitle>{issued?.name ? issued.name : t("nodes.issuedTitle")}</DialogTitle>
           <DialogDescription>
-            {t("nodes.issuedBody")}
+            {t("nodes.issuedInList")} {t("nodes.issuedBody")}
             {issued?.listen?.startsWith("127.0.0.1") ? t("nodes.issuedLoopback") : ""}
             {issued?.note ? ` ${issued.note}` : ""}
             {issued?.neverExpire ? t("nodes.issuedNever") : ""}
@@ -100,7 +100,11 @@ function IssuedBody({ issued, onClose }: { issued: Issued; onClose: () => void }
   return (
     <>
       <div role="status" className="mb-3 rounded-lg border border-line bg-paper-2 p-4">
-        <p className="text-sm font-medium">{online ? t("nodes.onlineReady") : t("nodes.waitingOnline")}</p>
+        <p className="text-sm font-medium">{t("nodes.issuedInList")}</p>
+        <p className="mt-1 text-xs text-stone">{t("nodes.issuedBody")}</p>
+        <p className="mt-3 text-sm font-medium">
+          {online ? t("nodes.onlineReady") : t("nodes.waitingOnline")}
+        </p>
         <p className="mt-1 text-xs text-stone">
           {online ? t("nodes.onlineReadyHint") : t("nodes.waitingOnlineHint")}
         </p>

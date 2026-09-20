@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- 控制台：服务列表展示访问方式标记，可用访问方式筛选，空状态点名凭证访问 / 临时放行 / 公开访问
+- 控制台：凭证访问的关闭公网业务端口改为中性文案，不再与“需处理”并列成故障
+- 控制台：登记节点在签发前需确认；取消不会写入节点；成功页说明节点已在列表中，并保留一次性凭证提示
+- 控制台与 API：节点名称、目标主机和 CIDR 在提交前校验，无效值无法保存
+- Console: service list shows access-mode badges and an access-mode filter; empty states name ticket access, temporary allow, and public access
+- Console: a closed public business port in ticket access is described as intended, not as a fault
+- Console: enrolling a node requires confirmation before issue; cancel does not create the node; the success surface states the node is already in the list and keeps the one-time credential warning
+- Console and API: node names, target hosts, and CIDRs are validated before save
+
 - 节点凭证隐藏改为可选：入口新增 `--hide-node-token` / `UMBRA_HIDE_NODE_TOKEN`，默认关闭。开启后保留文件或环境变量传递方式；默认安装命令与本地启动使用 `--token`。修改后需重新安装已有节点才能应用。
 - Node credential hiding is now opt-in via `umbrad --hide-node-token` / `UMBRA_HIDE_NODE_TOKEN` (default: false). Enabled installations use files or environment variables; default installation commands and local launches use `--token`. Reinstall existing nodes to apply the change.
 

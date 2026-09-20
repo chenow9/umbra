@@ -7,6 +7,7 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
       className={cn(
         "flex h-11 w-full rounded-md bg-paper px-3 text-sm text-ink shadow-border",
         "placeholder:text-stone focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine/35",
+        "aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-rose/40",
         "disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}

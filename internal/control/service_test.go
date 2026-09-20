@@ -138,6 +138,42 @@ func TestDisabledProbeDoesNotDial(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsInvalidHostNameAndCidr(t *testing.T) {
+	c, srv, _ := newTestConsole(t)
+	c.nodes["node"] = &nodeRec{ID: "node", Name: "QA", Enabled: true}
+	payload := map[string]any{
+		"nodeId": "node", "name": "private", "proto": "tcp", "mode": "visitor",
+		"localHost": "not_a_host!!!", "localPort": 22,
+	}
+	res := doJSON(t, srv, "POST", "/v1/mappings", payload, nil)
+	if res.StatusCode != 400 {
+		t.Fatalf("bad host %d %s", res.StatusCode, readBody(t, res))
+	}
+	payload["localHost"] = "127.0.0.1"
+	payload["allowCidrs"] = "not-a-cidr"
+	res = doJSON(t, srv, "POST", "/v1/mappings", payload, nil)
+	if res.StatusCode != 400 {
+		t.Fatalf("bad cidr %d %s", res.StatusCode, readBody(t, res))
+	}
+	payload["allowCidrs"] = "10.0.0.0/8"
+	res = doJSON(t, srv, "POST", "/v1/mappings", payload, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("valid mapping %d %s", res.StatusCode, readBody(t, res))
+	}
+}
+
+func TestCreateNodeRejectsInvalidName(t *testing.T) {
+	_, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "!!! bad/name?"}, nil)
+	if res.StatusCode != 400 {
+		t.Fatalf("bad name %d %s", res.StatusCode, readBody(t, res))
+	}
+	res = doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "home-nas"}, nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("valid name %d %s", res.StatusCode, readBody(t, res))
+	}
+}
+
 func TestCreateServiceReturnsFullViewAndRejectsRevokedNode(t *testing.T) {
 	c, srv, _ := newTestConsole(t)
 	c.nodes["node"] = &nodeRec{ID: "node", Name: "QA", Enabled: true}

@@ -31,8 +31,11 @@ export function ServiceList({
               : state.kind === "disabled"
                 ? t("services.view")
                 : t("services.connect");
-        const port =
-          m.mode === "visitor" ? t("services.publicClosed") : (m.entryPort ?? t("services.publicNone"));
+        const portLine =
+          m.mode === "visitor"
+            ? t("services.visitorAccess")
+            : t("services.publicPort", { port: m.entryPort ?? t("services.publicNone") });
+        const modeLabel = t(`mode.${m.mode}.label`);
         return (
           <li
             key={m.id}
@@ -42,16 +45,17 @@ export function ServiceList({
               className="service-directory-select"
               onClick={() => onSelect(m.id)}
               aria-pressed={selectedId === m.id}
-              aria-label={`${m.name} · ${m.nodeName} · ${action}`}
+              aria-label={`${m.name} · ${modeLabel} · ${m.nodeName} · ${action}`}
             >
               <span className="service-directory-name">
                 <strong>{m.name}</strong>
+                <span className="service-mode-badge">{modeLabel}</span>
                 <small>
                   {m.nodeName} · {m.proto.toUpperCase()}
                 </small>
               </span>
               <span className="service-directory-target">
-                <code>{t("services.publicPort", { port })}</code>
+                <code>{portLine}</code>
                 <code title={targetAddress(m.localHost, m.localPort)}>
                   {t("services.target", { addr: targetAddress(m.localHost, m.localPort) })}
                 </code>

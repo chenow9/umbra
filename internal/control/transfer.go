@@ -441,7 +441,7 @@ func validateBundle(b *ConfigBundle) error {
 			return fmt.Errorf("节点标识重复")
 		}
 		nodes[n.ID] = struct{}{}
-		if err := checkNameComment(n.Name, n.Comment); err != nil {
+		if err := checkNodeIdentity(n.Name, n.Comment); err != nil {
 			return err
 		}
 	}
@@ -789,7 +789,7 @@ func (c *Console) buildPlanLocked(bundle ConfigBundle, bindings []importBinding)
 		}
 		switch pn.action {
 		case "create":
-			if err := checkNameComment(pn.name, pn.comment); err != nil {
+			if err := checkNodeIdentity(pn.name, pn.comment); err != nil {
 				pn.view.Error = true
 				pn.view.Reason = err.Error()
 				plan.canApply = false
@@ -1129,7 +1129,7 @@ func (c *Console) restoreConfigLocked(s configSnap) {
 
 func (c *Console) mintNodeLocked(name, comment, os, arch string, neverExpire bool) (*nodeRec, string, error) {
 	name = strings.TrimSpace(name)
-	if err := checkNameComment(name, comment); err != nil {
+	if err := checkNodeIdentity(name, comment); err != nil {
 		return nil, "", err
 	}
 	os, arch = nodePlatform(os, arch)

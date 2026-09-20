@@ -57,6 +57,7 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
   const [q, setQ] = useState("");
   const [view, setView] = useState("all");
   const [proto, setProto] = useState("all");
+  const [mode, setMode] = useState("all");
   const [page, setPage] = useState(1);
   const [editor, setEditor] = useState<Editor | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Mapping | null>(null);
@@ -71,6 +72,7 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
       (!search.node || m.nodeId === search.node) &&
       serviceMatches(m, q) &&
       (proto === "all" || m.proto === proto) &&
+      (mode === "all" || m.mode === mode) &&
       (view === "all" || serviceState(m).kind === view),
   );
   rows.sort(
@@ -82,7 +84,7 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
   const pageData = pageOf(rows, page, PAGE_SIZE);
   useEffect(() => {
     setPage(1);
-  }, [q, view, proto, search.node]);
+  }, [q, view, proto, mode, search.node]);
   useEffect(() => {
     if (search.create && hasNode && !nodes.isPending) {
       const target = nodes.data?.find((node) => node.id === nodeId);
@@ -133,7 +135,7 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
   );
   const scopedNode = nodes.data?.find((node) => node.id === search.node);
   const affected = all.filter((m) => m.nodeId === search.node && m.enabled).length;
-  const filterCount = Number(view !== "all") + Number(proto !== "all");
+  const filterCount = Number(view !== "all") + Number(proto !== "all") + Number(mode !== "all");
   const statusOptions = [
     { value: "all", label: t("services.allStates") },
     { value: "attention", label: t("services.attention") },
@@ -144,6 +146,7 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
     setQ("");
     setView("all");
     setProto("all");
+    setMode("all");
     void navigate({ search: { node: nodeId, service: search.service } });
   };
   const loading = nodes.isPending || mappings.isPending;
@@ -280,7 +283,9 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                   onClick={() => setFiltersOpen(!filtersOpen)}
                 >
                   <SlidersHorizontal className="size-4" />
-                  {filterCount ? t("services.filterCount", { n: filterCount }) : t("services.filter")}
+                  {filterCount
+                    ? t("services.filterCount", { n: filterCount })
+                    : t("services.filter")}
                 </Button>
               </div>
               {filtersOpen ? (
@@ -321,6 +326,20 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                       ]}
                     />
                   </div>
+                  <div>
+                    <span className="service-refine-label">{t("services.mode")}</span>
+                    <Select
+                      aria-label={t("services.mode")}
+                      value={mode}
+                      onValueChange={setMode}
+                      options={[
+                        { value: "all", label: t("services.allModes") },
+                        { value: "visitor", label: t("mode.visitor.label") },
+                        { value: "spa", label: t("mode.spa.label") },
+                        { value: "public", label: t("mode.public.label") },
+                      ]}
+                    />
+                  </div>
                 </div>
               ) : null}
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-stone">
@@ -349,6 +368,17 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                       onClick={() => setProto("all")}
                     >
                       {proto.toUpperCase()}
+                      <X className="size-3" />
+                    </Button>
+                  ) : null}
+                  {mode !== "all" ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      aria-label={t("services.clearMode")}
+                      onClick={() => setMode("all")}
+                    >
+                      {t(`mode.${mode}.label`)}
                       <X className="size-3" />
                     </Button>
                   ) : null}
@@ -383,7 +413,9 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                   </p>
                   <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs text-stone">
                     <span>
-                      {scopedNode.status === "revoked" ? t("services.pickValid") : t("services.checkNode")}
+                      {scopedNode.status === "revoked"
+                        ? t("services.pickValid")
+                        : t("services.checkNode")}
                     </span>
                     <Link
                       to="/nodes"

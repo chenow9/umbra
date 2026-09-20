@@ -628,7 +628,7 @@ html[data-theme="moye"] {
 }
 .service-refine-panel {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   padding: 16px;
   border: 1px solid var(--line);
@@ -724,6 +724,18 @@ html[data-theme="moye"] {
   color: var(--stone);
   margin-top: 4px;
   font-size: 11px;
+}
+.service-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: var(--paper-2);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 .service-directory-select code {
   font-size: 12px;
@@ -1071,7 +1083,7 @@ html[data-theme="moye"] {
   font-size: 11px;
 }
 .service-refine-panel.is-node-scoped {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .service-refine-panel.is-node-scoped > div:first-child {
   grid-column: auto;

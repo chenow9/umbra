@@ -15,12 +15,27 @@ export function Field({ label, children, id }: { label: string; children: ReactN
   );
 }
 
-export function TextField({ label, ...props }: { label: string } & ComponentProps<typeof Input>) {
+export function TextField({
+  label,
+  error,
+  ...props
+}: { label: string; error?: string } & ComponentProps<typeof Input>) {
   const generatedId = useId();
   const id = props.id ?? generatedId;
+  const errorId = `${id}-error`;
   return (
     <Field label={label} id={id}>
-      <Input {...props} id={id} />
+      <Input
+        {...props}
+        id={id}
+        aria-invalid={Boolean(error) || props["aria-invalid"]}
+        aria-describedby={error ? errorId : props["aria-describedby"]}
+      />
+      {error ? (
+        <p id={errorId} role="alert" className="text-xs text-rose">
+          {error}
+        </p>
+      ) : null}
     </Field>
   );
 }
