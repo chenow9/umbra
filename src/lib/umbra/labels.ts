@@ -126,17 +126,33 @@ export function auditActorLabel(actor: string) {
   return actor;
 }
 
-export function auditTargetLabel(item: { target: string; targetName?: string }) {
-  const name = item.targetName?.trim();
-  if (name) return name;
-  if (/^(nde|map|tkt)_/i.test(item.target)) return t("audit.unknownTarget");
+function looksLikeUmbraID(value: string) {
+  return /^(nde|map|tkt)_/i.test(value.trim());
+}
+
+export function humanAuditName(detail?: string) {
+  const text = detail?.trim() ?? "";
+  if (!text || looksLikeUmbraID(text) || text.includes("=")) return "";
+  if (/^(SPA |Hello)/i.test(text)) return "";
+  const fields = text.split(/\s+/);
+  const last = fields[fields.length - 1] ?? "";
+  if (fields.length >= 2 && last.includes("/") && !looksLikeUmbraID(fields[0])) {
+    return fields.slice(0, -1).join(" ");
+  }
+  return text;
+}
+
+export function auditTargetLabel(item: { target: string; targetName?: string; detail?: string }) {
+  for (const candidate of [item.targetName, humanAuditName(item.detail), item.target]) {
+    const value = candidate?.trim();
+    if (value && !looksLikeUmbraID(value)) return value;
+  }
   return item.target || "—";
 }
 
-export function auditTargetHint(item: { target: string; targetName?: string }) {
-  const name = item.targetName?.trim();
-  if (name && item.target && name !== item.target) return item.target;
-  if (/^(nde|map|tkt)_/i.test(item.target)) return item.target;
+export function auditTargetHint(item: { target: string; targetName?: string; detail?: string }) {
+  const label = auditTargetLabel(item);
+  if (item.target && item.target !== label) return item.target;
   return undefined;
 }
 

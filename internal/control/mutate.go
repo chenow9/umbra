@@ -229,9 +229,9 @@ func (c *Console) patchMapping(w http.ResponseWriter, r *http.Request) {
 	next := m.Spec
 	if b.Name != nil {
 		name := strings.TrimSpace(*b.Name)
-		if name == "" {
+		if err := validNodeName(name); err != nil {
 			c.mu.Unlock()
-			writeErr(w, 400, "需要名称")
+			writeErr(w, 400, err.Error())
 			return
 		}
 		next.Name = name

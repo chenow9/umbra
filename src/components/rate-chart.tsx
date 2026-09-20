@@ -4,7 +4,9 @@ import { formatBps, formatBytes } from "@/lib/umbra/format";
 import { seriesToRate, trafficRangeMs, type TrafficRange } from "@/lib/umbra/live";
 import type { TrafficPoint } from "@/lib/umbra/types";
 import { useTheme } from "@/components/app-providers";
+import { EmptyState } from "@/components/empty-state";
 import { dateLocale, useI18n } from "@/lib/i18n";
+import { Activity } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as echarts from "echarts/core";
 import { LineChart } from "echarts/charts";
@@ -259,17 +261,16 @@ export function RateChart({
           aria-label={kind === "rate" ? t("traffic.rate") : t("chart.bytesAria")}
         />
         {!showChart || loading || error ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-sm text-stone">
-            <span>
-              {error
-                ? t("traffic.trafficFail")
-                : loading
-                  ? t("chart.loading")
-                  : waitingRate && hasSignal
-                    ? t("chart.waitSample")
-                    : t("chart.empty")}
-            </span>
-            {!loading && !error ? emptyAction : null}
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center text-sm text-stone">
+            {error ? (
+              t("traffic.trafficFail")
+            ) : loading ? (
+              t("chart.loading")
+            ) : waitingRate && hasSignal ? (
+              t("chart.waitSample")
+            ) : (
+              <EmptyState icon={Activity} title={t("chart.empty")} action={emptyAction} compact />
+            )}
           </div>
         ) : null}
       </div>

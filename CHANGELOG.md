@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- 控制台：流量无数据使用与其它页相同的空状态（图标 +「暂无流量」）
+- 控制台：审计对象列优先显示节点/服务名称，原始 id 放到提示
+- 控制台：快速前往可搜索并打开「全部服务」
+- 控制台与 API：服务名称与节点名称使用同一套字符规则，`!!!bad` 不能保存
+- Console: traffic empty state uses the shared icon + “no traffic yet” pattern
+- Console: audit object column prefers display names; raw ids stay in the tooltip
+- Console: Quick Go includes All services
+- Console and API: service names use the same character rules as node names
+
 - 控制台：登录后进入轻量总览（节点在线、服务数、需处理、近期审计）；徽标回到总览
 - 控制台：顶栏负责一级分区；观测 / 设置 / 服务详情使用同一套页内二级导航；抽屉关闭更明显
 - 控制台：审计动作合并同义说法并用人话；列表优先显示名称，标识放在提示里；操作者不再写 owner；快速前往与主导航用词对齐
