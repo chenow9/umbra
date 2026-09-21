@@ -2,46 +2,51 @@
 
 ## Unreleased
 
-- 控制台：流量无数据使用与其它页相同的空状态（图标 +「暂无流量」）
-- 控制台：审计对象列优先显示节点/服务名称，原始 id 放到提示
-- 控制台：快速前往可搜索并打开「全部服务」
-- 控制台与 API：服务名称与节点名称使用同一套字符规则，`!!!bad` 不能保存
-- Console: traffic empty state uses the shared icon + “no traffic yet” pattern
-- Console: audit object column prefers display names; raw ids stay in the tooltip
-- Console: Quick Go includes All services
-- Console and API: service names use the same character rules as node names
+## 0.3.2 — 2026-09-21
 
-- 控制台：登录后进入轻量总览（节点在线、服务数、需处理、近期审计）；徽标回到总览
-- 控制台：顶栏负责一级分区；观测 / 设置 / 服务详情使用同一套页内二级导航；抽屉关闭更明显
-- 控制台：审计动作合并同义说法并用人话；列表优先显示名称，标识放在提示里；操作者不再写 owner；快速前往与主导航用词对齐
-- 控制台：浅色与深色主色统一为同一套 lime 主按钮 / 导航选中态
-- 控制台：节点离线时，探测 / 签发等禁用操作有原因说明
-- Console: after sign-in, a light overview shows node/service health, attention, and recent audit; the logo returns there
-- Console: masthead is top-level location; Observe, Settings, and service detail share one in-page sub-nav
-- Console: audit actions use one human phrase each; names over raw ids; actor is administrator/gateway; Quick Go matches main nav
-- Console: light and dark share one lime primary for buttons and the active nav pill
-- Console: disabled probe/issue actions state why when the node is offline
+控制台体验：登录后进入总览，设置、空状态、访问方式与名称校验一并收齐；节点凭证隐藏改为可选。网关协议与安全模型未改。
 
-- 控制台：导航「系统」改为「设置」（`/settings`，`/deploy` 重定向）；2FA 文案与页面实际能力一致；修改密码展示至少 8 位规则
-- 控制台：节点、服务、流量、审计空状态统一为图标 + 一句说明 + 可选操作；流量图无数据时居中「暂无流量」
-- 控制台：审计加载中不再闪「没有匹配的记录」；空库与筛选无结果分开；流量/审计筛选空状态可一键清除
-- 控制台：改为公开访问需二次确认，取消则保持原访问方式
-- Console: nav “System” is now “Settings” (`/settings`, `/deploy` redirects); 2FA copy matches what the page can do; password change shows the 8-character rule
-- Console: nodes, services, traffic, and audit share one empty-state pattern; empty charts show a centered “No traffic yet”
-- Console: audit loading no longer flashes “no matching records”; empty database vs filtered no-match are distinct; traffic/audit filter empties can be cleared in one click
-- Console: switching to public access requires a second confirm; cancel keeps the previous mode
+- 控制台：登录后进入轻量总览（节点在线/总数、服务数、需处理、近期审计）；徽标回到总览，不再进入空的节点列表
+- 控制台：导航「系统」改为「设置」（`/settings`，`/deploy` 重定向）；顶栏负责一级分区，观测 / 设置 / 服务详情共用同一套页内二级导航
+- 控制台：服务列表展示访问方式标记并可用其筛选；空状态点名凭证访问 / 临时放行 / 公开访问；凭证访问关闭公网业务端口改为中性文案，不再与「需处理」并列成故障
+- 控制台：节点、服务、流量、审计空状态统一为图标 + 一句说明 + 可选操作；流量无数据时用同一套空状态（「暂无流量」）而不是裸坐标轴；审计加载中不再闪「没有匹配的记录」；空库与筛选无结果分开，有筛选时可一键清除
+- 控制台：登记节点在签发前需确认，取消不会写入节点；改为公开访问需二次确认，取消则保持原访问方式
+- 控制台：审计动作合并同义说法并用人话；对象列优先显示节点/服务名称，原始 id 放到提示；操作者不再写 owner；删除后仍能从详情恢复显示名
+- 控制台：快速前往与主导航用词对齐，可搜索并打开「全部服务」；浅色与深色共用同一套 lime 主按钮 / 导航选中态；节点离线时探测 / 签发等禁用操作说明原因
+- 控制台与 API：节点名称、目标主机、CIDR 以及服务名称（与节点同一字符规则）在提交前校验，`!!!bad` 等无效值无法保存
+- 节点凭证隐藏改为可选：入口新增 `--hide-node-token` / `UMBRA_HIDE_NODE_TOKEN`，默认关闭。开启后走文件或环境变量；默认安装命令与本地启动仍使用 `--token`。修改后需重新安装已有节点才能应用
+- 中英文 README 首页图改为对应语言版本
 
-- 控制台：服务列表展示访问方式标记，可用访问方式筛选，空状态点名凭证访问 / 临时放行 / 公开访问
-- 控制台：凭证访问的关闭公网业务端口改为中性文案，不再与“需处理”并列成故障
-- 控制台：登记节点在签发前需确认；取消不会写入节点；成功页说明节点已在列表中，并保留一次性凭证提示
-- 控制台与 API：节点名称、目标主机和 CIDR 在提交前校验，无效值无法保存
-- Console: service list shows access-mode badges and an access-mode filter; empty states name ticket access, temporary allow, and public access
-- Console: a closed public business port in ticket access is described as intended, not as a fault
-- Console: enrolling a node requires confirmation before issue; cancel does not create the node; the success surface states the node is already in the list and keeps the one-time credential warning
-- Console and API: node names, target hosts, and CIDRs are validated before save
+Console UX: sign-in lands on a light overview; Settings, empty states, access modes, and name validation are tightened; node credential hiding is opt-in. The gateway protocol and security model are unchanged.
 
-- 节点凭证隐藏改为可选：入口新增 `--hide-node-token` / `UMBRA_HIDE_NODE_TOKEN`，默认关闭。开启后保留文件或环境变量传递方式；默认安装命令与本地启动使用 `--token`。修改后需重新安装已有节点才能应用。
-- Node credential hiding is now opt-in via `umbrad --hide-node-token` / `UMBRA_HIDE_NODE_TOKEN` (default: false). Enabled installations use files or environment variables; default installation commands and local launches use `--token`. Reinstall existing nodes to apply the change.
+- Console: after sign-in, a light overview shows node online/total, services, attention items, and recent audit; the logo returns there instead of an empty node list
+- Console: nav “System” is now “Settings” (`/settings`, `/deploy` redirects); the masthead is top-level location, and Observe, Settings, and service detail share one in-page sub-nav
+- Console: service list shows access-mode badges and an access-mode filter; empty states name ticket access, temporary allow, and public access; a closed public business port in ticket access is described as intended, not as a fault
+- Console: nodes, services, traffic, and audit share one empty-state pattern; traffic with no samples uses the same icon + “No traffic yet” overlay instead of bare axes; audit loading no longer flashes “no matching records”; empty database vs filtered no-match are distinct, and active filters can be cleared in one click
+- Console: enrolling a node requires confirmation before issue; cancel does not create the node; switching to public access requires a second confirm, and cancel keeps the previous mode
+- Console: audit actions use one human phrase each; the object column prefers node/service display names with raw ids in the tooltip; actor is administrator/gateway; a name can still be recovered from detail after delete
+- Console: Quick Go matches main nav wording and can open All services; light and dark share one lime primary for buttons and the active nav pill; disabled probe/issue actions state why when the node is offline
+- Console and API: node names, target hosts, CIDRs, and service names (same character rules as nodes) are validated before save; values such as `!!!bad` are rejected
+- Node credential hiding is now opt-in via `umbrad --hide-node-token` / `UMBRA_HIDE_NODE_TOKEN` (default: false). Enabled installations use files or environment variables; default installation commands and local launches use `--token`. Reinstall existing nodes to apply the change
+- Localized README hero images for Chinese and English
+
+### 升级说明 / Upgrade notes
+
+升级前备份完整 `tls-dir` 并继续使用原目录。控制数据与流量历史 schema 不变。网关协议与安全模型未改。
+
+0.3.1 起节点凭证默认不出现在命令行；0.3.2 将隐藏改为可选且默认关闭，控制台生成的安装命令默认再次使用 `--token`。若要继续隐藏凭证，在入口设置 `--hide-node-token` 或 `UMBRA_HIDE_NODE_TOKEN=true` 后重新生成安装命令并重装节点。已按 0.3.1 文件 / 环境变量方式部署的节点在重新安装前不受影响。
+
+Back up the complete `tls-dir` and reuse it when upgrading. Control and traffic schemas are unchanged. The gateway protocol and security model are unchanged.
+
+0.3.1 kept node credentials off the command line by default; 0.3.2 makes hiding opt-in and off by default, so console-generated install commands use `--token` again. To keep credentials hidden, set `--hide-node-token` or `UMBRA_HIDE_NODE_TOKEN=true` on the gateway, regenerate the install command, and reinstall the node. Nodes already installed with 0.3.1 file / environment-variable credentials are unchanged until reinstalled.
+
+### 验证说明 / Validation notes
+
+GitHub `main` 在合入 #3–#6 后最新一次 CI（go + binaries）通过。本地 `go vet ./...`、`go test ./internal/control/` 与前端 113 项单测通过。云主机针对流量空状态、审计对象名称、快速前往「全部服务」、服务名称规则（F1–F4）的回归已通过。
+
+GitHub CI on `main` after merging #3–#6 passed (go + binaries). Local `go vet ./...`, `go test ./internal/control/`, and 113 frontend unit tests passed. Cloud-host regression of F1–F4 (traffic empty state, audit object names, Quick Go All services, service-name rules) passed.
+
+[完整改动 / Full diff](https://github.com/chenow9/umbra/compare/v0.3.1...v0.3.2)
 
 ## 0.3.1 — 2026-09-14
 
