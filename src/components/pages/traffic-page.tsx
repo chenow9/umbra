@@ -280,6 +280,13 @@ export function TrafficPage() {
             loading={!catalogReady || traffic.isPending}
             updating={traffic.isPlaceholderData}
             error={Boolean(problem)}
+            emptyAction={
+              !nodes.data?.length ? (
+                <Button asChild size="sm">
+                  <Link to="/nodes">{t("nodes.enroll")}</Link>
+                </Button>
+              ) : null
+            }
           />
         </section>
         {!mappingId && !invalid ? (

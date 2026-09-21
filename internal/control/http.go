@@ -1125,6 +1125,10 @@ func (c *Console) postMapping(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	if err := validNodeName(b.Name); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	id, err := newID("map")
 	if err != nil {
 		writeRandFail(w)
@@ -1493,7 +1497,27 @@ func (c *Console) postVisitor(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (c *Console) targetNameLocked(target string) string {
+func looksLikeUmbraID(s string) bool {
+	s = strings.TrimSpace(s)
+	return strings.HasPrefix(s, "nde_") || strings.HasPrefix(s, "map_") || strings.HasPrefix(s, "tkt_")
+}
+
+func humanAuditName(detail string) string {
+	s := strings.TrimSpace(detail)
+	if s == "" || looksLikeUmbraID(s) || strings.Contains(s, "=") {
+		return ""
+	}
+	if strings.HasPrefix(s, "SPA ") || strings.HasPrefix(s, "Hello") {
+		return ""
+	}
+	fields := strings.Fields(s)
+	if len(fields) >= 2 && strings.Contains(fields[len(fields)-1], "/") && !looksLikeUmbraID(fields[0]) {
+		return strings.Join(fields[:len(fields)-1], " ")
+	}
+	return s
+}
+
+func (c *Console) targetNameLocked(target, detail string) string {
 	if n := c.nodes[target]; n != nil {
 		return n.Name
 	}
@@ -1502,6 +1526,9 @@ func (c *Console) targetNameLocked(target string) string {
 			return m.Spec.Name + " · " + n.Name
 		}
 		return m.Spec.Name
+	}
+	if name := humanAuditName(detail); name != "" {
+		return name
 	}
 	return target
 }
@@ -1517,7 +1544,7 @@ func (c *Console) getAudit(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"id": a.ID, "ts": a.Ts.UTC().Format(time.RFC3339),
 			"actor": a.Actor, "action": a.Action, "target": a.Target, "detail": a.Detail,
-			"targetName": c.targetNameLocked(a.Target),
+			"targetName": c.targetNameLocked(a.Target, a.Detail),
 		})
 	}
 	out = filterAuditViews(out, q.Get("q"), q.Get("action"))

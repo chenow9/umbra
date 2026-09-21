@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Command } from "cmdk";
-import { ArrowUpRight, Plus, Search, Radio, Activity, Settings2 } from "lucide-react";
+import { ArrowUpRight, Plus, Search, Radio, Activity, Settings2, Layers } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useI18n } from "@/lib/i18n";
 import { listMappings, listNodes } from "@/lib/umbra/api";
@@ -53,6 +53,12 @@ export function QuickLauncher() {
       value: t("quick.addKeys"),
       label: t("quick.add"),
       icon: Plus,
+      to: "/mappings" as const,
+    },
+    {
+      value: t("quick.servicesKeys"),
+      label: t("nav.services"),
+      icon: Layers,
       to: "/mappings" as const,
     },
     {

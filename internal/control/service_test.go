@@ -160,6 +160,11 @@ func TestCreateRejectsInvalidHostNameAndCidr(t *testing.T) {
 	if res.StatusCode != 200 {
 		t.Fatalf("valid mapping %d %s", res.StatusCode, readBody(t, res))
 	}
+	payload["name"] = "!!!bad"
+	res = doJSON(t, srv, "POST", "/v1/mappings", payload, nil)
+	if res.StatusCode != 400 {
+		t.Fatalf("bad service name %d %s", res.StatusCode, readBody(t, res))
+	}
 }
 
 func TestCreateNodeRejectsInvalidName(t *testing.T) {
@@ -171,6 +176,42 @@ func TestCreateNodeRejectsInvalidName(t *testing.T) {
 	res = doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "home-nas"}, nil)
 	if res.StatusCode != 200 {
 		t.Fatalf("valid name %d %s", res.StatusCode, readBody(t, res))
+	}
+}
+
+func TestAuditObjectUsesDisplayNameAfterNodeDelete(t *testing.T) {
+	_, srv, _ := newTestConsole(t)
+	res := doJSON(t, srv, "POST", "/v1/nodes", map[string]string{"name": "home-nas", "os": "linux", "arch": "amd64"}, nil)
+	var n struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&n); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	res = doJSON(t, srv, "POST", "/v1/nodes/"+n.ID+"/delete", map[string]any{"force": true}, nil)
+	if res.StatusCode != 200 && res.StatusCode != 204 {
+		t.Fatalf("delete %d %s", res.StatusCode, readBody(t, res))
+	}
+	readBody(t, res)
+	res = doJSON(t, srv, "GET", "/v1/audit", nil, nil)
+	var rows []map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&rows); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	var deleteRow map[string]any
+	for _, row := range rows {
+		if row["action"] == "node.delete" {
+			deleteRow = row
+			break
+		}
+	}
+	if deleteRow == nil {
+		t.Fatalf("missing delete row %+v", rows)
+	}
+	if deleteRow["targetName"] != "home-nas" {
+		t.Fatalf("targetName %+v", deleteRow)
 	}
 }
 

@@ -468,6 +468,9 @@ func validateBundle(b *ConfigBundle) error {
 		if err := checkNameComment(s.Name, ""); err != nil {
 			return err
 		}
+		if err := validNodeName(s.Name); err != nil {
+			return err
+		}
 		if _, err := specFromExport(*s); err != nil {
 			return err
 		}

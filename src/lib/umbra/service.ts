@@ -1,6 +1,6 @@
 import { t } from "../i18n/index.ts";
 import type { Mapping, MappingMode, Proto } from "./types.ts";
-import { validCidrs, validHost } from "./validate.ts";
+import { validCidrs, validHost, validNodeName } from "./validate.ts";
 
 export function needsPublicConfirm(current: MappingMode | null | undefined, next: MappingMode) {
   return next === "public" && current !== "public";
@@ -50,6 +50,7 @@ export type ServiceErrors = Partial<Record<ServiceField, string>>;
 export function serviceErrors(input: ServiceInput): ServiceErrors {
   const errors: ServiceErrors = {};
   if (!input.name.trim()) errors.name = t("validate.name");
+  else if (!validNodeName(input.name)) errors.name = t("validate.nodeName");
   if (!input.nodeId) errors.nodeId = t("validate.node");
   const host = input.localHost.trim();
   if (!host) errors.localHost = t("validate.host");

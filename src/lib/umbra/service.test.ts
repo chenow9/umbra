@@ -104,6 +104,11 @@ test("public access needs a second confirm when leaving a closed mode", () => {
   assert.equal(needsPublicConfirm("visitor", "spa"), false);
 });
 
+test("service names follow the same character rules as node names", () => {
+  assert.ok(validateService({ ...input, name: "!!!bad" }));
+  assert.equal(validateService({ ...input, name: "工作室 SSH" }), null);
+});
+
 test("hostnames and CIDRs are validated like ports", () => {
   assert.ok(validateService({ ...input, localHost: "not_a_host!!!" }));
   assert.ok(validateService({ ...input, allowCidrs: "not-a-cidr" }));

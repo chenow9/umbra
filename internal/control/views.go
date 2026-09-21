@@ -317,7 +317,7 @@ func (c *Console) overviewView(live map[string]gateNode, stats map[string]gate.M
 		recent = append(recent, map[string]any{
 			"id": a.ID, "ts": a.Ts.UTC().Format(time.RFC3339),
 			"actor": a.Actor, "action": a.Action, "target": a.Target, "detail": a.Detail,
-			"targetName": c.targetNameLocked(a.Target),
+			"targetName": c.targetNameLocked(a.Target, a.Detail),
 		})
 	}
 	return map[string]any{

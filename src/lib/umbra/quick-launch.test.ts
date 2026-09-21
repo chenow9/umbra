@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { QUICK_LAUNCH_LIMIT, quickLaunchHits } from "./quick-launch.ts";
+import { QUICK_LAUNCH_LIMIT, queryWordsMatch, quickLaunchHits } from "./quick-launch.ts";
 import type { Mapping, Node } from "./types.ts";
 
 const mapping = (over: Partial<Mapping> & Pick<Mapping, "id" | "name">): Mapping =>
@@ -35,6 +35,11 @@ const node = (over: Partial<Node> & Pick<Node, "id" | "name">): Node =>
     bytesOut: 0,
     ...over,
   }) as Node;
+
+test("all-services wording matches the main nav label", () => {
+  assert.equal(queryWordsMatch("全部服务 all services mappings", "全部服务"), true);
+  assert.equal(queryWordsMatch("添加服务 新建 创建 add new", "全部服务"), false);
+});
 
 test("empty query hides inventory", () => {
   const hits = quickLaunchHits(
