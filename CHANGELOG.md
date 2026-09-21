@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- 控制台：登录后进入轻量总览（节点在线、服务数、需处理、近期审计）；徽标回到总览
+- 控制台：顶栏负责一级分区；观测 / 设置 / 服务详情使用同一套页内二级导航；抽屉关闭更明显
+- 控制台：审计动作合并同义说法并用人话；列表优先显示名称，标识放在提示里；操作者不再写 owner；快速前往与主导航用词对齐
+- 控制台：浅色与深色主色统一为同一套 lime 主按钮 / 导航选中态
+- 控制台：节点离线时，探测 / 签发等禁用操作有原因说明
+- Console: after sign-in, a light overview shows node/service health, attention, and recent audit; the logo returns there
+- Console: masthead is top-level location; Observe, Settings, and service detail share one in-page sub-nav
+- Console: audit actions use one human phrase each; names over raw ids; actor is administrator/gateway; Quick Go matches main nav
+- Console: light and dark share one lime primary for buttons and the active nav pill
+- Console: disabled probe/issue actions state why when the node is offline
+
 - 控制台：导航「系统」改为「设置」（`/settings`，`/deploy` 重定向）；2FA 文案与页面实际能力一致；修改密码展示至少 8 位规则
 - 控制台：节点、服务、流量、审计空状态统一为图标 + 一句说明 + 可选操作；流量图无数据时居中「暂无流量」
 - 控制台：审计加载中不再闪「没有匹配的记录」；空库与筛选无结果分开；流量/审计筛选空状态可一键清除

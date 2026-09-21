@@ -11,13 +11,9 @@ import {
 } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { UmbraLive } from "@/components/umbra-live";
-import {
-  applyTheme,
-  DEFAULT_THEME,
-  readStoredTheme,
-  type ThemeId,
-} from "@/lib/theme";
+import { applyTheme, DEFAULT_THEME, readStoredTheme, type ThemeId } from "@/lib/theme";
 import {
   I18nContext,
   persistLocalePreference,
@@ -72,7 +68,10 @@ export function AppProviders({ children }: { children: ReactNode }) {
     setLocaleState(resolved);
   }, []);
 
-  const t = useCallback((path: string, vars?: TranslateVars) => translate(path, vars, locale), [locale]);
+  const t = useCallback(
+    (path: string, vars?: TranslateVars) => translate(path, vars, locale),
+    [locale],
+  );
   const i18n = useMemo(
     () => ({ locale, preference, setPreference, t }),
     [locale, preference, setPreference, t],
@@ -82,15 +81,17 @@ export function AppProviders({ children }: { children: ReactNode }) {
     <QueryClientProvider client={client}>
       <I18nContext.Provider value={i18n}>
         <ThemeCtx.Provider value={{ theme, setTheme }}>
-          <UmbraLive>
-            {children}
-            <Toaster
-              position="bottom-right"
-              toastOptions={{
-                className: "font-sans !bg-card !text-ink !border-line shadow-border",
-              }}
-            />
-          </UmbraLive>
+          <TooltipProvider>
+            <UmbraLive>
+              {children}
+              <Toaster
+                position="bottom-right"
+                toastOptions={{
+                  className: "font-sans !bg-card !text-ink !border-line shadow-border",
+                }}
+              />
+            </UmbraLive>
+          </TooltipProvider>
         </ThemeCtx.Provider>
       </I18nContext.Provider>
     </QueryClientProvider>

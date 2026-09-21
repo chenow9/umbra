@@ -211,3 +211,12 @@ export function serviceMatches(m: Mapping, query: string) {
 export function serviceCanConnect(mapping: Mapping): boolean {
   return serviceState({ ...mapping, lastProbeError: undefined }).kind === "ready";
 }
+
+export function serviceGateReason(mapping: Mapping): string | undefined {
+  if (serviceCanConnect(mapping)) return undefined;
+  const state = serviceState(mapping);
+  if (mapping.nodeStatus !== "online") return t("connect.needOnline");
+  if (state.kind === "disabled") return t("connect.needEnabled");
+  if (state.kind === "pending") return t("connect.needReady");
+  return state.next;
+}

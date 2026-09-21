@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   needsPublicConfirm,
   serviceCanConnect,
+  serviceGateReason,
   serviceState,
   serviceSummary,
   serviceMatches,
@@ -28,6 +29,11 @@ const ready = {
   localPort: 22,
   entryPort: null,
 } as Mapping;
+test("gated connect actions explain node offline", () => {
+  assert.match(serviceGateReason({ ...ready, nodeStatus: "offline" }) ?? "", /节点离线/);
+  assert.equal(serviceGateReason(ready), undefined);
+});
+
 test("pending visitor configuration is not ready, even with an online node", () => {
   assert.equal(serviceState({ ...ready, pushState: "pending" }).kind, "pending");
   assert.equal(serviceState({ ...ready, nodeStatus: "offline" }).kind, "attention");

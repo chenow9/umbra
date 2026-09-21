@@ -1,5 +1,5 @@
 import { collateLocale, getLocale, t } from "../i18n/index.ts";
-import { modeHint, modeLabel, reachLabel } from "./labels.ts";
+import { canonicalAuditAction, modeHint, modeLabel, reachLabel } from "./labels.ts";
 import type { AuditItem, Mapping, Node, NodeStatus } from "./types.ts";
 
 export const PAGE_SIZE = 10;
@@ -89,7 +89,9 @@ export function filterNodes(rows: Node[], q: NodeQuery): Node[] {
     if (status && n.status !== status) return false;
     if (os && n.os !== os) return false;
     if (!needle) return true;
-    return `${n.name} ${n.comment} ${n.addr ?? ""} ${n.os} ${n.arch}`.toLowerCase().includes(needle);
+    return `${n.name} ${n.comment} ${n.addr ?? ""} ${n.os} ${n.arch}`
+      .toLowerCase()
+      .includes(needle);
   });
 }
 
@@ -105,7 +107,9 @@ export function filterMappings(rows: Mapping[], q: MappingFilter): Mapping[] {
     if (mode && m.mode !== mode) return false;
     if (reach && (m.reach ?? "") !== reach) return false;
     if (!needle) return true;
-    return `${m.name} ${m.nodeName} ${m.proto} ${m.mode} ${m.localHost} ${m.reach ?? ""}`.toLowerCase().includes(needle);
+    return `${m.name} ${m.nodeName} ${m.proto} ${m.mode} ${m.localHost} ${m.reach ?? ""}`
+      .toLowerCase()
+      .includes(needle);
   });
 }
 
@@ -113,9 +117,11 @@ export function filterAudit(rows: AuditItem[], q: AuditQuery): AuditItem[] {
   const needle = (q.q ?? "").trim().toLowerCase();
   const action = (q.action ?? "").trim();
   return rows.filter((a) => {
-    if (action && a.action !== action) return false;
+    if (action && canonicalAuditAction(a.action) !== canonicalAuditAction(action)) return false;
     if (!needle) return true;
-    return `${a.action} ${a.target} ${a.targetName ?? ""} ${a.detail} ${a.actor}`.toLowerCase().includes(needle);
+    return `${a.action} ${a.target} ${a.targetName ?? ""} ${a.detail} ${a.actor}`
+      .toLowerCase()
+      .includes(needle);
   });
 }
 
@@ -171,7 +177,16 @@ export function groupMappings(rows: Mapping[], q: MappingFilter = {}): MappingGr
 }
 
 const PROTO_ORDER = ["tcp", "udp"];
-const REACH_ORDER = ["open", "closed", "full", "visitor", "offline", "pending", "error", "disabled"];
+const REACH_ORDER = [
+  "open",
+  "closed",
+  "full",
+  "visitor",
+  "offline",
+  "pending",
+  "error",
+  "disabled",
+];
 
 function tally(rows: Mapping[], key: (m: Mapping) => string): Map<string, number> {
   const counts = new Map<string, number>();
@@ -211,9 +226,24 @@ export function nodeFacets(rows: Node[], q: Pick<NodeQuery, "q" | "status"> = {}
   return {
     status: [
       { value: "all", label: t("status.all"), count: statusCount() },
-      { value: "online", label: t("status.online"), count: statusCount("online"), status: "online" },
-      { value: "offline", label: t("status.offline"), count: statusCount("offline"), status: "offline" },
-      { value: "revoked", label: t("status.revoked"), count: statusCount("revoked"), status: "revoked" },
+      {
+        value: "online",
+        label: t("status.online"),
+        count: statusCount("online"),
+        status: "online",
+      },
+      {
+        value: "offline",
+        label: t("status.offline"),
+        count: statusCount("offline"),
+        status: "offline",
+      },
+      {
+        value: "revoked",
+        label: t("status.revoked"),
+        count: statusCount("revoked"),
+        status: "revoked",
+      },
     ],
   };
 }
@@ -240,9 +270,22 @@ export function mappingFacets(rows: Mapping[]): MappingFacets {
 
   return {
     nodes,
-    protos: orderedFacets(tally(rows, (m) => m.proto), PROTO_ORDER, { tcp: "TCP", udp: "UDP" }),
-    modes: orderedFacets(tally(rows, (m) => m.mode), MODE_ORDER, modeLabel, modeHint()),
-    reaches: orderedFacets(tally(rows, (m) => m.reach ?? ""), REACH_ORDER, reachLabel()),
+    protos: orderedFacets(
+      tally(rows, (m) => m.proto),
+      PROTO_ORDER,
+      { tcp: "TCP", udp: "UDP" },
+    ),
+    modes: orderedFacets(
+      tally(rows, (m) => m.mode),
+      MODE_ORDER,
+      modeLabel,
+      modeHint(),
+    ),
+    reaches: orderedFacets(
+      tally(rows, (m) => m.reach ?? ""),
+      REACH_ORDER,
+      reachLabel(),
+    ),
   };
 }
 
@@ -285,7 +328,10 @@ export function filterNodeOptions<T extends { label: string }>(nodes: T[], q: st
   return nodes.filter((n) => n.label.toLowerCase().includes(needle));
 }
 
-export function defaultGroupOpen(groups: MappingGroup[], focusNodeId?: string): Record<string, boolean> {
+export function defaultGroupOpen(
+  groups: MappingGroup[],
+  focusNodeId?: string,
+): Record<string, boolean> {
   const few = groups.length <= 4;
   const open: Record<string, boolean> = {};
   for (const g of groups) {

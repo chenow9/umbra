@@ -13,10 +13,11 @@ const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 try {
   await page.goto(base, { waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: "节点", exact: true, level: 1 }).waitFor();
-  assert.equal(new URL(page.url()).pathname, "/nodes");
+  await page.getByRole("heading", { name: "总览", exact: true, level: 1 }).waitFor();
+  assert.equal(new URL(page.url()).pathname, "/");
   assert.equal(new URL(page.url()).searchParams.has("node"), false);
   for (const [path, title] of [
+    ["/", "总览"],
     ["/nodes", "节点"],
     ["/mappings", "全部服务"],
     ["/traffic", "观测"],
