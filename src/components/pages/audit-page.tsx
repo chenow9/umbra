@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { ScrollText } from "lucide-react";
 import { ObservabilityNav } from "@/components/observability-nav";
 import { AppShell } from "@/components/app-shell";
+import { EmptyState } from "@/components/empty-state";
 import { SelectField } from "@/components/field";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Pager } from "@/components/ui/pager";
 import { useI18n } from "@/lib/i18n";
@@ -32,7 +35,13 @@ export function AuditPage() {
   });
   const pageData = audit.data ?? emptyPage<AuditItem>(page);
   const list = pageData.items;
-  const empty = !audit.isLoading && pageData.total === 0 && !q && action === "all";
+  const loaded = audit.isSuccess || Boolean(audit.data);
+  const empty = loaded && pageData.total === 0 && !q && action === "all";
+  const noMatch = loaded && pageData.total === 0 && Boolean(q || action !== "all");
+  const clearFilters = () => {
+    setQ("");
+    setAction("all");
+  };
   const labels = actionLabel();
   const actionOptions = [
     { value: "all", label: t("audit.all") },
@@ -51,10 +60,12 @@ export function AuditPage() {
   return (
     <AppShell title={t("audit.title")} description={t("audit.description")}>
       <ObservabilityNav active="audit" />
-      {empty ? (
-        <p className="rounded-xl bg-card px-4 py-10 text-center text-sm text-stone shadow-border">
-          {t("audit.empty")}
+      {audit.isPending ? (
+        <p role="status" className="py-10 text-sm text-stone">
+          {t("audit.loading")}
         </p>
+      ) : empty ? (
+        <EmptyState icon={ScrollText} title={t("audit.empty")} />
       ) : (
         <>
           <div className="mb-4 flex flex-wrap items-end gap-3">
@@ -73,10 +84,16 @@ export function AuditPage() {
               options={actionOptions}
             />
           </div>
-          {pageData.total === 0 ? (
-            <p className="rounded-xl bg-card px-4 py-10 text-center text-sm text-stone shadow-border">
-              {t("audit.none")}
-            </p>
+          {noMatch ? (
+            <EmptyState
+              icon={ScrollText}
+              title={t("audit.none")}
+              action={
+                <Button variant="outline" onClick={clearFilters}>
+                  {t("audit.clear")}
+                </Button>
+              }
+            />
           ) : (
             <>
               <div className="flex flex-col gap-2 md:hidden">

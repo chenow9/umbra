@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- 控制台：导航「系统」改为「设置」（`/settings`，`/deploy` 重定向）；2FA 文案与页面实际能力一致；修改密码展示至少 8 位规则
+- 控制台：节点、服务、流量、审计空状态统一为图标 + 一句说明 + 可选操作；流量图无数据时居中「暂无流量」
+- 控制台：审计加载中不再闪「没有匹配的记录」；空库与筛选无结果分开；流量/审计筛选空状态可一键清除
+- 控制台：改为公开访问需二次确认，取消则保持原访问方式
+- Console: nav “System” is now “Settings” (`/settings`, `/deploy` redirects); 2FA copy matches what the page can do; password change shows the 8-character rule
+- Console: nodes, services, traffic, and audit share one empty-state pattern; empty charts show a centered “No traffic yet”
+- Console: audit loading no longer flashes “no matching records”; empty database vs filtered no-match are distinct; traffic/audit filter empties can be cleared in one click
+- Console: switching to public access requires a second confirm; cancel keeps the previous mode
+
 - 控制台：服务列表展示访问方式标记，可用访问方式筛选，空状态点名凭证访问 / 临时放行 / 公开访问
 - 控制台：凭证访问的关闭公网业务端口改为中性文案，不再与“需处理”并列成故障
 - 控制台：登记节点在签发前需确认；取消不会写入节点；成功页说明节点已在列表中，并保留一次性凭证提示

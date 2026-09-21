@@ -11,10 +11,7 @@ export function SystemPage() {
   return (
     <AppShell title={t("system.title")} description={t("system.description")}>
       <div className="mx-auto flex max-w-3xl flex-col gap-6">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-ink">{t("system.heading")}</h2>
-          <p className="mt-2 text-sm leading-relaxed text-ink-soft">{t("system.intro")}</p>
-        </div>
+        <p className="text-sm leading-relaxed text-ink-soft">{t("system.intro")}</p>
         <AuthPanel />
         <LanguagePicker />
         <ThemePicker />

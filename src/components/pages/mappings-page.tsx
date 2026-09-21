@@ -2,7 +2,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, Plus, Search, SlidersHorizontal, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Layers, Plus, Search, SlidersHorizontal, X } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
@@ -238,31 +239,17 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
               {t("services.missingNode")}
             </p>
           ) : !nodes.data?.length && !all.length && !error ? (
-            <section className="rounded-xl border border-line bg-card p-6 sm:p-8">
-              <h3 className="text-xl font-semibold">{t("services.startTitle")}</h3>
-              <ol className="my-6 grid gap-5 text-sm sm:grid-cols-3">
-                <li>
-                  <span className="text-xs text-stone">01</span>
-                  <p className="mt-1 font-medium">{t("services.stepEnroll")}</p>
-                  <p className="mt-1 text-stone">{t("services.stepEnrollHint")}</p>
-                </li>
-                <li>
-                  <span className="text-xs text-stone">02</span>
-                  <p className="mt-1 font-medium">{t("services.stepAdd")}</p>
-                  <p className="mt-1 text-stone">{t("services.stepAddHint")}</p>
-                </li>
-                <li>
-                  <span className="text-xs text-stone">03</span>
-                  <p className="mt-1 font-medium">{t("services.stepConnect")}</p>
-                  <p className="mt-1 text-stone">{t("services.stepConnectHint")}</p>
-                </li>
-              </ol>
-              <Button asChild>
-                <Link to="/nodes">
-                  {t("services.firstNode")} <ArrowRight className="ml-2 size-4" />
-                </Link>
-              </Button>
-            </section>
+            <EmptyState
+              icon={Layers}
+              title={t("services.emptyNoNodes")}
+              action={
+                <Button asChild>
+                  <Link to="/nodes">
+                    {t("services.firstNode")} <ArrowRight className="ml-2 size-4" />
+                  </Link>
+                </Button>
+              }
+            />
           ) : !error || all.length ? (
             <>
               <div className="flex items-center gap-3">
@@ -428,27 +415,28 @@ export function MappingsPage({ nodeId }: { nodeId?: string } = {}) {
                 </div>
               ) : null}
               {!rows.length ? (
-                <section className="rounded-lg border border-dashed border-line px-5 py-10 text-center">
-                  <h3 className="font-medium">
-                    {q || filterCount
+                <EmptyState
+                  icon={Layers}
+                  title={
+                    q || filterCount
                       ? t("services.noneMatch")
                       : scopedNode?.status === "revoked"
-                        ? t("services.noneOnNode")
-                        : t("services.first")}
-                  </h3>
-                  <p className="mt-2 text-sm text-stone">
-                    {q || filterCount
-                      ? t("services.noneMatchHint")
-                      : scopedNode?.status === "revoked"
                         ? t("services.revokedHint")
-                        : t("services.firstHint")}
-                  </p>
-                  {q || filterCount ? (
-                    <Button variant="outline" className="mt-5" onClick={clearFilters}>
-                      {t("services.clear")}
-                    </Button>
-                  ) : null}
-                </section>
+                        : t("services.emptyFirst")
+                  }
+                  action={
+                    q || filterCount ? (
+                      <Button variant="outline" onClick={clearFilters}>
+                        {t("services.clear")}
+                      </Button>
+                    ) : hasNode && scopedNode?.status !== "revoked" ? (
+                      <Button onClick={() => setEditor({ mode: "create", nodeId: search.node })}>
+                        <Plus className="mr-1.5 size-4" />
+                        {t("services.add")}
+                      </Button>
+                    ) : null
+                  }
+                />
               ) : (
                 <ServiceList
                   mappings={pageData.items}

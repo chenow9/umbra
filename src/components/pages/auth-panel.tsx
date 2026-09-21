@@ -29,9 +29,15 @@ export function AuthPanel() {
   return (
     <section className="rounded-xl bg-card p-5 shadow-border">
       <p className="text-xs font-medium text-pine">{t("auth.kicker")}</p>
-      <h2 className="mt-1 text-base font-medium text-ink">{t("auth.title")}</h2>
+      <h2 className="mt-1 text-base font-medium text-ink">
+        {s.twoFactorRequired && s.twoFactorConfigured ? t("auth.title") : t("auth.passwordTitle")}
+      </h2>
       <p className="mt-1 text-sm leading-relaxed text-stone">
-        {s.twoFactorRequired ? t("auth.required") : t("auth.optional")}
+        {s.twoFactorRequired && s.twoFactorConfigured
+          ? t("auth.required")
+          : s.twoFactorRequired
+            ? t("auth.twoFactorPending")
+            : t("auth.passwordOnly")}
       </p>
       {s.twoFactorConfigured ? (
         <p className="mt-2 text-sm text-ink">
@@ -78,6 +84,7 @@ function PasswordForm({ needSecond, onDone }: { needSecond: boolean; onDone: () 
       className="flex flex-col gap-3"
       onSubmit={(e) => {
         e.preventDefault();
+        if (next.trim().length < 8 || mut.isPending) return;
         mut.mutate();
       }}
     >
@@ -101,7 +108,17 @@ function PasswordForm({ needSecond, onDone }: { needSecond: boolean; onDone: () 
           value={next}
           onChange={(e) => setNext(e.target.value)}
           required
+          aria-describedby="password-rule"
+          aria-invalid={next.length > 0 && next.length < 8}
         />
+        <p id="password-rule" className="text-xs text-stone">
+          {t("auth.passwordRule")}
+        </p>
+        {next.length > 0 && next.length < 8 ? (
+          <p role="alert" className="text-xs text-rose">
+            {t("login.errors.shortPassword")}
+          </p>
+        ) : null}
       </label>
       {needSecond ? (
         <label className="flex flex-col gap-1.5">
@@ -116,7 +133,7 @@ function PasswordForm({ needSecond, onDone }: { needSecond: boolean; onDone: () 
           />
         </label>
       ) : null}
-      <Button type="submit" variant="outline" disabled={mut.isPending}>
+      <Button type="submit" variant="outline" disabled={mut.isPending || next.trim().length < 8}>
         {mut.isPending ? t("common.loading") : t("auth.updatePassword")}
       </Button>
     </form>

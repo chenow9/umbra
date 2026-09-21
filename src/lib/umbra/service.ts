@@ -2,6 +2,10 @@ import { t } from "../i18n/index.ts";
 import type { Mapping, MappingMode, Proto } from "./types.ts";
 import { validCidrs, validHost } from "./validate.ts";
 
+export function needsPublicConfirm(current: MappingMode | null | undefined, next: MappingMode) {
+  return next === "public" && current !== "public";
+}
+
 export function accessOptions(): { mode: MappingMode; label: string; description: string }[] {
   return [
     {
