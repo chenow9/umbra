@@ -35,9 +35,9 @@ func (c *Console) patchNode(w http.ResponseWriter, r *http.Request) {
 	rehash := false
 	if b.Name != nil {
 		name := strings.TrimSpace(*b.Name)
-		if name == "" {
+		if err := validNodeName(name); err != nil {
 			c.mu.Unlock()
-			writeErr(w, 400, "需要名称")
+			writeErr(w, 400, err.Error())
 			return
 		}
 		a.Name = name
@@ -276,6 +276,11 @@ func (c *Console) patchMapping(w http.ResponseWriter, r *http.Request) {
 		next.AllowCidrs = *b.AllowCidrs
 	}
 	if err := validateMapping(next.Proto, next.Mode, next.EntryPort, next.LocalHost, next.LocalPort); err != nil {
+		c.mu.Unlock()
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if err := validateCidrs(next.AllowCidrs); err != nil {
 		c.mu.Unlock()
 		writeErr(w, 400, err.Error())
 		return

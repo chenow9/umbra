@@ -776,8 +776,8 @@ func (c *Console) postNode(w http.ResponseWriter, r *http.Request) {
 	if !jsonBody(w, r, &b) {
 		return
 	}
-	if strings.TrimSpace(b.Name) == "" {
-		writeErr(w, 400, "需要名称")
+	if err := checkNodeIdentity(b.Name, b.Comment); err != nil {
+		writeErr(w, 400, err.Error())
 		return
 	}
 	id, err := newID("nde")
@@ -1014,6 +1014,9 @@ func validateMapping(proto, mode string, entry *int, localHost string, localPort
 	if strings.TrimSpace(localHost) == "" {
 		return fmt.Errorf("需要目标地址")
 	}
+	if !validLocalHost(localHost) {
+		return fmt.Errorf("目标地址无效")
+	}
 	if localPort < 1 || localPort > 65535 {
 		return fmt.Errorf("目标端口无效")
 	}
@@ -1051,6 +1054,9 @@ func (c *Console) checkSpec(selfID string, spec wire.Mapping) error {
 	if err := validateMapping(spec.Proto, spec.Mode, spec.EntryPort, spec.LocalHost, spec.LocalPort); err != nil {
 		return err
 	}
+	if err := validateCidrs(spec.AllowCidrs); err != nil {
+		return err
+	}
 	if spec.Enabled {
 		return c.portTaken(selfID, spec)
 	}
@@ -1061,6 +1067,9 @@ func (c *Console) checkSpecs(batch map[string]wire.Mapping) error {
 	seen := map[string]string{}
 	for id, spec := range batch {
 		if err := validateMapping(spec.Proto, spec.Mode, spec.EntryPort, spec.LocalHost, spec.LocalPort); err != nil {
+			return err
+		}
+		if err := validateCidrs(spec.AllowCidrs); err != nil {
 			return err
 		}
 		if !spec.Enabled || spec.Mode == "visitor" || spec.EntryPort == nil {
@@ -1109,6 +1118,10 @@ func (c *Console) postMapping(w http.ResponseWriter, r *http.Request) {
 		b.Mode = "public"
 	}
 	if err := validateMapping(b.Proto, b.Mode, b.EntryPort, b.LocalHost, b.LocalPort); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if err := validateCidrs(b.AllowCidrs); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}

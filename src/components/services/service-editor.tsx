@@ -26,7 +26,12 @@ import {
   type RateUnit,
 } from "@/lib/umbra/format";
 import type { Mapping, MappingMode, Proto } from "@/lib/umbra/types";
-import { accessOptions, validateService } from "@/lib/umbra/service";
+import {
+  accessOptions,
+  serviceErrors,
+  validateService,
+  type ServiceField,
+} from "@/lib/umbra/service";
 function RateLimitField({ value, onChange }: { value: string; onChange: (next: string) => void }) {
   const { t } = useI18n();
   const id = useId();
@@ -110,6 +115,8 @@ export function ServiceEditor({
     nodeId || usable.find((node) => node.status === "online")?.id || usable[0]?.id || "";
   const editing = mapping !== null;
   const [step, setStep] = useState(0);
+  const [attempted, setAttempted] = useState(false);
+  const [touched, setTouched] = useState<Partial<Record<ServiceField, boolean>>>({});
   const stepHeading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (!editing) stepHeading.current?.focus();
@@ -148,6 +155,23 @@ export function ServiceEditor({
         rateKbps: 0,
       });
   const stepValidation = !editing && step === 0 ? targetValidation : validation;
+  const errors = serviceErrors(
+    !editing && step === 0
+      ? {
+          ...payload,
+          mode: "visitor",
+          entryPort: null,
+          maxConns: 0,
+          idleTimeoutSec: 0,
+          spaTtlSec: 0,
+          udpIdleTimeoutSec: 0,
+          rateKbps: 0,
+        }
+      : payload,
+  );
+  const showError = (field: ServiceField) =>
+    attempted || touched[field] ? errors[field] : undefined;
+  const markTouched = (field: ServiceField) => setTouched((prev) => ({ ...prev, [field]: true }));
   const stepTitles = [t("editor.where"), t("editor.who"), t("editor.confirm")];
 
   const save = useMutation({
@@ -189,8 +213,10 @@ export function ServiceEditor({
         className="flex min-h-0 flex-1 flex-col"
         onSubmit={(e) => {
           e.preventDefault();
+          setAttempted(true);
           if (stepValidation || save.isPending) return;
           if (!editing && step < 2) {
+            setAttempted(false);
             setStep(step + 1);
             return;
           }
@@ -215,6 +241,8 @@ export function ServiceEditor({
                     required
                     autoFocus={editing}
                     value={name}
+                    error={showError("name")}
+                    onBlur={() => markTouched("name")}
                     onChange={(e) => setName(e.target.value)}
                     placeholder={t("editor.namePh")}
                   />
@@ -245,6 +273,8 @@ export function ServiceEditor({
                 <TextField
                   label={t("editor.host")}
                   value={localHost}
+                  error={showError("localHost")}
+                  onBlur={() => markTouched("localHost")}
                   onChange={(e) => setLocalHost(e.target.value)}
                   required
                 />
@@ -255,6 +285,8 @@ export function ServiceEditor({
                   max={65535}
                   placeholder={t("editor.portPh")}
                   value={localPort}
+                  error={showError("localPort")}
+                  onBlur={() => markTouched("localPort")}
                   onChange={(e) => setLocalPort(e.target.value)}
                   required
                 />
@@ -294,6 +326,8 @@ export function ServiceEditor({
                     min={1}
                     max={65535}
                     value={entryPort}
+                    error={showError("entryPort")}
+                    onBlur={() => markTouched("entryPort")}
                     onChange={(e) => setEntryPort(e.target.value)}
                     required
                     placeholder={t("editor.entryPh")}
@@ -302,6 +336,8 @@ export function ServiceEditor({
                 <TextField
                   label={t("editor.cidr")}
                   value={allowCidrs}
+                  error={showError("allowCidrs")}
+                  onBlur={() => markTouched("allowCidrs")}
                   onChange={(e) => setAllowCidrs(e.target.value)}
                   placeholder={t("editor.cidrPh")}
                 />

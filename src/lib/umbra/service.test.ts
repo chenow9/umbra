@@ -89,6 +89,14 @@ test("real target and public entry ports must be explicit and valid", () => {
   assert.ok(validateService({ ...input, maxConns: NaN }));
 });
 
+test("hostnames and CIDRs are validated like ports", () => {
+  assert.ok(validateService({ ...input, localHost: "not_a_host!!!" }));
+  assert.ok(validateService({ ...input, allowCidrs: "not-a-cidr" }));
+  assert.equal(validateService({ ...input, localHost: "localhost" }), null);
+  assert.equal(validateService({ ...input, localHost: "::1" }), null);
+  assert.equal(validateService({ ...input, allowCidrs: "10.0.0.0/8" }), null);
+});
+
 test("a failed probe requests attention but does not prevent retrying or connecting", () => {
   const failed = { ...ready, lastProbeError: "EOF" };
   assert.equal(serviceState(failed).kind, "attention");
