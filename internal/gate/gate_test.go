@@ -1282,32 +1282,34 @@ func TestVisitorReconnectKeepsLocalPort(t *testing.T) {
 		}
 	}
 	s.mu.Unlock()
-	deadline := time.Now().Add(4 * time.Second)
+	// The local listener stays bound while the session is down, so Dial can
+	// succeed before reconnect. Probe deadlines stay short so a dead
+	// connection cannot burn the wait (session detect ≤1s + retry.Initial jitter).
+	deadline := time.Now().Add(12 * time.Second)
 	var last error
 	for time.Now().Before(deadline) {
-		c, err := net.DialTimeout("tcp", local, 400*time.Millisecond)
+		c, err := net.DialTimeout("tcp", local, 300*time.Millisecond)
 		if err != nil {
 			last = err
-			time.Sleep(80 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 			continue
 		}
 		msg := []byte("re-hi")
-		_, err = c.Write(msg)
-		if err != nil {
+		_ = c.SetDeadline(time.Now().Add(400 * time.Millisecond))
+		if _, err := c.Write(msg); err != nil {
 			_ = c.Close()
 			last = err
-			time.Sleep(80 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 			continue
 		}
 		buf := make([]byte, len(msg))
-		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 		_, err = io.ReadFull(c, buf)
 		_ = c.Close()
 		if err == nil && string(buf) == string(msg) {
 			return
 		}
 		last = err
-		time.Sleep(80 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("visitor did not recover on same port: %v", last)
 }

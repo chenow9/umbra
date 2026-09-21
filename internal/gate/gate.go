@@ -792,12 +792,17 @@ func (s *Server) ReplaceToken(nodeID, newHash string, until time.Time) {
 	s.tok[newHash] = tokenEnt{NodeID: nodeID, Until: until}
 	ac := s.nodes[nodeID]
 	kick := ac != nil && ac.credHash != newHash
+	var sess *yamux.Session
+	var raw net.Conn
+	if kick {
+		sess, raw = ac.sess, ac.raw
+	}
 	s.mu.Unlock()
 	if kick {
-		if ac.sess != nil {
-			_ = ac.sess.Close()
-		} else if ac.raw != nil {
-			_ = ac.raw.Close()
+		if sess != nil {
+			_ = sess.Close()
+		} else if raw != nil {
+			_ = raw.Close()
 		}
 	}
 }
@@ -966,16 +971,20 @@ func (s *Server) Revoke(nodeID string) {
 			ids = append(ids, id)
 		}
 	}
-	s.mu.Unlock()
+	var conn *wire.Conn
+	var sess *yamux.Session
+	var raw net.Conn
 	if ac != nil {
-		if ac.conn != nil {
-			_ = ac.conn.SendJSON("Revoked", map[string]any{})
-		}
-		if ac.sess != nil {
-			_ = ac.sess.Close()
-		} else if ac.raw != nil {
-			_ = ac.raw.Close()
-		}
+		conn, sess, raw = ac.conn, ac.sess, ac.raw
+	}
+	s.mu.Unlock()
+	if conn != nil {
+		_ = conn.SendJSON("Revoked", map[string]any{})
+	}
+	if sess != nil {
+		_ = sess.Close()
+	} else if raw != nil {
+		_ = raw.Close()
 	}
 	for _, id := range ids {
 		s.stopEntry(id)
@@ -985,13 +994,16 @@ func (s *Server) Revoke(nodeID string) {
 func (s *Server) Disconnect(nodeID string) {
 	s.mu.Lock()
 	ac := s.nodes[nodeID]
-	s.mu.Unlock()
+	var sess *yamux.Session
+	var raw net.Conn
 	if ac != nil {
-		if ac.sess != nil {
-			_ = ac.sess.Close()
-		} else if ac.raw != nil {
-			_ = ac.raw.Close()
-		}
+		sess, raw = ac.sess, ac.raw
+	}
+	s.mu.Unlock()
+	if sess != nil {
+		_ = sess.Close()
+	} else if raw != nil {
+		_ = raw.Close()
 	}
 }
 
