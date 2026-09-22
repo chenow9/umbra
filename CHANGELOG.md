@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- 同一台机器可以安装多个节点。控制台安装命令按节点 ID 分开 systemd、launchd、Windows 服务和 Docker 容器，以及各自的凭证和 CA；多个节点共用一份 `umbra-node` 程序。新命令不会停止旧的固定名服务（`umbra-node`、`io.umbra.node`、`UmbraNode`、容器 `umbra-node`）。用新命令装好后，请手动停掉那一份，避免两个进程同时使用同一次登记。
+- Multiple nodes can be installed on one machine. Console install commands give each node id its own systemd unit, launchd job, Windows service, or Docker container, plus its own credential and CA. The nodes share one `umbra-node` binary. New commands leave an older fixed-name install in place (`umbra-node`, `io.umbra.node`, `UmbraNode`, or the `umbra-node` container). Stop that one manually after the new service is running, so two processes do not keep the same enrollment.
+
 ## 0.3.2 — 2026-09-21
 
 控制台体验：登录后进入总览，设置、空状态、访问方式与名称校验一并收齐；节点凭证隐藏改为可选。网关协议与安全模型未改。
