@@ -1283,8 +1283,8 @@ func TestVisitorReconnectKeepsLocalPort(t *testing.T) {
 	}
 	s.mu.Unlock()
 	// The local listener stays bound while the session is down, so Dial can
-	// succeed before reconnect. Probe deadlines stay short so a dead
-	// connection cannot burn the wait (session detect ≤1s + retry.Initial jitter).
+	// succeed against a dead tunnel. Probes stay short across the reconnect
+	// gap (retry.Initial plus jitter).
 	deadline := time.Now().Add(12 * time.Second)
 	var last error
 	for time.Now().Before(deadline) {

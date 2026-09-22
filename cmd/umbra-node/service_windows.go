@@ -4,11 +4,18 @@ package main
 
 import (
 	"context"
+	"flag"
 
 	"golang.org/x/sys/windows/svc"
 )
 
-const windowsServiceName = "UmbraNode"
+// windowsServiceName matches the SCM service. Install commands pass
+// --service-name per node; the default keeps an existing UmbraNode service working.
+var windowsServiceName = "UmbraNode"
+
+func init() {
+	flag.StringVar(&windowsServiceName, "service-name", "UmbraNode", "Windows 服务名（与 SCM 中的名称一致）")
+}
 
 type nodeService struct {
 	run func(context.Context) error
@@ -54,5 +61,9 @@ func runPlatformService(run func(context.Context) error) (bool, error) {
 	if err != nil || !isService {
 		return false, err
 	}
-	return true, svc.Run(windowsServiceName, nodeService{run: run})
+	name := windowsServiceName
+	if name == "" {
+		name = "UmbraNode"
+	}
+	return true, svc.Run(name, nodeService{run: run})
 }

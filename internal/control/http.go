@@ -809,7 +809,11 @@ func (c *Console) postNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.mu.Unlock()
-	out := c.enrollFields(plain, rec.OS, rec.Arch)
+	out, err := c.enrollFields(id, plain, rec.OS, rec.Arch)
+	if err != nil {
+		writeErr(w, 500, "无法生成安装命令")
+		return
+	}
 	out["id"] = id
 	out["token"] = plain
 	out["os"] = rec.OS
@@ -883,7 +887,11 @@ func (c *Console) postRotate(w http.ResponseWriter, r *http.Request) {
 	c.mu.Unlock()
 	c.Gate.RotateTokenUntil(id, old, hash, until, grace)
 	c.installToken(hash, id, until)
-	out := c.enrollFields(plain, nodeOS, nodeArch)
+	out, err := c.enrollFields(id, plain, nodeOS, nodeArch)
+	if err != nil {
+		writeErr(w, 500, "无法生成安装命令")
+		return
+	}
 	out["token"] = plain
 	out["graceSec"] = graceSec
 	out["expiresAt"] = rfc3339(until)

@@ -311,102 +311,128 @@ UMBRA_TOKEN=umbra_boot_… ./umbra-node \
 <details>
 <summary><strong>展开查看节点系统服务管理命令</strong></summary>
 
-控制台生成的二进制安装命令会把 `umbra-node` 注册为系统服务。命令执行完成后可以关闭终端；节点会继续运行，并随系统启动自动上线。
+控制台生成的二进制安装命令会把这个节点注册为系统服务。同一台机器可以安装多个节点：它们共用一份 `umbra-node` 程序，各自有服务名、凭证和 CA。服务名来自节点 ID，下划线写成连字符。节点 `nde_ab12` 在 Linux 上的服务名是 `umbra-node-nde-ab12`。下面用 `NODE` 表示这段名字，请换成复制命令里的实际名字。命令执行完成后可以关闭终端；节点会继续运行，并随系统启动自动上线。再执行同一个节点的命令只替换该节点自己的服务。
+
+用旧命令安装的服务仍使用固定名 `umbra-node`（macOS 为 `io.umbra.node`，Windows 为 `UmbraNode`，Docker 容器为 `umbra-node`）。新命令不会停掉它们。新服务运行后请手动停掉对应的旧服务，否则两个进程会同时使用同一次登记：
+
+```bash
+# Linux
+sudo systemctl disable --now umbra-node
+
+# macOS
+sudo launchctl bootout system/io.umbra.node 2>/dev/null || true
+sudo launchctl disable system/io.umbra.node
+
+# Docker
+docker rm -f umbra-node
+```
+
+```powershell
+# Windows（管理员 PowerShell）
+Stop-Service -Name UmbraNode -ErrorAction SilentlyContinue
+Set-Service -Name UmbraNode -StartupType Disabled
+```
 
 **Linux（systemd）**
 
 ```bash
 # 查看状态和最近日志
-sudo systemctl status umbra-node
-sudo journalctl -u umbra-node -n 100 --no-pager
+sudo systemctl status umbra-node-NODE
+sudo journalctl -u umbra-node-NODE -n 100 --no-pager
 
 # 临时停止；下次开机仍会自动启动
-sudo systemctl stop umbra-node
+sudo systemctl stop umbra-node-NODE
 
 # 启动或重启
-sudo systemctl start umbra-node
-sudo systemctl restart umbra-node
+sudo systemctl start umbra-node-NODE
+sudo systemctl restart umbra-node-NODE
 
 # 停止并禁用开机启动
-sudo systemctl disable --now umbra-node
+sudo systemctl disable --now umbra-node-NODE
 
 # 恢复开机启动并立即运行
-sudo systemctl enable --now umbra-node
+sudo systemctl enable --now umbra-node-NODE
 ```
 
-彻底卸载 Linux 服务：
+彻底卸载这个 Linux 节点：
 
 ```bash
-sudo systemctl disable --now umbra-node
-sudo rm -f /etc/systemd/system/umbra-node.service
+sudo systemctl disable --now umbra-node-NODE
+sudo rm -f /etc/systemd/system/umbra-node-NODE.service
 sudo systemctl daemon-reload
-sudo rm -f /usr/local/bin/umbra-node
+sudo rm -rf /etc/umbra/nodes/NODE
+# 仅当这台机器上没有其他 Umbra 节点时再删除共用程序
+# sudo rm -f /usr/local/bin/umbra-node
 ```
 
 **macOS（launchd）**
 
 ```bash
 # 查看状态
-sudo launchctl print system/io.umbra.node
+sudo launchctl print system/io.umbra.node.NODE
 
 # 临时停止；下次开机仍会自动启动
-sudo launchctl bootout system/io.umbra.node
+sudo launchctl bootout system/io.umbra.node.NODE
 
 # 再次启动
-sudo launchctl bootstrap system /Library/LaunchDaemons/io.umbra.node.plist
+sudo launchctl bootstrap system /Library/LaunchDaemons/io.umbra.node.NODE.plist
 
 # 重启
-sudo launchctl kickstart -k system/io.umbra.node
+sudo launchctl kickstart -k system/io.umbra.node.NODE
 
 # 停止并禁用开机启动
-sudo launchctl bootout system/io.umbra.node 2>/dev/null || true
-sudo launchctl disable system/io.umbra.node
+sudo launchctl bootout system/io.umbra.node.NODE 2>/dev/null || true
+sudo launchctl disable system/io.umbra.node.NODE
 
 # 恢复开机启动并立即运行
-sudo launchctl enable system/io.umbra.node
-sudo launchctl bootstrap system /Library/LaunchDaemons/io.umbra.node.plist
+sudo launchctl enable system/io.umbra.node.NODE
+sudo launchctl bootstrap system /Library/LaunchDaemons/io.umbra.node.NODE.plist
 ```
 
-彻底卸载 macOS 服务：
+彻底卸载这个 macOS 节点：
 
 ```bash
-sudo launchctl bootout system/io.umbra.node 2>/dev/null || true
-sudo launchctl disable system/io.umbra.node
-sudo rm -f /Library/LaunchDaemons/io.umbra.node.plist
-sudo rm -f /usr/local/libexec/umbra-node-run
-sudo rm -f /usr/local/bin/umbra-node
+sudo launchctl bootout system/io.umbra.node.NODE 2>/dev/null || true
+sudo launchctl disable system/io.umbra.node.NODE
+sudo rm -f /Library/LaunchDaemons/io.umbra.node.NODE.plist
+sudo rm -f /usr/local/libexec/umbra-node-NODE
+sudo rm -rf /usr/local/etc/umbra/nodes/NODE
+# sudo rm -f /usr/local/bin/umbra-node
 ```
 
 **Windows（管理员 PowerShell）**
 
 ```powershell
 # 查看状态
-Get-Service -Name UmbraNode
+Get-Service -Name UmbraNode-NODE
 
 # 临时停止；下次开机仍会自动启动
-Stop-Service -Name UmbraNode
+Stop-Service -Name UmbraNode-NODE
 
 # 启动或重启
-Start-Service -Name UmbraNode
-Restart-Service -Name UmbraNode
+Start-Service -Name UmbraNode-NODE
+Restart-Service -Name UmbraNode-NODE
 
 # 停止并禁用开机启动
-Stop-Service -Name UmbraNode -ErrorAction SilentlyContinue
-Set-Service -Name UmbraNode -StartupType Disabled
+Stop-Service -Name UmbraNode-NODE -ErrorAction SilentlyContinue
+Set-Service -Name UmbraNode-NODE -StartupType Disabled
 
 # 恢复开机启动并立即运行
-Set-Service -Name UmbraNode -StartupType Automatic
-Start-Service -Name UmbraNode
+Set-Service -Name UmbraNode-NODE -StartupType Automatic
+Start-Service -Name UmbraNode-NODE
 ```
 
-彻底卸载 Windows 服务：
+彻底卸载这个 Windows 节点：
 
 ```powershell
-Stop-Service -Name UmbraNode -ErrorAction SilentlyContinue
-sc.exe delete UmbraNode
+Stop-Service -Name UmbraNode-NODE -ErrorAction SilentlyContinue
+sc.exe delete UmbraNode-NODE
+Remove-Item -Recurse -Force "$env:ProgramData\Umbra\nodes\NODE"
 ```
 
-卸载系统服务默认保留 CA 和本地配置，方便重新安装。确认不再使用该节点时，先在控制台吊销节点凭证，再按需删除 `/etc/umbra`、`/usr/local/etc/umbra` 或 `C:\ProgramData\Umbra`；删除本地文件不会自动删除控制台中的节点记录。
+多个节点共用 `%ProgramFiles%\Umbra\umbra-node.exe`。只在这台机器上没有其他 Umbra 节点时再删除它。
+
+卸载一个节点时保留其他节点的配置。确认不再使用某个节点时，先在控制台吊销它的凭证，再删除该节点自己的配置目录。删除本地文件不会删除控制台中的节点记录。
 
 </details>
 
@@ -449,7 +475,7 @@ UMBRA_TAG=0.3.2 docker compose -f deploy/compose.gate.yml up -d
 
 **节点**（同样 host 网络，才能把服务目标写成宿主机 `127.0.0.1`）：
 
-控制台登记弹窗的 Docker 命令会把 CA 写进本机再 `docker run --network host`。也可以用 compose：
+控制台登记弹窗的 Docker 命令会把 CA 写进本机再 `docker run --network host`。容器名、CA 和凭证按节点分开，再执行另一个节点的命令不会删除前一个容器。也可以用 compose：
 
 ```bash
 cp deploy/node.env.example node.env   # 填 UMBRA_SERVER / UMBRA_TOKEN

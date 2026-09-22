@@ -84,11 +84,12 @@ function IssuedBody({ issued, onClose }: { issued: Issued; onClose: () => void }
   const dockerCmd =
     issued.dockerCmd && (issued.dockerCmd.includes("BEGIN CERTIFICATE") || !pem)
       ? issued.dockerCmd
-      : nodeEnrollDockerCmd(issued.token, server, pem || undefined, issued.hideNodeToken);
+      : nodeEnrollDockerCmd(issued.id, issued.token, server, pem || undefined, issued.hideNodeToken);
   const servicePlatform = issued.os === "docker" ? "linux" : issued.os;
   const binCmd = nodeEnrollServiceCmd(
     servicePlatform,
     issued.arch,
+    issued.id,
     issued.token,
     server,
     pem || undefined,
@@ -160,6 +161,7 @@ function IssuedBody({ issued, onClose }: { issued: Issued; onClose: () => void }
               : t("nodes.binaryHasCa")
             : t("nodes.missingCa")}
         </p>
+        <p className="mt-1 text-xs leading-relaxed text-stone">{t("nodes.instanceNote")}</p>
         <Button
           type="button"
           className="mt-3"
