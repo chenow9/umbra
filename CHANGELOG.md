@@ -2,10 +2,34 @@
 
 ## Unreleased
 
+## 0.3.3 — 2026-09-29
+
+同一台机器可以安装多个节点，访问端重连更可靠。网关协议、控制数据与安全模型未改。
+
+Several nodes can now be installed on one machine, and the visitor reconnects more reliably. The gateway protocol, control data, and security model are unchanged.
+
 - 同一台机器可以安装多个节点。控制台安装命令按节点 ID 分开 systemd、launchd、Windows 服务和 Docker 容器，以及各自的凭证和 CA；多个节点共用一份 `umbra-node` 程序。新命令不会停止旧的固定名服务（`umbra-node`、`io.umbra.node`、`UmbraNode`、容器 `umbra-node`）。用新命令装好后，请手动停掉那一份，避免两个进程同时使用同一次登记。
 - 访问端在本地端口一直有连接时也会发现会话已断开并重连。之前要等 Accept 空闲超时才检查会话，持续拨号会把重连卡住。
 - Multiple nodes can be installed on one machine. Console install commands give each node id its own systemd unit, launchd job, Windows service, or Docker container, plus its own credential and CA. The nodes share one `umbra-node` binary. New commands leave an older fixed-name install in place (`umbra-node`, `io.umbra.node`, `UmbraNode`, or the `umbra-node` container). Stop that one manually after the new service is running, so two processes do not keep the same enrollment.
 - The visitor notices a dead session and reconnects even while local dials keep arriving. It previously checked the session only when Accept timed out, so a steady stream of dials could stall reconnect.
+
+### 升级说明 / Upgrade notes
+
+升级前备份完整 `tls-dir` 并继续使用原目录。控制数据与流量历史 schema 不变。
+
+新的安装命令按节点 ID 命名服务、配置目录和容器，不会停止旧的固定名安装。已经用旧命令装过的机器：新服务起来后，请手动停掉旧的那一份（Linux `umbra-node`、macOS `io.umbra.node`、Windows `UmbraNode`、Docker 容器 `umbra-node`），否则两个进程会同时使用同一次登记。已有的单节点服务不重装也能继续运行。Docker 镜像标签仍是 `chenow9/umbra-node:latest`。
+
+Back up the complete `tls-dir` and reuse it when upgrading. Control and traffic schemas are unchanged.
+
+New install commands name the service, config directory, and container after the node id, and leave older fixed-name installs alone. On a machine installed with an older command, stop the old one manually once the new service is running (Linux `umbra-node`, macOS `io.umbra.node`, Windows `UmbraNode`, Docker container `umbra-node`), or two processes will share one enrollment. Existing single-node services keep running without a reinstall. The Docker image tag is still `chenow9/umbra-node:latest`.
+
+### 验证说明 / Validation notes
+
+GitHub `main` 合入 #7 后 CI（go + binaries）通过；本地 `go vet ./...`、`go test -race ./...`、前端 `units.test.ts` 与 `tsc --noEmit` 通过。安装命令尚未在真实的 systemd、launchd、Windows 服务或 Docker 主机上执行过。
+
+GitHub CI on `main` after merging #7 passed (go + binaries). Local `go vet ./...`, `go test -race ./...`, the frontend `units.test.ts`, and `tsc --noEmit` passed. The install commands have not yet been run on real systemd, launchd, Windows service, or Docker hosts.
+
+[完整改动 / Full diff](https://github.com/chenow9/umbra/compare/v0.3.2...v0.3.3)
 
 ## 0.3.2 — 2026-09-21
 
