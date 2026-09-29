@@ -426,6 +426,8 @@ export const zh = {
     binaryReady: "系统服务命令已准备好",
     dockerHasCa: "命令已包含入口 CA 和本次凭证，并会创建可自动重启的容器。",
     binaryHasCa: "命令已包含入口 CA 和本次凭证，并会安装为开机自动启动的系统服务。",
+    instanceNote:
+      "这条命令只安装或替换当前节点，同一台机器上的其他节点会继续运行。若还留着旧的固定名服务（umbra-node、io.umbra.node、UmbraNode，或容器 umbra-node），装好后请手动停掉那一个。",
     missingCa: "命令尚未包含入口 CA，请先下载 CA 并按命令提示放置。",
     copyCmd: "复制一键命令",
     cmdCopied: "一键命令已复制",
@@ -1395,6 +1397,8 @@ export const en = {
       "The command includes the gateway CA and this credential, and creates a restarting container.",
     binaryHasCa:
       "The command includes the gateway CA and this credential, and installs a service that starts on boot.",
+    instanceNote:
+      "This command installs or replaces only this node. Other nodes on the same machine keep running. If an older fixed-name install is still present (umbra-node, io.umbra.node, UmbraNode, or the umbra-node container), stop that one after this command succeeds.",
     missingCa:
       "The command does not include the gateway CA yet. Download it and place it as the command describes.",
     copyCmd: "Copy one-shot command",

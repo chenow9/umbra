@@ -1285,7 +1285,10 @@ func (c *Console) enrichImportResultLocked(result *importResult, live map[string
 		if n.Action != "create" || n.Token == "" {
 			continue
 		}
-		fields := c.enrollFields(n.Token, n.OS, n.Arch)
+		fields, err := c.enrollFields(n.LocalID, n.Token, n.OS, n.Arch)
+		if err != nil {
+			continue
+		}
 		result.Nodes[i].HideNodeToken = c.HideNodeToken
 		if v, ok := fields["installCmd"].(string); ok {
 			result.Nodes[i].InstallCmd = v

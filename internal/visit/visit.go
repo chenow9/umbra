@@ -221,26 +221,35 @@ func serveTCP(ctx context.Context, sess *yamux.Session, ln net.Listener, mapping
 	if ln == nil {
 		return fmt.Errorf("no local tcp listener")
 	}
+	// Unblock Accept when the session dies. Otherwise a steady stream of
+	// local dials keeps Accept from timing out, and the dead session is
+	// never noticed.
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+			_ = sess.Close()
+		case <-sess.CloseChan():
+		}
 		if tl, ok := ln.(*net.TCPListener); ok {
 			_ = tl.SetDeadline(time.Now())
 		}
-		_ = sess.Close()
 	}()
 	for {
+		if sess.IsClosed() || ctx.Err() != nil {
+			return fmt.Errorf("session closed")
+		}
 		if tl, ok := ln.(*net.TCPListener); ok {
 			_ = tl.SetDeadline(time.Now().Add(time.Second))
 		}
 		c, err := ln.Accept()
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
+		if sess.IsClosed() || ctx.Err() != nil {
+			if c != nil {
+				_ = c.Close()
 			}
+			return fmt.Errorf("session closed")
+		}
+		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				if sess.IsClosed() {
-					return fmt.Errorf("session closed")
-				}
 				continue
 			}
 			return err
@@ -268,9 +277,12 @@ func serveUDP(ctx context.Context, sess *yamux.Session, pc *net.UDPConn, mapping
 		return fmt.Errorf("no local udp listener")
 	}
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+			_ = sess.Close()
+		case <-sess.CloseChan():
+		}
 		_ = pc.SetReadDeadline(time.Now())
-		_ = sess.Close()
 	}()
 
 	type sessRow struct {
@@ -281,16 +293,16 @@ func serveUDP(ctx context.Context, sess *yamux.Session, pc *net.UDPConn, mapping
 	rows := map[string]*sessRow{}
 	buf := make([]byte, 64*1024)
 	for {
+		if sess.IsClosed() || ctx.Err() != nil {
+			return fmt.Errorf("session closed")
+		}
 		_ = pc.SetReadDeadline(time.Now().Add(time.Second))
 		n, raddr, err := pc.ReadFromUDP(buf)
+		if sess.IsClosed() || ctx.Err() != nil {
+			return fmt.Errorf("session closed")
+		}
 		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				if sess.IsClosed() {
-					return fmt.Errorf("session closed")
-				}
 				continue
 			}
 			return err
@@ -302,6 +314,9 @@ func serveUDP(ctx context.Context, sess *yamux.Session, pc *net.UDPConn, mapping
 			st, err := sess.OpenStream()
 			if err != nil {
 				mu.Unlock()
+				if sess.IsClosed() {
+					return fmt.Errorf("session closed")
+				}
 				continue
 			}
 			if err := wire.WriteOpen(st, wire.StreamOpen{
