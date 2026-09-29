@@ -25,9 +25,9 @@ New install commands name the service, config directory, and container after the
 
 ### 验证说明 / Validation notes
 
-GitHub `main` 合入 #7 后 CI（go + binaries）通过；本地 `go vet ./...`、`go test -race ./...`、前端 `units.test.ts` 与 `tsc --noEmit` 通过。安装命令尚未在真实的 systemd、launchd、Windows 服务或 Docker 主机上执行过。
+GitHub `main` 合入 #7 后 CI（go + binaries）通过；本地 `go vet ./...`、`go test -race ./...`、前端 `units.test.ts` 与 `tsc --noEmit` 通过。安装命令已在真实的 Linux（systemd）、macOS（launchd）、Windows 服务和 Docker 主机上验收通过。
 
-GitHub CI on `main` after merging #7 passed (go + binaries). Local `go vet ./...`, `go test -race ./...`, the frontend `units.test.ts`, and `tsc --noEmit` passed. The install commands have not yet been run on real systemd, launchd, Windows service, or Docker hosts.
+GitHub CI on `main` after merging #7 passed (go + binaries). Local `go vet ./...`, `go test -race ./...`, the frontend `units.test.ts`, and `tsc --noEmit` passed. The install commands were verified on real Linux (systemd), macOS (launchd), Windows service, and Docker hosts.
 
 [完整改动 / Full diff](https://github.com/chenow9/umbra/compare/v0.3.2...v0.3.3)
 
